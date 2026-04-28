@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use foundation::{arena::Arena, ids::ArenaId, ids::FileId, span::Span};
 
 use super::symbols::SymbolId;
@@ -47,4 +49,6 @@ pub struct Hir {
     pub file_id: FileId,
     pub exprs: Arena<HirExpr>,
     pub stmts: Vec<HirStmt>,
+    /// Source span for each expression id (lowering fills this; used by bytecode / diagnostics).
+    pub expr_spans: HashMap<HirId, Span>,
 }

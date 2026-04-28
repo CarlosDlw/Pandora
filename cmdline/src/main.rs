@@ -3,6 +3,7 @@ use core::analyzer::analyze;
 use core::lexer::lex;
 use core::lowering::lower;
 use core::parser::parse;
+use core::vm::{compile_program, execute};
 use foundation::diagnostics::Diagnostics;
 use foundation::ids::FileId;
 use std::{fs, process::ExitCode};
@@ -43,11 +44,6 @@ fn main() -> ExitCode {
         }
         println!();
         return ExitCode::SUCCESS;
-    }
-
-    if !cli.lexeme && !cli.ast && !cli.hir && !cli.check {
-        eprintln!("use one mode: pandora <file.pand> --lexeme | --ast | --hir | --check");
-        return ExitCode::from(2);
     }
 
     let contents = match fs::read_to_string(&cli.file) {
@@ -95,10 +91,27 @@ fn main() -> ExitCode {
                         println!("#{}: {:?}", idx, expr);
                     }
                 }
-            } else if cli.check {
+            } else {
                 let mut symbols = symbols;
-                let (_semantic_model, analyze_diagnostics) = analyze(&hir, &mut symbols);
+                let (semantic_model, analyze_diagnostics) = analyze(&hir, &mut symbols);
                 diagnostics.extend(analyze_diagnostics);
+
+                if cli.check {
+                } else {
+                    if diagnostics.has_errors() {
+                        return finish_with_diagnostics(diagnostics);
+                    }
+                    let (chunk, compile_diagnostics) = compile_program(&hir, &semantic_model);
+                    diagnostics.extend(compile_diagnostics);
+
+                    if diagnostics.has_errors() {
+                        return finish_with_diagnostics(diagnostics);
+                    }
+
+                    if let Err(vm_diagnostics) = execute(&chunk, &symbols) {
+                        diagnostics.extend(vm_diagnostics);
+                    }
+                }
             }
         }
     }

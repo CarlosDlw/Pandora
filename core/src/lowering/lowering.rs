@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     analyzer::Type,
     ast::{Ast, AstNode, BinaryOp},
@@ -35,6 +37,7 @@ impl<'a> Lowering<'a> {
                 file_id: ast.file_id,
                 exprs: Arena::new(),
                 stmts: Vec::new(),
+                expr_spans: HashMap::new(),
             },
             symbols,
             diagnostics: Diagnostics::new(),
@@ -118,20 +121,34 @@ impl<'a> Lowering<'a> {
 
     fn lower_expr(&mut self, id: ArenaId) -> ArenaId {
         let Some(node) = self.ast.get(id) else {
-            return self.insert_hir_expr(HirExpr::Invalid);
+            return self.insert_hir_expr(
+                HirExpr::Invalid,
+                Span::new_unchecked(self.ast.file_id, 0, 0),
+            );
         };
 
         match node {
-            AstNode::IntegerLiteral { value, .. } => self.insert_hir_expr(HirExpr::Int(value.clone())),
-            AstNode::FloatLiteral { value, .. } => self.insert_hir_expr(HirExpr::Float(value.clone())),
-            AstNode::StringLiteral { value, .. } => self.insert_hir_expr(HirExpr::Str(value.clone())),
-            AstNode::CharLiteral { value, .. } => self.insert_hir_expr(HirExpr::Char(*value)),
-            AstNode::BoolLiteral { value, .. } => self.insert_hir_expr(HirExpr::Bool(*value)),
+            AstNode::IntegerLiteral { value, .. } => {
+                self.insert_hir_expr(HirExpr::Int(value.clone()), self.node_span(id))
+            }
+            AstNode::FloatLiteral { value, .. } => {
+                self.insert_hir_expr(HirExpr::Float(value.clone()), self.node_span(id))
+            }
+            AstNode::StringLiteral { value, .. } => {
+                let value = unquote_string_literal(value);
+                self.insert_hir_expr(HirExpr::Str(value), self.node_span(id))
+            }
+            AstNode::CharLiteral { value, .. } => {
+                self.insert_hir_expr(HirExpr::Char(*value), self.node_span(id))
+            }
+            AstNode::BoolLiteral { value, .. } => {
+                self.insert_hir_expr(HirExpr::Bool(*value), self.node_span(id))
+            }
             AstNode::Identifier { name, span } => match self.symbols.resolve(self.current_scope, name) {
-                Some(symbol_id) => self.insert_hir_expr(HirExpr::Var(symbol_id)),
+                Some(symbol_id) => self.insert_hir_expr(HirExpr::Var(symbol_id), self.node_span(id)),
                 None => {
                     self.push_error(format!("undefined symbol '{name}'"), *span);
-                    self.insert_hir_expr(HirExpr::Invalid)
+                    self.insert_hir_expr(HirExpr::Invalid, *span)
                 }
             },
             AstNode::BinaryExpr {
@@ -139,11 +156,14 @@ impl<'a> Lowering<'a> {
             } => {
                 let lhs = self.lower_expr(*left);
                 let rhs = self.lower_expr(*right);
-                self.insert_hir_expr(HirExpr::Binary {
-                    op: map_binary_op(*op),
-                    lhs,
-                    rhs,
-                })
+                self.insert_hir_expr(
+                    HirExpr::Binary {
+                        op: map_binary_op(*op),
+                        lhs,
+                        rhs,
+                    },
+                    self.node_span(id),
+                )
             }
             AstNode::CallExpr { callee, args, span } => {
                 let lowered_args = args.iter().map(|arg| self.lower_expr(*arg)).collect::<Vec<_>>();
@@ -153,33 +173,39 @@ impl<'a> Lowering<'a> {
                     _ => None,
                 };
                 match callee_symbol {
-                    Some(symbol_id) => self.insert_hir_expr(HirExpr::Call {
-                        callee: symbol_id,
-                        args: lowered_args,
-                    }),
+                    Some(symbol_id) => self.insert_hir_expr(
+                        HirExpr::Call {
+                            callee: symbol_id,
+                            args: lowered_args,
+                        },
+                        self.node_span(id),
+                    ),
                     None => {
                         self.push_error("call target must be an identifier", *span);
-                        self.insert_hir_expr(HirExpr::Invalid)
+                        self.insert_hir_expr(HirExpr::Invalid, *span)
                     }
                 }
             }
             AstNode::TypeName { .. } => {
                 self.push_error("type name is not an expression", self.node_span(id));
-                self.insert_hir_expr(HirExpr::Invalid)
+                self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
             AstNode::LetDecl { .. } | AstNode::ExprStmt { .. } => {
                 self.push_error("statement used where expression expected", self.node_span(id));
-                self.insert_hir_expr(HirExpr::Invalid)
+                self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
-            AstNode::Invalid { .. } => self.insert_hir_expr(HirExpr::Invalid),
+            AstNode::Invalid { .. } => self.insert_hir_expr(HirExpr::Invalid, self.node_span(id)),
         }
     }
 
-    fn insert_hir_expr(&mut self, expr: HirExpr) -> ArenaId {
-        self.hir
+    fn insert_hir_expr(&mut self, expr: HirExpr, span: Span) -> ArenaId {
+        let id = self
+            .hir
             .exprs
             .insert(expr)
-            .expect("hir arena insertion should not fail in normal conditions")
+            .expect("hir arena insertion should not fail in normal conditions");
+        self.hir.expr_spans.insert(id, span);
+        id
     }
 
     fn node_span(&self, id: ArenaId) -> Span {
@@ -231,6 +257,14 @@ fn init_global_scope(symbols: &mut SymbolTable, registry: &crate::builtins::Buil
         );
     }
     scope_id
+}
+
+/// Lexer includes surrounding `"`; runtime `print` expects the decoded content (no delimiter).
+fn unquote_string_literal(raw: &str) -> String {
+    raw.strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .map(ToString::to_string)
+        .unwrap_or_else(|| raw.to_string())
 }
 
 fn map_type_name(name: &str) -> Option<Type> {

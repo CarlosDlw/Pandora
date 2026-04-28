@@ -1,16 +1,37 @@
+use std::path::PathBuf;
+
 use assert_cmd::Command;
+use predicates::boolean::PredicateBooleanExt;
 use predicates::str::contains;
 use tempfile::NamedTempFile;
 
 #[test]
-fn rejects_missing_mode_with_exit_2() {
-    let file = NamedTempFile::new().expect("temp file");
+fn default_mode_executes_when_no_dump_flags_are_set() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"a := 1;").expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
         .assert()
-        .code(2)
-        .stderr(contains("use one mode"));
+        .success();
+}
+
+#[test]
+fn runs_example_001_simple() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/001_simple.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("20")
+                .and(contains("John"))
+                .and(contains("true"))
+                .and(contains("3.14159"))
+                .and(contains("John 20")),
+        );
 }
 
 #[test]

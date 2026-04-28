@@ -77,6 +77,11 @@ impl VirtualFileSystem {
     pub fn len(&self) -> usize {
         self.files.len()
     }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
 }
 
 #[cfg(test)]
