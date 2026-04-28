@@ -1,0 +1,36 @@
+# simple comment
+
+## Variables
+# syntax:
+# name: type = value
+#
+# inference: - infer type from value
+# name := value
+#
+# constants: - cannot be reassigned - use two colons
+# name:: type = value
+
+age: i32 = 20
+name: str = "John"
+is_student: bool = true
+
+PI:: f32 = 3.14159
+
+# types:
+# i1            - 1-bit integer
+# i8            - 8-bit integer
+# i16           - 16-bit integer
+# i32           - 32-bit integer
+# i64           - 64-bit integer
+# i128          - 128-bit integer
+# u1            - 1-bit unsigned integer
+# u8            - 8-bit unsigned integer
+# u16           - 16-bit unsigned integer
+# u32           - 32-bit unsigned integer
+# u64           - 64-bit unsigned integer
+# u128          - 128-bit unsigned integer
+# f32           - 32-bit floating point number
+# f64           - 64-bit floating point number
+# str           - string
+# bool          - boolean
+# char          - character with single quotes
