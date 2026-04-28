@@ -1,4 +1,4 @@
-use crate::hir::Type;
+use crate::analyzer::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Builtin {

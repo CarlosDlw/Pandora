@@ -312,4 +312,22 @@ mod tests {
         assert!(diagnostics.has_errors());
         assert!(ast.roots.len() >= 2);
     }
+
+    #[test]
+    fn parses_call_expression_with_multiple_args() {
+        let source = "print(name, age)";
+        let lex_out = lex(FileId::from_u32(6), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(6), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let root = ast.roots[0];
+        let expr_stmt = ast.get(root).expect("expr stmt");
+        let expr_id = match expr_stmt {
+            AstNode::ExprStmt { expr, .. } => *expr,
+            _ => panic!("expected expression statement"),
+        };
+        assert!(matches!(
+            ast.get(expr_id),
+            Some(AstNode::CallExpr { args, .. }) if args.len() == 2
+        ));
+    }
 }

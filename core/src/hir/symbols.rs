@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use crate::analyzer::Type;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SymbolId(pub u32);
 
@@ -10,20 +12,6 @@ pub struct ScopeId(pub u32);
 pub struct Scope {
     pub symbols: HashMap<String, SymbolId>,
     pub parent: Option<ScopeId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Type {
-    Unknown,
-    Int,
-    Float,
-    Bool,
-    Str,
-    Unit,
-    Function {
-        params: Vec<Type>,
-        ret: Box<Type>,
-    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

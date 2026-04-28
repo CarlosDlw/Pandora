@@ -1,5 +1,7 @@
 use clap::{ArgGroup, CommandFactory, Parser};
+use core::analyzer::analyze;
 use core::lexer::lex;
+use core::lowering::lower;
 use core::parser::parse;
 use foundation::diagnostics::Diagnostics;
 use foundation::ids::FileId;
@@ -10,7 +12,7 @@ use std::{fs, process::ExitCode};
 #[command(about = "CLI entrypoint for Pandora", long_about = None)]
 #[command(group(
     ArgGroup::new("mode")
-        .args(["lexeme", "ast"])
+        .args(["lexeme", "ast", "hir", "check"])
         .multiple(false)
 ))]
 struct Cli {
@@ -22,6 +24,12 @@ struct Cli {
     /// Print AST roots from the parser.
     #[arg(long)]
     ast: bool,
+    /// Print HIR statements and expression arena.
+    #[arg(long)]
+    hir: bool,
+    /// Run semantic checks only (diagnostics output).
+    #[arg(long)]
+    check: bool,
 }
 
 fn main() -> ExitCode {
@@ -37,8 +45,8 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    if !cli.lexeme && !cli.ast {
-        eprintln!("use one mode: pandora <file.pand> --lexeme | --ast");
+    if !cli.lexeme && !cli.ast && !cli.hir && !cli.check {
+        eprintln!("use one mode: pandora <file.pand> --lexeme | --ast | --hir | --check");
         return ExitCode::from(2);
     }
 
@@ -67,9 +75,29 @@ fn main() -> ExitCode {
         let (ast, parser_diagnostics) =
             parse(FileId::from_u32(0), contents.len() as u32, output.tokens);
         diagnostics.extend(parser_diagnostics);
-        for root in &ast.roots {
-            if let Some(node) = ast.get(*root) {
-                println!("#{id}: {:?}", node, id = root.as_u32());
+        if cli.ast {
+            for root in &ast.roots {
+                if let Some(node) = ast.get(*root) {
+                    println!("#{id}: {:?}", node, id = root.as_u32());
+                }
+            }
+        } else {
+            let (hir, symbols, lower_diagnostics) = lower(&ast);
+            diagnostics.extend(lower_diagnostics);
+
+            if cli.hir {
+                for stmt in &hir.stmts {
+                    println!("{stmt:?}");
+                }
+                for idx in 0..hir.exprs.len() {
+                    let id = foundation::ids::ArenaId::from_u32(idx as u32);
+                    if let Some(expr) = hir.exprs.get(id) {
+                        println!("#{}: {:?}", idx, expr);
+                    }
+                }
+            } else if cli.check {
+                let (_semantic_model, analyze_diagnostics) = analyze(&hir, &symbols);
+                diagnostics.extend(analyze_diagnostics);
             }
         }
     }

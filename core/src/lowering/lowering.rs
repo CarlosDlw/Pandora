@@ -1,7 +1,8 @@
 use crate::{
+    analyzer::Type,
     ast::{Ast, AstNode, BinaryOp},
     builtins::default_registry,
-    hir::{BinOp, Hir, HirExpr, HirStmt, ScopeId, SymbolId, SymbolOrigin, SymbolTable, Type},
+    hir::{BinOp, Hir, HirExpr, HirStmt, ScopeId, SymbolId, SymbolOrigin, SymbolTable},
 };
 use foundation::{
     arena::Arena,
@@ -58,13 +59,15 @@ impl<'a> Lowering<'a> {
         match node {
             AstNode::LetDecl {
                 name,
+                ty,
                 value,
                 is_const,
                 span,
                 ..
             } => {
-                let symbol = self.bind_symbol(*name);
                 let value = self.lower_expr(*value);
+                let symbol_ty = self.resolve_decl_type(*ty);
+                let symbol = self.bind_symbol(*name, symbol_ty);
                 HirStmt::Let {
                     symbol,
                     value,
@@ -87,13 +90,13 @@ impl<'a> Lowering<'a> {
         }
     }
 
-    fn bind_symbol(&mut self, id: ArenaId) -> SymbolId {
+    fn bind_symbol(&mut self, id: ArenaId, ty: Type) -> SymbolId {
         let Some(AstNode::Identifier { name, .. }) = self.ast.get(id) else {
             self.push_error("invalid declaration name", self.node_span(id));
             return self.symbols.define(
                 self.current_scope,
                 "<invalid>".to_string(),
-                Type::Unknown,
+                ty,
                 SymbolOrigin::User,
             );
         };
@@ -108,7 +111,7 @@ impl<'a> Lowering<'a> {
         self.symbols.define(
             self.current_scope,
             name.clone(),
-            Type::Unknown,
+            ty,
             SymbolOrigin::User,
         )
     }
@@ -126,6 +129,15 @@ impl<'a> Lowering<'a> {
                     self.insert_hir_expr(HirExpr::Invalid)
                 }
             },
+            AstNode::FloatLiteral { value, span } => match value.parse::<f64>() {
+                Ok(value) => self.insert_hir_expr(HirExpr::Float(value)),
+                Err(_) => {
+                    self.push_error("invalid float literal", *span);
+                    self.insert_hir_expr(HirExpr::Invalid)
+                }
+            },
+            AstNode::StringLiteral { value, .. } => self.insert_hir_expr(HirExpr::Str(value.clone())),
+            AstNode::BoolLiteral { value, .. } => self.insert_hir_expr(HirExpr::Bool(*value)),
             AstNode::Identifier { name, span } => match self.symbols.resolve(self.current_scope, name) {
                 Some(symbol_id) => self.insert_hir_expr(HirExpr::Var(symbol_id)),
                 None => {
@@ -144,11 +156,23 @@ impl<'a> Lowering<'a> {
                     rhs,
                 })
             }
-            AstNode::FloatLiteral { span, .. }
-            | AstNode::StringLiteral { span, .. }
-            | AstNode::BoolLiteral { span, .. } => {
-                self.push_error("literal not supported in HIR yet", *span);
-                self.insert_hir_expr(HirExpr::Invalid)
+            AstNode::CallExpr { callee, args, span } => {
+                let lowered_args = args.iter().map(|arg| self.lower_expr(*arg)).collect::<Vec<_>>();
+                let callee_expr = self.lower_expr(*callee);
+                let callee_symbol = match self.hir.exprs.get(callee_expr) {
+                    Some(HirExpr::Var(symbol_id)) => Some(*symbol_id),
+                    _ => None,
+                };
+                match callee_symbol {
+                    Some(symbol_id) => self.insert_hir_expr(HirExpr::Call {
+                        callee: symbol_id,
+                        args: lowered_args,
+                    }),
+                    None => {
+                        self.push_error("call target must be an identifier", *span);
+                        self.insert_hir_expr(HirExpr::Invalid)
+                    }
+                }
             }
             AstNode::TypeName { .. } => {
                 self.push_error("type name is not an expression", self.node_span(id));
@@ -180,6 +204,22 @@ impl<'a> Lowering<'a> {
         self.diagnostics
             .push(Diagnostic::new(message, span, Severity::Error));
     }
+
+    fn resolve_decl_type(&mut self, ty: Option<ArenaId>) -> Type {
+        let Some(ty_id) = ty else {
+            return Type::Unknown;
+        };
+        match self.ast.get(ty_id) {
+            Some(AstNode::TypeName { name, span }) => match map_type_name(name) {
+                Some(ty) => ty,
+                None => {
+                    self.push_error(format!("unknown type '{name}'"), *span);
+                    Type::Unknown
+                }
+            },
+            _ => Type::Unknown,
+        }
+    }
 }
 
 fn map_binary_op(op: BinaryOp) -> BinOp {
@@ -202,6 +242,17 @@ fn init_global_scope(symbols: &mut SymbolTable, registry: &crate::builtins::Buil
         );
     }
     scope_id
+}
+
+fn map_type_name(name: &str) -> Option<Type> {
+    match name {
+        "i1" | "i8" | "i16" | "i32" | "i64" | "i128" | "u1" | "u8" | "u16" | "u32" | "u64"
+        | "u128" => Some(Type::Int),
+        "f32" | "f64" => Some(Type::Float),
+        "str" => Some(Type::Str),
+        "bool" => Some(Type::Bool),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -279,5 +330,24 @@ mod tests {
         let print_id = symbols.resolve(ScopeId(0), "print").expect("builtin print");
         let print_symbol = symbols.symbol(print_id).expect("symbol exists");
         assert_eq!(print_symbol.origin, SymbolOrigin::Builtin);
+    }
+
+    #[test]
+    fn lowers_builtin_call_into_hir_call() {
+        let src = "print(1, 2)";
+        let lex_output = lex(FileId::from_u32(5), src);
+        let (ast, _) = parse(FileId::from_u32(5), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+
+        let mut has_call = false;
+        for idx in 0..hir.exprs.len() {
+            let id = foundation::ids::ArenaId::from_u32(idx as u32);
+            if matches!(hir.exprs.get(id), Some(HirExpr::Call { .. })) {
+                has_call = true;
+                break;
+            }
+        }
+        assert!(has_call);
     }
 }

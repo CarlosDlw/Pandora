@@ -22,20 +22,32 @@ impl Parser {
     fn parse_expression_bp(&mut self, min_prec: Precedence) -> ArenaId {
         let mut left = self.parse_prefix();
 
-        while let Some((op, prec)) = self.current_binary_op() {
-            if prec < min_prec {
-                break;
+        loop {
+            if self.current().is_some_and(|t| t.kind == TokenKind::LeftParen)
+                && Precedence::Highest >= min_prec
+            {
+                left = self.parse_call_suffix(left);
+                continue;
             }
 
-            self.bump();
-            let right = self.parse_expression_bp(next_precedence(prec));
-            let span = self.merge_spans(left, right);
-            left = self.insert_node(AstNode::BinaryExpr {
-                op,
-                left,
-                right,
-                span,
-            });
+            if let Some((op, prec)) = self.current_binary_op() {
+                if prec < min_prec {
+                    break;
+                }
+
+                self.bump();
+                let right = self.parse_expression_bp(next_precedence(prec));
+                let span = self.merge_spans(left, right);
+                left = self.insert_node(AstNode::BinaryExpr {
+                    op,
+                    left,
+                    right,
+                    span,
+                });
+                continue;
+            }
+
+            break;
         }
 
         left
@@ -121,6 +133,40 @@ impl Parser {
             TokenKind::Slash => Some((BinaryOp::Divide, Precedence::Product)),
             _ => None,
         }
+    }
+
+    fn parse_call_suffix(&mut self, callee: ArenaId) -> ArenaId {
+        let open = self.current_span_or_eof();
+        self.bump();
+        let mut args = Vec::new();
+
+        if self.consume_if(TokenKind::RightParen) {
+            let span = merge_pair(self.node_span(callee), open);
+            return self.insert_node(AstNode::CallExpr { callee, args, span });
+        }
+
+        loop {
+            let arg = self.parse_expression();
+            args.push(arg);
+
+            if self.consume_if(TokenKind::Comma) {
+                continue;
+            }
+
+            if self.consume_if(TokenKind::RightParen) {
+                break;
+            }
+
+            self.push_error("expected ',' or ')' in argument list", self.current_span_or_eof());
+            break;
+        }
+
+        let end = args
+            .last()
+            .map(|id| self.node_span(*id))
+            .unwrap_or(open);
+        let span = merge_pair(self.node_span(callee), end);
+        self.insert_node(AstNode::CallExpr { callee, args, span })
     }
 }
 

@@ -43,6 +43,11 @@ pub enum AstNode {
         right: ArenaId,
         span: Span,
     },
+    CallExpr {
+        callee: ArenaId,
+        args: Vec<ArenaId>,
+        span: Span,
+    },
     LetDecl {
         name: ArenaId,
         ty: Option<ArenaId>,
@@ -67,6 +72,7 @@ impl AstNode {
             | Self::StringLiteral { span, .. }
             | Self::BoolLiteral { span, .. }
             | Self::BinaryExpr { span, .. }
+            | Self::CallExpr { span, .. }
             | Self::LetDecl { span, .. }
             | Self::ExprStmt { span, .. } => *span,
         }
