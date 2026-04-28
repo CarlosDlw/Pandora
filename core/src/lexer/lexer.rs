@@ -97,6 +97,10 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     self.push_token(TokenKind::RightParen, start, self.cursor);
                 }
+                ',' => {
+                    self.bump();
+                    self.push_token(TokenKind::Comma, start, self.cursor);
+                }
                 ';' => {
                     self.bump();
                     self.push_token(TokenKind::Semicolon, start, self.cursor);
@@ -283,6 +287,7 @@ mod tests {
 name: str = "John"
 is_student: bool = true
 PI:: f32 = 3.14159
+print(name, age)
 "#;
         let output = lex(FileId::from_u32(1), src);
         assert!(output.diagnostics.is_empty());
@@ -290,6 +295,7 @@ PI:: f32 = 3.14159
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::TypeName));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Float));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::String));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Comma));
     }
 
     #[test]

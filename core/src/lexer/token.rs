@@ -14,6 +14,7 @@ pub enum TokenKind {
     Slash,
     LeftParen,
     RightParen,
+    Comma,
     Semicolon,
     Colon,
     DoubleColon,

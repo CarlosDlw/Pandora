@@ -16,6 +16,13 @@ is_student: bool = true
 
 PI:: f32 = 3.14159
 
+print(age)
+print(name)
+print(is_student)
+print(PI)
+
+print(name, age)
+
 # types:
 # i1            - 1-bit integer
 # i8            - 8-bit integer
