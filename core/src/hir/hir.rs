@@ -14,10 +14,11 @@ pub enum BinOp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirExpr {
-    Int(i64),
-    Float(f64),
+    Int(String),
+    Float(String),
     Bool(bool),
     Str(String),
+    Char(char),
     Var(SymbolId),
     Binary { op: BinOp, lhs: HirId, rhs: HirId },
     Call { callee: SymbolId, args: Vec<HirId> },

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    hir::{BinOp, Hir, HirExpr, HirId, HirStmt, SymbolTable},
     analyzer::Type as AnalyzerType,
+    hir::{BinOp, Hir, HirExpr, HirId, HirStmt, SymbolTable},
 };
 use foundation::{
     diagnostics::{Diagnostic, Diagnostics, Severity},
@@ -14,7 +14,7 @@ pub struct SemanticModel {
     pub types: HashMap<HirId, AnalyzerType>,
 }
 
-pub fn analyze(hir: &Hir, symbols: &SymbolTable) -> (SemanticModel, Diagnostics) {
+pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnostics) {
     let mut checker = Checker {
         hir,
         symbols,
@@ -27,7 +27,7 @@ pub fn analyze(hir: &Hir, symbols: &SymbolTable) -> (SemanticModel, Diagnostics)
 
 struct Checker<'a> {
     hir: &'a Hir,
-    symbols: &'a SymbolTable,
+    symbols: &'a mut SymbolTable,
     diagnostics: Diagnostics,
     model: SemanticModel,
 }
@@ -41,7 +41,35 @@ impl<'a> Checker<'a> {
 
     fn check_stmt(&mut self, stmt: &HirStmt) -> AnalyzerType {
         match stmt {
-            HirStmt::Let { value, span, .. } => self.check_expr(*value, *span),
+            HirStmt::Let {
+                symbol,
+                value,
+                span,
+                ..
+            } => {
+                let declared = self
+                    .symbols
+                    .symbol(*symbol)
+                    .map(|s| s.ty.clone())
+                    .unwrap_or(AnalyzerType::Unknown);
+                let actual = self.check_expr_expected(*value, *span, Some(&declared));
+                let final_ty = if matches!(declared, AnalyzerType::Unknown) {
+                    actual.clone()
+                } else {
+                    declared.clone()
+                };
+                if let Some(sym) = self.symbols.symbol_mut(*symbol) {
+                    sym.ty = final_ty.clone();
+                }
+
+                if !is_assignable(&final_ty, &actual) {
+                    self.push_error(
+                        format!("cannot assign value of type {actual:?} to {final_ty:?}"),
+                        *span,
+                    );
+                }
+                final_ty
+            }
             HirStmt::Expr { expr, span } => self.check_expr(*expr, *span),
             HirStmt::Invalid { span } => {
                 self.push_error("invalid statement", *span);
@@ -51,15 +79,25 @@ impl<'a> Checker<'a> {
     }
 
     fn check_expr(&mut self, id: HirId, span: Span) -> AnalyzerType {
+        self.check_expr_expected(id, span, None)
+    }
+
+    fn check_expr_expected(
+        &mut self,
+        id: HirId,
+        span: Span,
+        expected: Option<&AnalyzerType>,
+    ) -> AnalyzerType {
         if let Some(ty) = self.model.types.get(&id) {
             return ty.clone();
         }
 
         let ty = match self.hir.exprs.get(id) {
-            Some(HirExpr::Int(_)) => AnalyzerType::Int,
-            Some(HirExpr::Float(_)) => AnalyzerType::Float,
+            Some(HirExpr::Int(raw)) => self.check_int_literal(raw, expected, span),
+            Some(HirExpr::Float(raw)) => self.check_float_literal(raw, expected, span),
             Some(HirExpr::Bool(_)) => AnalyzerType::Bool,
             Some(HirExpr::Str(_)) => AnalyzerType::Str,
+            Some(HirExpr::Char(_)) => AnalyzerType::Char,
             Some(HirExpr::Var(symbol_id)) => self
                 .symbols
                 .symbol(*symbol_id)
@@ -92,11 +130,36 @@ impl<'a> Checker<'a> {
         right_ty: AnalyzerType,
         span: Span,
     ) -> AnalyzerType {
-        if left_ty == AnalyzerType::Int && right_ty == AnalyzerType::Int {
-            return AnalyzerType::Int;
+        if let (
+            AnalyzerType::Int {
+                signed: ls,
+                bits: lb,
+            },
+            AnalyzerType::Int {
+                signed: rs,
+                bits: rb,
+            },
+        ) = (&left_ty, &right_ty)
+        {
+            if ls == rs && lb == rb {
+                return left_ty;
+            }
+            self.push_error(
+                format!("integer widths/signs mismatch for {:?}: left={left_ty:?}, right={right_ty:?}", op),
+                span,
+            );
+            return AnalyzerType::Unknown;
         }
-        if left_ty == AnalyzerType::Float && right_ty == AnalyzerType::Float {
-            return AnalyzerType::Float;
+
+        if let (AnalyzerType::Float { bits: lb }, AnalyzerType::Float { bits: rb }) = (&left_ty, &right_ty) {
+            if lb == rb {
+                return left_ty;
+            }
+            self.push_error(
+                format!("float widths mismatch for {:?}: left={left_ty:?}, right={right_ty:?}", op),
+                span,
+            );
+            return AnalyzerType::Unknown;
         }
 
         self.push_error(
@@ -125,12 +188,12 @@ impl<'a> Checker<'a> {
         }
 
         for (idx, arg) in args.iter().enumerate() {
-            let arg_ty = self.check_expr(*arg, span);
             let expected = if is_variadic_any {
                 AnalyzerType::Any
             } else {
                 params.get(idx).cloned().unwrap_or(AnalyzerType::Unknown)
             };
+            let arg_ty = self.check_expr_expected(*arg, span, Some(&expected));
             if expected != AnalyzerType::Any
                 && expected != AnalyzerType::Unknown
                 && arg_ty != AnalyzerType::Unknown
@@ -146,10 +209,112 @@ impl<'a> Checker<'a> {
         *ret
     }
 
+    fn check_int_literal(
+        &mut self,
+        raw: &str,
+        expected: Option<&AnalyzerType>,
+        span: Span,
+    ) -> AnalyzerType {
+        let parsed = match raw.parse::<u128>() {
+            Ok(value) => value,
+            Err(_) => {
+                self.push_error(format!("invalid integer literal '{raw}'"), span);
+                return AnalyzerType::Unknown;
+            }
+        };
+
+        if let Some(AnalyzerType::Int { signed, bits }) = expected {
+            if integer_fits(parsed, *signed, *bits) {
+                return AnalyzerType::Int {
+                    signed: *signed,
+                    bits: *bits,
+                };
+            }
+            self.push_error(
+                format!("integer literal '{raw}' out of range for {}{}", if *signed { "i" } else { "u" }, bits),
+                span,
+            );
+            return AnalyzerType::Unknown;
+        }
+
+        if integer_fits(parsed, true, 32) {
+            AnalyzerType::Int {
+                signed: true,
+                bits: 32,
+            }
+        } else if integer_fits(parsed, true, 64) {
+            AnalyzerType::Int {
+                signed: true,
+                bits: 64,
+            }
+        } else if integer_fits(parsed, true, 128) {
+            AnalyzerType::Int {
+                signed: true,
+                bits: 128,
+            }
+        } else {
+            self.push_error(format!("integer literal '{raw}' out of supported range"), span);
+            AnalyzerType::Unknown
+        }
+    }
+
+    fn check_float_literal(
+        &mut self,
+        raw: &str,
+        expected: Option<&AnalyzerType>,
+        span: Span,
+    ) -> AnalyzerType {
+        let parsed = match raw.parse::<f64>() {
+            Ok(value) => value,
+            Err(_) => {
+                self.push_error(format!("invalid float literal '{raw}'"), span);
+                return AnalyzerType::Unknown;
+            }
+        };
+
+        if let Some(AnalyzerType::Float { bits }) = expected {
+            if float_fits(parsed, *bits) {
+                return AnalyzerType::Float { bits: *bits };
+            }
+            self.push_error(format!("float literal '{raw}' out of range for f{bits}"), span);
+            return AnalyzerType::Unknown;
+        }
+
+        AnalyzerType::Float { bits: 64 }
+    }
+
     fn push_error(&mut self, message: impl Into<String>, span: Span) {
         self.diagnostics
             .push(Diagnostic::new(message, span, Severity::Error));
     }
+}
+
+fn integer_fits(value: u128, signed: bool, bits: u16) -> bool {
+    if bits == 0 || bits > 128 {
+        return false;
+    }
+    if signed {
+        if bits == 128 {
+            return value <= i128::MAX as u128;
+        }
+        value <= ((1u128 << (bits - 1)) - 1)
+    } else if bits == 128 {
+        true
+    } else {
+        value <= ((1u128 << bits) - 1)
+    }
+}
+
+fn float_fits(value: f64, bits: u16) -> bool {
+    match bits {
+        32 => value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64,
+        64 => value.is_finite(),
+        _ => false,
+    }
+}
+
+fn is_assignable(expected: &AnalyzerType, actual: &AnalyzerType) -> bool {
+    expected == actual || matches!(expected, AnalyzerType::Unknown | AnalyzerType::Any) || matches!(actual, AnalyzerType::Unknown)
 }
 
 #[cfg(test)]
@@ -165,8 +330,8 @@ mod tests {
         let src = "len(1)";
         let lex_output = lex(FileId::from_u32(20), src);
         let (ast, _) = parse(FileId::from_u32(20), src.len() as u32, lex_output.tokens);
-        let (hir, symbols, _) = lower(&ast);
-        let (_model, diagnostics) = analyze(&hir, &symbols);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
     }
 
@@ -175,8 +340,58 @@ mod tests {
         let src = "print(1, 2)";
         let lex_output = lex(FileId::from_u32(21), src);
         let (ast, _) = parse(FileId::from_u32(21), src.len() as u32, lex_output.tokens);
-        let (hir, symbols, _) = lower(&ast);
-        let (_model, diagnostics) = analyze(&hir, &symbols);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn enforces_unsigned_integer_range() {
+        let src = "x: u8 = 300";
+        let lex_output = lex(FileId::from_u32(22), src);
+        let (ast, _) = parse(FileId::from_u32(22), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+    }
+
+    #[test]
+    fn enforces_i1_signed_range() {
+        let src = "x: i1 = 1";
+        let lex_output = lex(FileId::from_u32(23), src);
+        let (ast, _) = parse(FileId::from_u32(23), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_u1_upper_bound() {
+        let src = "x: u1 = 1";
+        let lex_output = lex(FileId::from_u32(24), src);
+        let (ast, _) = parse(FileId::from_u32(24), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn infers_type_for_colon_equals_binding() {
+        let src = "x := 1; y: i32 = x";
+        let lex_output = lex(FileId::from_u32(25), src);
+        let (ast, _) = parse(FileId::from_u32(25), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn supports_char_type_and_literal() {
+        let src = "c: char = 'x'";
+        let lex_output = lex(FileId::from_u32(26), src);
+        let (ast, _) = parse(FileId::from_u32(26), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());
     }
 }

@@ -79,6 +79,10 @@ impl SymbolTable {
         self.symbols.get(id.0 as usize)
     }
 
+    pub fn symbol_mut(&mut self, id: SymbolId) -> Option<&mut Symbol> {
+        self.symbols.get_mut(id.0 as usize)
+    }
+
     pub fn resolve_in_scope(&self, scope_id: ScopeId, name: &str) -> Option<SymbolId> {
         let scope = self.scopes.get(scope_id.0 as usize)?;
         scope.symbols.get(name).copied()

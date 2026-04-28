@@ -15,7 +15,10 @@ pub fn default_registry() -> BuiltinRegistry {
             name: "len",
             ty: Type::Function {
                 params: vec![Type::Str],
-                ret: Box::new(Type::Int),
+                ret: Box::new(Type::Int {
+                    signed: false,
+                    bits: 64,
+                }),
             },
         }],
     }

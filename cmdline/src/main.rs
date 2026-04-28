@@ -96,7 +96,8 @@ fn main() -> ExitCode {
                     }
                 }
             } else if cli.check {
-                let (_semantic_model, analyze_diagnostics) = analyze(&hir, &symbols);
+                let mut symbols = symbols;
+                let (_semantic_model, analyze_diagnostics) = analyze(&hir, &mut symbols);
                 diagnostics.extend(analyze_diagnostics);
             }
         }

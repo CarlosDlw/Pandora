@@ -33,6 +33,10 @@ pub enum AstNode {
         value: String,
         span: Span,
     },
+    CharLiteral {
+        value: char,
+        span: Span,
+    },
     BoolLiteral {
         value: bool,
         span: Span,
@@ -70,6 +74,7 @@ impl AstNode {
             | Self::IntegerLiteral { span, .. }
             | Self::FloatLiteral { span, .. }
             | Self::StringLiteral { span, .. }
+            | Self::CharLiteral { span, .. }
             | Self::BoolLiteral { span, .. }
             | Self::BinaryExpr { span, .. }
             | Self::CallExpr { span, .. }

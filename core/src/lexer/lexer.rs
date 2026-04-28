@@ -70,6 +70,10 @@ impl<'a> Lexer<'a> {
                 self.lex_string();
                 continue;
             }
+            if ch == '\'' {
+                self.lex_char();
+                continue;
+            }
 
             let start = self.cursor;
             match ch {
@@ -208,6 +212,38 @@ impl<'a> Lexer<'a> {
         self.push_unterminated_string_diagnostic(start, self.cursor);
     }
 
+    fn lex_char(&mut self) {
+        let start = self.cursor;
+        self.bump();
+
+        let Some(first) = self.peek() else {
+            self.push_invalid_char_literal_diagnostic(start, self.cursor);
+            return;
+        };
+
+        if first == '\\' {
+            self.bump();
+            if self.peek().is_some() {
+                self.bump();
+            } else {
+                self.push_invalid_char_literal_diagnostic(start, self.cursor);
+                return;
+            }
+        } else if first == '\'' || first == '\n' {
+            self.push_invalid_char_literal_diagnostic(start, self.cursor);
+            return;
+        } else {
+            self.bump();
+        }
+
+        if self.peek() == Some('\'') {
+            self.bump();
+            self.push_token(TokenKind::Char, start, self.cursor);
+        } else {
+            self.push_invalid_char_literal_diagnostic(start, self.cursor);
+        }
+    }
+
     fn push_token(&mut self, kind: TokenKind, start: usize, end: usize) {
         let lexeme = self.source[start..end].to_string();
         let span = Span::new_unchecked(self.file_id, start as u32, end as u32);
@@ -236,6 +272,15 @@ impl<'a> Lexer<'a> {
         let span = Span::new_unchecked(self.file_id, start as u32, end as u32);
         self.diagnostics.push(Diagnostic::new(
             "unterminated string literal",
+            span,
+            Severity::Error,
+        ));
+    }
+
+    fn push_invalid_char_literal_diagnostic(&mut self, start: usize, end: usize) {
+        let span = Span::new_unchecked(self.file_id, start as u32, end as u32);
+        self.diagnostics.push(Diagnostic::new(
+            "invalid char literal",
             span,
             Severity::Error,
         ));
@@ -296,6 +341,13 @@ print(name, age)
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Float));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::String));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Comma));
+    }
+
+    #[test]
+    fn lexes_char_literal() {
+        let output = lex(FileId::from_u32(5), "c: char = 'x'");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Char));
     }
 
     #[test]

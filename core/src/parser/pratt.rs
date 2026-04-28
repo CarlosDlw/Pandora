@@ -99,6 +99,20 @@ impl Parser {
                     span: token.span,
                 })
             }
+            TokenKind::Char => {
+                self.bump();
+                let parsed = parse_char_lexeme(&token.lexeme);
+                match parsed {
+                    Some(ch) => self.insert_node(AstNode::CharLiteral {
+                        value: ch,
+                        span: token.span,
+                    }),
+                    None => {
+                        self.push_error("invalid char literal", token.span);
+                        self.invalid_node(token.span)
+                    }
+                }
+            }
             TokenKind::Bool => {
                 self.bump();
                 self.insert_node(AstNode::BoolLiteral {
@@ -180,5 +194,29 @@ fn next_precedence(prec: Precedence) -> Precedence {
         Precedence::Sum => Precedence::Product,
         Precedence::Product => Precedence::Highest,
         Precedence::Highest => Precedence::Highest,
+    }
+}
+
+fn parse_char_lexeme(lexeme: &str) -> Option<char> {
+    if !(lexeme.starts_with('\'') && lexeme.ends_with('\'')) {
+        return None;
+    }
+    let inner = &lexeme[1..lexeme.len() - 1];
+    if inner.starts_with('\\') {
+        return match inner {
+            "\\n" => Some('\n'),
+            "\\t" => Some('\t'),
+            "\\r" => Some('\r'),
+            "\\'" => Some('\''),
+            "\\\\" => Some('\\'),
+            _ => None,
+        };
+    }
+    let mut chars = inner.chars();
+    let ch = chars.next()?;
+    if chars.next().is_none() {
+        Some(ch)
+    } else {
+        None
     }
 }

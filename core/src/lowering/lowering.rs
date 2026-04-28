@@ -122,21 +122,10 @@ impl<'a> Lowering<'a> {
         };
 
         match node {
-            AstNode::IntegerLiteral { value, span } => match value.parse::<i64>() {
-                Ok(value) => self.insert_hir_expr(HirExpr::Int(value)),
-                Err(_) => {
-                    self.push_error("integer literal out of range for i64", *span);
-                    self.insert_hir_expr(HirExpr::Invalid)
-                }
-            },
-            AstNode::FloatLiteral { value, span } => match value.parse::<f64>() {
-                Ok(value) => self.insert_hir_expr(HirExpr::Float(value)),
-                Err(_) => {
-                    self.push_error("invalid float literal", *span);
-                    self.insert_hir_expr(HirExpr::Invalid)
-                }
-            },
+            AstNode::IntegerLiteral { value, .. } => self.insert_hir_expr(HirExpr::Int(value.clone())),
+            AstNode::FloatLiteral { value, .. } => self.insert_hir_expr(HirExpr::Float(value.clone())),
             AstNode::StringLiteral { value, .. } => self.insert_hir_expr(HirExpr::Str(value.clone())),
+            AstNode::CharLiteral { value, .. } => self.insert_hir_expr(HirExpr::Char(*value)),
             AstNode::BoolLiteral { value, .. } => self.insert_hir_expr(HirExpr::Bool(*value)),
             AstNode::Identifier { name, span } => match self.symbols.resolve(self.current_scope, name) {
                 Some(symbol_id) => self.insert_hir_expr(HirExpr::Var(symbol_id)),
@@ -246,11 +235,23 @@ fn init_global_scope(symbols: &mut SymbolTable, registry: &crate::builtins::Buil
 
 fn map_type_name(name: &str) -> Option<Type> {
     match name {
-        "i1" | "i8" | "i16" | "i32" | "i64" | "i128" | "u1" | "u8" | "u16" | "u32" | "u64"
-        | "u128" => Some(Type::Int),
-        "f32" | "f64" => Some(Type::Float),
+        "i1" => Some(Type::Int { signed: true, bits: 1 }),
+        "i8" => Some(Type::Int { signed: true, bits: 8 }),
+        "i16" => Some(Type::Int { signed: true, bits: 16 }),
+        "i32" => Some(Type::Int { signed: true, bits: 32 }),
+        "i64" => Some(Type::Int { signed: true, bits: 64 }),
+        "i128" => Some(Type::Int { signed: true, bits: 128 }),
+        "u1" => Some(Type::Int { signed: false, bits: 1 }),
+        "u8" => Some(Type::Int { signed: false, bits: 8 }),
+        "u16" => Some(Type::Int { signed: false, bits: 16 }),
+        "u32" => Some(Type::Int { signed: false, bits: 32 }),
+        "u64" => Some(Type::Int { signed: false, bits: 64 }),
+        "u128" => Some(Type::Int { signed: false, bits: 128 }),
+        "f32" => Some(Type::Float { bits: 32 }),
+        "f64" => Some(Type::Float { bits: 64 }),
         "str" => Some(Type::Str),
         "bool" => Some(Type::Bool),
+        "char" => Some(Type::Char),
         _ => None,
     }
 }

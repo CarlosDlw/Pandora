@@ -6,6 +6,7 @@ pub enum TokenKind {
     Integer,
     Float,
     String,
+    Char,
     Bool,
     TypeName,
     Plus,
