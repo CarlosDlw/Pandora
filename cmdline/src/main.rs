@@ -8,6 +8,8 @@ use foundation::diagnostics::Diagnostics;
 use foundation::ids::FileId;
 use std::{fs, process::ExitCode};
 
+mod diagnostic_renderer;
+
 #[derive(Debug, Parser)]
 #[command(name = "pandora")]
 #[command(about = "CLI entrypoint for Pandora", long_about = None)]
@@ -99,13 +101,13 @@ fn main() -> ExitCode {
                 if cli.check {
                 } else {
                     if diagnostics.has_errors() {
-                        return finish_with_diagnostics(diagnostics);
+                        return finish_with_diagnostics(&cli.file, &contents, diagnostics);
                     }
                     let (chunk, compile_diagnostics) = compile_program(&hir, &semantic_model);
                     diagnostics.extend(compile_diagnostics);
 
                     if diagnostics.has_errors() {
-                        return finish_with_diagnostics(diagnostics);
+                        return finish_with_diagnostics(&cli.file, &contents, diagnostics);
                     }
 
                     if let Err(vm_diagnostics) = execute(&chunk, &symbols) {
@@ -116,18 +118,12 @@ fn main() -> ExitCode {
         }
     }
 
-    finish_with_diagnostics(diagnostics)
+    finish_with_diagnostics(&cli.file, &contents, diagnostics)
 }
 
-fn finish_with_diagnostics(diagnostics: Diagnostics) -> ExitCode {
+fn finish_with_diagnostics(path: &str, source: &str, diagnostics: Diagnostics) -> ExitCode {
     for diagnostic in diagnostics.iter() {
-        eprintln!(
-            "{:?}: {} [{}..{}]",
-            diagnostic.severity,
-            diagnostic.message,
-            diagnostic.span.start(),
-            diagnostic.span.end()
-        );
+        eprintln!("{}", diagnostic_renderer::render(path, source, diagnostic));
     }
 
     if diagnostics.has_errors() {

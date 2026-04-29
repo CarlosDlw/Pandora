@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use predicates::boolean::PredicateBooleanExt;
 use predicates::str::contains;
 use tempfile::NamedTempFile;
 
@@ -12,7 +13,12 @@ fn lexeme_mode_returns_error_for_lexer_diagnostic() {
         .arg("--lexeme")
         .assert()
         .code(1)
-        .stderr(contains("invalid character"));
+        .stderr(
+            contains("error: invalid character")
+                .and(contains("-->"))
+                .and(contains("| a := @"))
+                .and(contains("[5..6]")),
+        );
 }
 
 #[test]
@@ -25,7 +31,11 @@ fn ast_mode_includes_lexer_diagnostics_in_exit_status() {
         .arg("--ast")
         .assert()
         .code(1)
-        .stderr(contains("invalid character"));
+        .stderr(
+            contains("error: invalid character")
+                .and(contains("-->"))
+                .and(contains("| a := @")),
+        );
 }
 
 #[test]
@@ -38,5 +48,9 @@ fn ast_mode_returns_error_for_parser_diagnostic() {
         .arg("--ast")
         .assert()
         .code(1)
-        .stderr(contains("expected ')'"));
+        .stderr(
+            contains("error: expected ')'")
+                .and(contains("-->"))
+                .and(contains("= help:")),
+        );
 }
