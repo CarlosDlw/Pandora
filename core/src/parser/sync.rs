@@ -31,6 +31,7 @@ impl Parser {
                 | TokenKind::Float
                 | TokenKind::String
                 | TokenKind::Bool
+                | TokenKind::Minus
                 | TokenKind::LeftParen
         )
     }

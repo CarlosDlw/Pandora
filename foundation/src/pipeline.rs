@@ -2,6 +2,7 @@ use crate::{
     db::Database,
     diagnostics::Diagnostics,
     error::FoundationError,
+    frontend::PandoraFrontend,
     ids::{CacheId, FileId},
 };
 
@@ -89,14 +90,18 @@ impl Pipeline {
         )
     }
 
-    pub fn run(&self, db: &mut Database) -> Result<(), FoundationError> {
+    /// Runs the real compiler via [`PandoraFrontend`] (implementations live in the `core` crate).
+    pub fn run(
+        &self,
+        db: &mut Database,
+        frontend: &mut impl PandoraFrontend,
+    ) -> Result<(), FoundationError> {
         let file_ids: Vec<FileId> = db.vfs().iter().map(|(file_id, _)| file_id).collect();
         for file_id in file_ids {
-            let (ast, mut diagnostics) = self.parse(db, file_id);
-            let (hir, lower_diagnostics) = self.lower(ast);
-            let (_analysis, analyze_diagnostics) = self.analyze(hir);
-            diagnostics.extend(lower_diagnostics);
-            diagnostics.extend(analyze_diagnostics);
+            let file = db.vfs().get_file_required(file_id)?;
+            let diagnostics = frontend.compile_file(file_id, &file.contents);
+            db.syntax_cache_mut().set(file_id, CacheId::from_u32(1));
+            db.semantic_cache_mut().set(file_id, CacheId::from_u32(1));
             db.set_diagnostics(file_id, diagnostics);
         }
         Ok(())
@@ -116,9 +121,22 @@ impl Pipeline {
 
 #[cfg(test)]
 mod tests {
-    use crate::{db::Database, ids::FileId};
+    use crate::{
+        db::Database,
+        diagnostics::Diagnostics,
+        frontend::PandoraFrontend,
+        ids::FileId,
+    };
 
     use super::Pipeline;
+
+    struct RecordingFrontend;
+
+    impl PandoraFrontend for RecordingFrontend {
+        fn compile_file(&mut self, _file_id: FileId, _source: &str) -> Diagnostics {
+            Diagnostics::new()
+        }
+    }
 
     #[test]
     fn load_file_and_seed_placeholders() {
@@ -152,7 +170,10 @@ mod tests {
             .load_file(&mut db, "main.pnd", "content")
             .expect("load file");
 
-        pipeline.run(&mut db).expect("run pipeline");
+        let mut fe = RecordingFrontend;
+        pipeline
+            .run(&mut db, &mut fe)
+            .expect("run pipeline");
         assert!(db.diagnostics_for(file_id).is_some());
     }
 }

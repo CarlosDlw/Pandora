@@ -1,4 +1,4 @@
-//! Linear VM execution: one [`crate::hir::symbols::SymbolTable`] lookup for builtins (`SymbolOrigin::Builtin`),
+//! Linear VM execution: builtins use [`SymbolOrigin::Builtin`];
 //! user-defined callees are rejected until closures/functions exist.
 
 use std::collections::HashMap;
@@ -8,9 +8,7 @@ use foundation::{
     span::Span,
 };
 
-use crate::hir::{
-    symbols::{SymbolId, SymbolOrigin, SymbolTable},
-};
+use crate::hir::symbols::{SymbolId, SymbolOrigin, SymbolTable};
 
 use super::{
     bytecode::Op,
@@ -80,7 +78,8 @@ impl<'a> Vm<'a> {
 
     fn step_op(&mut self, op: &Op, span: Span) -> Result<(), Diagnostic> {
         match op {
-            Op::ConstInt(n) => self.stack.push(Value::Int(*n)),
+            Op::ConstI128(n) => self.stack.push(Value::Int128(*n)),
+            Op::ConstU128(n) => self.stack.push(Value::UInt128(*n)),
             Op::ConstBool(b) => self.stack.push(Value::Bool(*b)),
             Op::ConstStr(s) => self.stack.push(Value::Str(s.clone())),
             Op::ConstFloat(f) => self.stack.push(Value::Float(*f)),
@@ -101,14 +100,53 @@ impl<'a> Vm<'a> {
                 self.stack.push(v);
             }
 
-            Op::Store(sym) => {
+            Op::Bind(sym) => {
                 let v = self.pop_one(span)?;
                 self.env.insert(*sym, v);
             }
 
-            Op::Add => self.apply_bin_checked(span, |a, b| a.checked_add(b), |a, b| Some(a + b))?,
-            Op::Sub => self.apply_bin_checked(span, |a, b| a.checked_sub(b), |a, b| Some(a - b))?,
-            Op::Mul => self.apply_bin_checked(span, |a, b| a.checked_mul(b), |a, b| Some(a * b))?,
+            Op::Assign(sym) => {
+                let sym_info = self.symbols.symbol(*sym).ok_or_else(|| {
+                    Diagnostic::new("unknown symbol id in assignment", span, Severity::Error)
+                })?;
+                if sym_info.origin == SymbolOrigin::Builtin {
+                    return Err(Diagnostic::new(
+                        "cannot assign to a builtin",
+                        span,
+                        Severity::Error,
+                    ));
+                }
+                if sym_info.is_const {
+                    return Err(Diagnostic::new(
+                        "cannot assign to a constant declared with '::'",
+                        span,
+                        Severity::Error,
+                    ));
+                }
+                let v = self.pop_one(span)?;
+                self.env.insert(*sym, v);
+            }
+
+            Op::Neg => self.apply_neg(span)?,
+
+            Op::Add => self.apply_bin_checked(
+                span,
+                |a, b| a.checked_add(b),
+                |a, b| a.checked_add(b),
+                |a, b| Some(a + b),
+            )?,
+            Op::Sub => self.apply_bin_checked(
+                span,
+                |a, b| a.checked_sub(b),
+                |a, b| a.checked_sub(b),
+                |a, b| Some(a - b),
+            )?,
+            Op::Mul => self.apply_bin_checked(
+                span,
+                |a, b| a.checked_mul(b),
+                |a, b| a.checked_mul(b),
+                |a, b| Some(a * b),
+            )?,
             Op::Div => self.apply_div(span)?,
 
             Op::Call(sym, argc) => {
@@ -144,20 +182,53 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
+    fn apply_neg(&mut self, span: Span) -> Result<(), Diagnostic> {
+        let v = self.pop_one(span)?;
+        let out = match v {
+            Value::Int128(i) => Value::Int128(i.checked_neg().ok_or_else(|| {
+                Diagnostic::new("integer overflow in unary negation", span, Severity::Error)
+            })?),
+            Value::Float(f) => Value::Float(-f),
+            Value::UInt128(_) => {
+                return Err(Diagnostic::new(
+                    "invalid operand for unary '-' (unsigned)",
+                    span,
+                    Severity::Error,
+                ));
+            }
+            other => {
+                return Err(Diagnostic::new(
+                    format!("invalid operand for unary '-' (got {})", builtin_type_name(&other)),
+                    span,
+                    Severity::Error,
+                ));
+            }
+        };
+        self.stack.push(out);
+        Ok(())
+    }
+
     fn apply_bin_checked(
         &mut self,
         span: Span,
-        int_op: fn(i64, i64) -> Option<i64>,
+        signed_int: fn(i128, i128) -> Option<i128>,
+        unsigned_int: fn(u128, u128) -> Option<u128>,
         float_op: fn(f64, f64) -> Option<f64>,
     ) -> Result<(), Diagnostic> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         let out = match (lhs, rhs) {
-            (Value::Int(a), Value::Int(b)) => {
-                let r = int_op(a, b).ok_or_else(|| {
+            (Value::Int128(a), Value::Int128(b)) => {
+                let r = signed_int(a, b).ok_or_else(|| {
                     Diagnostic::new("integer overflow or invalid operation", span, Severity::Error)
                 })?;
-                Value::Int(r)
+                Value::Int128(r)
+            }
+            (Value::UInt128(a), Value::UInt128(b)) => {
+                let r = unsigned_int(a, b).ok_or_else(|| {
+                    Diagnostic::new("integer overflow or invalid operation", span, Severity::Error)
+                })?;
+                Value::UInt128(r)
             }
             (Value::Float(a), Value::Float(b)) => {
                 let r = float_op(a, b).ok_or_else(|| {
@@ -181,11 +252,20 @@ impl<'a> Vm<'a> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         let out = match (lhs, rhs) {
-            (Value::Int(a), Value::Int(b)) => {
+            (Value::Int128(a), Value::Int128(b)) => {
                 if b == 0 {
                     return Err(Diagnostic::new("division by zero", span, Severity::Error));
                 }
-                Value::Int(a / b)
+                let r = a.checked_div(b).ok_or_else(|| {
+                    Diagnostic::new("integer division overflow", span, Severity::Error)
+                })?;
+                Value::Int128(r)
+            }
+            (Value::UInt128(a), Value::UInt128(b)) => {
+                if b == 0 {
+                    return Err(Diagnostic::new("division by zero", span, Severity::Error));
+                }
+                Value::UInt128(a / b)
             }
             (Value::Float(a), Value::Float(b)) => {
                 if b == 0.0 {
@@ -232,7 +312,13 @@ fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Dia
                 ));
             };
             match arg {
-                Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
+                Value::Str(s) => {
+                    let n = s.chars().count();
+                    let n128 = i128::try_from(n).map_err(|_| {
+                        Diagnostic::new("string length exceeds i128 range", span, Severity::Error)
+                    })?;
+                    Ok(Value::Int128(n128))
+                }
                 other => Err(Diagnostic::new(
                     format!("len expects str, got {}", builtin_type_name(other)),
                     span,
@@ -250,7 +336,8 @@ fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Dia
 
 fn builtin_type_name(v: &Value) -> &'static str {
     match v {
-        Value::Int(_) => "int",
+        Value::Int128(_) => "int",
+        Value::UInt128(_) => "uint",
         Value::Bool(_) => "bool",
         Value::Str(_) => "str",
         Value::Float(_) => "float",
@@ -284,8 +371,8 @@ mod tests {
     fn execute_int_add_returns_empty_stack() {
         let mut b = ChunkBuilder::new();
         let s = span();
-        b.emit(Op::ConstInt(1), s);
-        b.emit(Op::ConstInt(2), s);
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::ConstI128(2), s);
         b.emit(Op::Add, s);
         b.emit(Op::Pop, s);
         b.emit(Op::Return, s);
@@ -298,8 +385,8 @@ mod tests {
     fn div_by_zero_is_error() {
         let mut b = ChunkBuilder::new();
         let s = span();
-        b.emit(Op::ConstInt(1), s);
-        b.emit(Op::ConstInt(0), s);
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::ConstI128(0), s);
         b.emit(Op::Div, s);
         b.emit(Op::Return, s);
         let chunk = b.finish();

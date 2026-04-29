@@ -14,6 +14,11 @@ pub enum BinOp {
     Divide,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirExpr {
     Int(String),
@@ -22,6 +27,7 @@ pub enum HirExpr {
     Str(String),
     Char(char),
     Var(SymbolId),
+    Unary { op: UnaryOp, operand: HirId },
     Binary { op: BinOp, lhs: HirId, rhs: HirId },
     Call { callee: SymbolId, args: Vec<HirId> },
     Invalid,
@@ -33,6 +39,11 @@ pub enum HirStmt {
         symbol: SymbolId,
         value: HirId,
         is_const: bool,
+        span: Span,
+    },
+    Assign {
+        symbol: SymbolId,
+        value: HirId,
         span: Span,
     },
     Expr {

@@ -27,6 +27,8 @@ pub struct Symbol {
     pub ty: Type,
     pub origin: SymbolOrigin,
     pub scope: ScopeId,
+    /// Bindings declared with `::` — cannot be mutated by [`crate::vm::bytecode::Op::Assign`].
+    pub is_const: bool,
 }
 
 #[derive(Debug, Default)]
@@ -49,7 +51,14 @@ impl SymbolTable {
         id
     }
 
-    pub fn define(&mut self, scope_id: ScopeId, name: String, ty: Type, origin: SymbolOrigin) -> SymbolId {
+    pub fn define(
+        &mut self,
+        scope_id: ScopeId,
+        name: String,
+        ty: Type,
+        origin: SymbolOrigin,
+        is_const: bool,
+    ) -> SymbolId {
         let id = SymbolId(self.symbols.len() as u32);
         self.symbols.push(Symbol {
             id,
@@ -57,6 +66,7 @@ impl SymbolTable {
             ty,
             origin,
             scope: scope_id,
+            is_const,
         });
         self.scopes[scope_id.0 as usize].symbols.insert(name, id);
         id

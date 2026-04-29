@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::Type,
-    ast::{Ast, AstNode, BinaryOp},
+    ast::{Ast, AstNode, BinaryOp, UnaryOp},
     builtins::default_registry,
-    hir::{BinOp, Hir, HirExpr, HirStmt, ScopeId, SymbolId, SymbolOrigin, SymbolTable},
+    hir::{BinOp, Hir, HirExpr, HirStmt, ScopeId, SymbolId, SymbolOrigin, SymbolTable, UnaryOp as HirUnaryOp},
 };
 use foundation::{
     arena::Arena,
@@ -70,11 +70,20 @@ impl<'a> Lowering<'a> {
             } => {
                 let value = self.lower_expr(*value);
                 let symbol_ty = self.resolve_decl_type(*ty);
-                let symbol = self.bind_symbol(*name, symbol_ty);
+                let symbol = self.bind_symbol(*name, symbol_ty, *is_const);
                 HirStmt::Let {
                     symbol,
                     value,
                     is_const: *is_const,
+                    span: *span,
+                }
+            }
+            AstNode::AssignStmt { target, value, span } => {
+                let value = self.lower_expr(*value);
+                let symbol = self.resolve_assignment_target(*target);
+                HirStmt::Assign {
+                    symbol,
+                    value,
                     span: *span,
                 }
             }
@@ -93,7 +102,7 @@ impl<'a> Lowering<'a> {
         }
     }
 
-    fn bind_symbol(&mut self, id: ArenaId, ty: Type) -> SymbolId {
+    fn bind_symbol(&mut self, id: ArenaId, ty: Type, is_const: bool) -> SymbolId {
         let Some(AstNode::Identifier { name, .. }) = self.ast.get(id) else {
             self.push_error("invalid declaration name", self.node_span(id));
             return self.symbols.define(
@@ -101,6 +110,7 @@ impl<'a> Lowering<'a> {
                 "<invalid>".to_string(),
                 ty,
                 SymbolOrigin::User,
+                is_const,
             );
         };
 
@@ -116,7 +126,25 @@ impl<'a> Lowering<'a> {
             name.clone(),
             ty,
             SymbolOrigin::User,
+            is_const,
         )
+    }
+
+    fn resolve_assignment_target(&mut self, id: ArenaId) -> SymbolId {
+        let Some(AstNode::Identifier { name, span }) = self.ast.get(id) else {
+            self.push_error("invalid assignment target", self.node_span(id));
+            return self
+                .symbols
+                .define(self.current_scope, "<invalid_assign>".to_string(), Type::Unknown, SymbolOrigin::User, false);
+        };
+        match self.symbols.resolve(self.current_scope, name) {
+            Some(symbol_id) => symbol_id,
+            None => {
+                self.push_error(format!("undefined symbol '{name}'"), *span);
+                self.symbols
+                    .define(self.current_scope, "<undefined_assign>".to_string(), Type::Unknown, SymbolOrigin::User, false)
+            }
+        }
     }
 
     fn lower_expr(&mut self, id: ArenaId) -> ArenaId {
@@ -143,6 +171,13 @@ impl<'a> Lowering<'a> {
             }
             AstNode::BoolLiteral { value, .. } => {
                 self.insert_hir_expr(HirExpr::Bool(*value), self.node_span(id))
+            }
+            AstNode::UnaryExpr { op, operand, .. } => {
+                let operand = self.lower_expr(*operand);
+                let op = match op {
+                    UnaryOp::Neg => HirUnaryOp::Neg,
+                };
+                self.insert_hir_expr(HirExpr::Unary { op, operand }, self.node_span(id))
             }
             AstNode::Identifier { name, span } => match self.symbols.resolve(self.current_scope, name) {
                 Some(symbol_id) => self.insert_hir_expr(HirExpr::Var(symbol_id), self.node_span(id)),
@@ -190,7 +225,7 @@ impl<'a> Lowering<'a> {
                 self.push_error("type name is not an expression", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
-            AstNode::LetDecl { .. } | AstNode::ExprStmt { .. } => {
+            AstNode::LetDecl { .. } | AstNode::AssignStmt { .. } | AstNode::ExprStmt { .. } => {
                 self.push_error("statement used where expression expected", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
@@ -254,6 +289,7 @@ fn init_global_scope(symbols: &mut SymbolTable, registry: &crate::builtins::Buil
             builtin.name.to_string(),
             builtin.ty.clone(),
             SymbolOrigin::Builtin,
+            true,
         );
     }
     scope_id
@@ -261,10 +297,30 @@ fn init_global_scope(symbols: &mut SymbolTable, registry: &crate::builtins::Buil
 
 /// Lexer includes surrounding `"`; runtime `print` expects the decoded content (no delimiter).
 fn unquote_string_literal(raw: &str) -> String {
-    raw.strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-        .map(ToString::to_string)
-        .unwrap_or_else(|| raw.to_string())
+    let Some(inner) = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+        return raw.to_string();
+    };
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 fn map_type_name(name: &str) -> Option<Type> {

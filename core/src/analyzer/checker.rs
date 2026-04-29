@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::Type as AnalyzerType,
-    hir::{BinOp, Hir, HirExpr, HirId, HirStmt, SymbolTable},
+    hir::{BinOp, Hir, HirExpr, HirId, HirStmt, SymbolTable, UnaryOp},
 };
 use foundation::{
     diagnostics::{Diagnostic, Diagnostics, Severity},
@@ -71,6 +71,28 @@ impl<'a> Checker<'a> {
                 final_ty
             }
             HirStmt::Expr { expr, span } => self.check_expr(*expr, *span),
+            HirStmt::Assign {
+                symbol,
+                value,
+                span,
+            } => {
+                let expected = self
+                    .symbols
+                    .symbol(*symbol)
+                    .map(|s| (s.ty.clone(), s.is_const))
+                    .unwrap_or((AnalyzerType::Unknown, false));
+                if expected.1 {
+                    self.push_error("cannot assign to constant", *span);
+                }
+                let actual = self.check_expr_expected(*value, *span, Some(&expected.0));
+                if !is_assignable(&expected.0, &actual) {
+                    self.push_error(
+                        format!("cannot assign value of type {actual:?} to {:?}", expected.0),
+                        *span,
+                    );
+                }
+                expected.0
+            }
             HirStmt::Invalid { span } => {
                 self.push_error("invalid statement", *span);
                 AnalyzerType::Unknown
@@ -103,6 +125,13 @@ impl<'a> Checker<'a> {
                 .symbol(*symbol_id)
                 .map(|s| s.ty.clone())
                 .unwrap_or(AnalyzerType::Unknown),
+            Some(HirExpr::Unary {
+                op: UnaryOp::Neg,
+                operand,
+            }) => {
+                let operand_ty = self.check_expr(*operand, span);
+                self.check_unary_neg(operand_ty, span)
+            }
             Some(HirExpr::Binary { op, lhs, rhs }) => {
                 let left_ty = self.check_expr(*lhs, span);
                 let right_ty = self.check_expr(*rhs, span);
@@ -121,6 +150,30 @@ impl<'a> Checker<'a> {
 
         self.model.types.insert(id, ty.clone());
         ty
+    }
+
+    fn check_unary_neg(&mut self, operand_ty: AnalyzerType, span: Span) -> AnalyzerType {
+        match operand_ty {
+            AnalyzerType::Int { signed: true, bits } => AnalyzerType::Int { signed: true, bits },
+            AnalyzerType::Float { bits } => AnalyzerType::Float { bits },
+            AnalyzerType::Int {
+                signed: false,
+                bits,
+            } => {
+                self.push_error(
+                    format!("unary '-' is invalid for unsigned integer u{bits}"),
+                    span,
+                );
+                AnalyzerType::Unknown
+            }
+            other => {
+                self.push_error(
+                    format!("unary '-' expects numeric operand, got {other:?}"),
+                    span,
+                );
+                AnalyzerType::Unknown
+            }
+        }
     }
 
     fn check_binary(

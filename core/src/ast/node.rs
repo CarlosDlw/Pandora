@@ -8,6 +8,11 @@ pub enum BinaryOp {
     Divide,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AstNode {
     Invalid {
@@ -41,6 +46,11 @@ pub enum AstNode {
         value: bool,
         span: Span,
     },
+    UnaryExpr {
+        op: UnaryOp,
+        operand: ArenaId,
+        span: Span,
+    },
     BinaryExpr {
         op: BinaryOp,
         left: ArenaId,
@@ -57,6 +67,11 @@ pub enum AstNode {
         ty: Option<ArenaId>,
         value: ArenaId,
         is_const: bool,
+        span: Span,
+    },
+    AssignStmt {
+        target: ArenaId,
+        value: ArenaId,
         span: Span,
     },
     ExprStmt {
@@ -76,9 +91,11 @@ impl AstNode {
             | Self::StringLiteral { span, .. }
             | Self::CharLiteral { span, .. }
             | Self::BoolLiteral { span, .. }
+            | Self::UnaryExpr { span, .. }
             | Self::BinaryExpr { span, .. }
             | Self::CallExpr { span, .. }
             | Self::LetDecl { span, .. }
+            | Self::AssignStmt { span, .. }
             | Self::ExprStmt { span, .. } => *span,
         }
     }

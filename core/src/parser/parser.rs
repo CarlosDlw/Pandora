@@ -62,6 +62,9 @@ impl Parser {
         if self.is_declaration_start() {
             return self.parse_let_decl();
         }
+        if self.is_assignment_start() {
+            return self.parse_assign_stmt();
+        }
 
         let expr = self.parse_expression();
         let span = self.node_span(expr);
@@ -145,6 +148,39 @@ impl Parser {
         })
     }
 
+    fn parse_assign_stmt(&mut self) -> ArenaId {
+        let name_token = match self.current() {
+            Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+            _ => {
+                let span = self.current_span_or_eof();
+                self.push_error("expected identifier in assignment", span);
+                self.synchronize();
+                return self.invalid_node(span);
+            }
+        };
+        self.bump();
+
+        let target = self.insert_node(AstNode::Identifier {
+            name: name_token.lexeme,
+            span: name_token.span,
+        });
+
+        if !self.consume_if(TokenKind::Assign) {
+            let span = self.current_span_or_eof();
+            self.push_error("expected '=' in assignment", span);
+            self.synchronize();
+            return self.invalid_node(name_token.span);
+        }
+
+        let value = self.parse_expression();
+        let span = merge_span(name_token.span, self.node_span(value));
+        self.insert_node(AstNode::AssignStmt {
+            target,
+            value,
+            span,
+        })
+    }
+
     fn is_declaration_start(&self) -> bool {
         matches!(
             (self.peek_kind(0), self.peek_kind(1)),
@@ -152,6 +188,13 @@ impl Parser {
                 Some(TokenKind::Identifier),
                 Some(TokenKind::Colon | TokenKind::DoubleColon | TokenKind::InferAssign)
             )
+        )
+    }
+
+    fn is_assignment_start(&self) -> bool {
+        matches!(
+            (self.peek_kind(0), self.peek_kind(1)),
+            (Some(TokenKind::Identifier), Some(TokenKind::Assign))
         )
     }
 

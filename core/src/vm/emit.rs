@@ -6,8 +6,11 @@ use foundation::{
 };
 
 use crate::{
-    analyzer::SemanticModel,
-    hir::{BinOp, Hir, HirExpr, HirId, HirStmt},
+    analyzer::{SemanticModel, Type},
+    hir::{
+        BinOp, Hir, HirExpr, HirId, HirStmt, UnaryOp as HirUnaryOp,
+    },
+    integer_lit::{bytecode_int_from_checked_literal, literal_u128, IntConst},
 };
 
 use super::{
@@ -35,7 +38,10 @@ pub fn compile_program(hir: &Hir, model: &SemanticModel) -> (Chunk, Diagnostics)
 
 fn stmt_primary_span(stmt: &HirStmt) -> Span {
     match stmt {
-        HirStmt::Let { span, .. } | HirStmt::Expr { span, .. } | HirStmt::Invalid { span } => *span,
+        HirStmt::Let { span, .. }
+        | HirStmt::Assign { span, .. }
+        | HirStmt::Expr { span, .. }
+        | HirStmt::Invalid { span } => *span,
     }
 }
 
@@ -58,7 +64,13 @@ fn emit_stmt(
             symbol, value, span, ..
         } => {
             emit_expr(hir, model, *value, b, diagnostics);
-            b.emit(Op::Store(*symbol), *span);
+            b.emit(Op::Bind(*symbol), *span);
+        }
+        HirStmt::Assign {
+            symbol, value, span, ..
+        } => {
+            emit_expr(hir, model, *value, b, diagnostics);
+            b.emit(Op::Assign(*symbol), *span);
         }
         HirStmt::Expr { expr, span } => {
             emit_expr(hir, model, *expr, b, diagnostics);
@@ -85,10 +97,25 @@ fn emit_expr(
     };
 
     match expr {
-        HirExpr::Int(raw) => match parse_int_literal(raw, span, diagnostics) {
-            Some(v) => b.emit(Op::ConstInt(v), span),
-            None => {}
-        },
+        HirExpr::Int(raw) => {
+            let hir_ty = model
+                .types
+                .get(&id)
+                .cloned()
+                .unwrap_or(Type::Unknown);
+
+            match emit_int_const(raw, &hir_ty) {
+                Ok(IntConst::Signed(v)) => b.emit(Op::ConstI128(v), span),
+                Ok(IntConst::Unsigned(v)) => b.emit(Op::ConstU128(v), span),
+                Err(msg) => {
+                    diagnostics.push(Diagnostic::new(
+                        format!("integer literal `{raw}`: {msg}"),
+                        span,
+                        Severity::Error,
+                    ));
+                }
+            }
+        }
         HirExpr::Float(raw) => match raw.parse::<f64>() {
             Ok(v) => b.emit(Op::ConstFloat(v), span),
             Err(_) => {
@@ -103,6 +130,13 @@ fn emit_expr(
         HirExpr::Str(s) => b.emit(Op::ConstStr(s.clone()), span),
         HirExpr::Char(c) => b.emit(Op::ConstChar(*c), span),
         HirExpr::Var(sym) => b.emit(Op::Load(*sym), span),
+        HirExpr::Unary {
+            op: HirUnaryOp::Neg,
+            operand,
+        } => {
+            emit_expr(hir, model, *operand, b, diagnostics);
+            b.emit(Op::Neg, expr_span(hir, id));
+        }
         HirExpr::Binary {
             op: binop,
             lhs,
@@ -110,12 +144,12 @@ fn emit_expr(
         } => {
             emit_expr(hir, model, *lhs, b, diagnostics);
             emit_expr(hir, model, *rhs, b, diagnostics);
-            let span = expr_span(hir, id);
+            let span_merge = expr_span(hir, id);
             match binop {
-                BinOp::Add => b.emit(Op::Add, span),
-                BinOp::Subtract => b.emit(Op::Sub, span),
-                BinOp::Multiply => b.emit(Op::Mul, span),
-                BinOp::Divide => b.emit(Op::Div, span),
+                BinOp::Add => b.emit(Op::Add, span_merge),
+                BinOp::Subtract => b.emit(Op::Sub, span_merge),
+                BinOp::Multiply => b.emit(Op::Mul, span_merge),
+                BinOp::Divide => b.emit(Op::Div, span_merge),
             }
         }
         HirExpr::Call { callee, args } => {
@@ -139,16 +173,21 @@ fn emit_expr(
     }
 }
 
-fn parse_int_literal(raw: &str, span: Span, diagnostics: &mut Diagnostics) -> Option<i64> {
-    match raw.parse::<i64>() {
-        Ok(v) => Some(v),
-        Err(_) => {
-            diagnostics.push(Diagnostic::new(
-                format!("invalid integer literal `{raw}` in bytecode"),
-                span,
-                Severity::Error,
-            ));
-            None
-        }
+/// Integer literals use the semantic type produced by analyze; fallback matches checker inference ladder.
+fn emit_int_const(raw: &str, hir_ty: &Type) -> Result<IntConst, &'static str> {
+    match hir_ty {
+        Type::Unknown => fallback_inference_int(raw),
+        ty @ Type::Int { .. } => bytecode_int_from_checked_literal(raw, ty),
+        // Defensive fallback if analyzer and HIR ever diverge:
+        _ => fallback_inference_int(raw),
+    }
+}
+
+fn fallback_inference_int(raw: &str) -> Result<IntConst, &'static str> {
+    let parsed = literal_u128(raw)?;
+    if parsed <= i128::MAX as u128 {
+        Ok(IntConst::Signed(parsed as i128))
+    } else {
+        Ok(IntConst::Unsigned(parsed))
     }
 }

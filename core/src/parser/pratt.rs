@@ -1,5 +1,5 @@
 use crate::{
-    ast::{AstNode, BinaryOp},
+    ast::{AstNode, BinaryOp, UnaryOp},
     lexer::TokenKind,
 };
 use foundation::ids::ArenaId;
@@ -118,6 +118,17 @@ impl Parser {
                 self.insert_node(AstNode::BoolLiteral {
                     value: token.lexeme == "true",
                     span: token.span,
+                })
+            }
+            TokenKind::Minus => {
+                let op_span = token.span;
+                self.bump();
+                let operand = self.parse_expression_bp(Precedence::Highest);
+                let span = merge_pair(op_span, self.node_span(operand));
+                self.insert_node(AstNode::UnaryExpr {
+                    op: UnaryOp::Neg,
+                    operand,
+                    span,
                 })
             }
             TokenKind::LeftParen => {

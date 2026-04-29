@@ -72,7 +72,7 @@ mod tests {
     #[test]
     fn finish_preserves_parallel_vectors() {
         let mut b = ChunkBuilder::new();
-        b.emit(Op::ConstInt(1), junk_span());
+        b.emit(Op::ConstI128(1), junk_span());
         b.emit(Op::Pop, junk_span());
         let chunk = b.finish();
         assert_eq!(chunk.code.len(), chunk.spans.len());
