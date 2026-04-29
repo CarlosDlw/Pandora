@@ -99,7 +99,7 @@ impl Pipeline {
         let file_ids: Vec<FileId> = db.vfs().iter().map(|(file_id, _)| file_id).collect();
         for file_id in file_ids {
             let file = db.vfs().get_file_required(file_id)?;
-            let diagnostics = frontend.compile_file(file_id, &file.contents);
+            let diagnostics = frontend.compile_file(file_id, &file.contents, db.builtins_any());
             db.syntax_cache_mut().set(file_id, CacheId::from_u32(1));
             db.semantic_cache_mut().set(file_id, CacheId::from_u32(1));
             db.set_diagnostics(file_id, diagnostics);
@@ -133,7 +133,12 @@ mod tests {
     struct RecordingFrontend;
 
     impl PandoraFrontend for RecordingFrontend {
-        fn compile_file(&mut self, _file_id: FileId, _source: &str) -> Diagnostics {
+        fn compile_file(
+            &mut self,
+            _file_id: FileId,
+            _source: &str,
+            _builtins: Option<&std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+        ) -> Diagnostics {
             Diagnostics::new()
         }
     }

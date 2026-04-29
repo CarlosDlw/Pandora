@@ -15,3 +15,26 @@ print(nums)
 for n in nums {
     print(n)
 }
+
+i: i32 = 8
+print(i.add(2), i.checked_mul(3), i.to_str())
+
+f: f64 = 3.5
+print(f.sqrt(), f.sin(), f.is_finite(), f.to_i32(), f.to_str())
+
+b: bool = true
+print(b.and(false), b.or(false), b.xor(false), b.not(), b.eq(true), b.to_i32(), b.to_str())
+
+c: char = 'a'
+print(c.eq('a'), c.is_alpha(), c.to_upper(), c.to_lower(), c.to_i32(), c.to_str())
+
+s: str = " 42 "
+print(s.trim().to_i32(), s.contains("4"), s.char_at(1), s.to_upper(), s.reverse())
+
+arrm: [i32] = [1, 2, 3]
+print(arrm.len(), arrm.get(1), arrm.reverse(), arrm.slice(0, 2))
+
+fn addm(a: i32, b: i32) -> i32 {
+    return a + b
+}
+print(addm.arity(), addm(2, 4))

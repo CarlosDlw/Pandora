@@ -431,3 +431,111 @@ fn check_mode_reports_catch_without_required_return_value() {
                 .and(contains("finish catch blocks with `return value`")),
         );
 }
+
+#[test]
+fn check_mode_reports_unknown_integer_method() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"x: i32 = 1\nprint(x.push(1))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("unknown method 'push'"));
+}
+
+#[test]
+fn check_mode_reports_integer_method_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"x: i32 = 1\nprint(x.add())\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument count for method 'add'"));
+}
+
+#[test]
+fn check_mode_reports_float_method_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"x: f64 = 1.5\nprint(x.pow())\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument count for method 'pow'"));
+}
+
+#[test]
+fn check_mode_reports_bool_method_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"x: bool = true\nprint(x.and())\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument count for method 'and'"));
+}
+
+#[test]
+fn check_mode_reports_char_method_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"c: char = 'a'\nprint(c.eq())\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument count for method 'eq'"));
+}
+
+#[test]
+fn check_mode_reports_str_method_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"s: str = \"abc\"\nprint(s.slice(0))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument count for method 'slice'"));
+}
+
+#[test]
+fn check_mode_reports_array_method_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"a: [i32] = [1,2,3]\nprint(a.get())\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument count for method 'get'"));
+}
+
+#[test]
+fn check_mode_reports_function_method_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"fn add(a: i32, b: i32) -> i32 { return a + b }\nprint(add.arity(1))\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument count for method 'arity'"));
+}

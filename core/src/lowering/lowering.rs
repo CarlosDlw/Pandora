@@ -21,7 +21,15 @@ use foundation::{
 };
 
 pub fn lower(ast: &Ast) -> (Hir, SymbolTable, Diagnostics) {
+    lower_with_registry(ast, &default_registry())
+}
+
+pub fn lower_with_registry(
+    ast: &Ast,
+    registry: &crate::builtins::BuiltinRegistry,
+) -> (Hir, SymbolTable, Diagnostics) {
     let mut lowering = Lowering::new(ast);
+    lowering.init_builtins(registry);
     lowering.lower_program();
     (lowering.hir, lowering.symbols, lowering.diagnostics)
 }
@@ -39,7 +47,7 @@ struct Lowering<'a> {
 impl<'a> Lowering<'a> {
     fn new(ast: &'a Ast) -> Self {
         let mut symbols = SymbolTable::new();
-        let root_scope = init_global_scope(&mut symbols, &default_registry());
+        let root_scope = symbols.create_scope(None);
         Self {
             ast,
             hir: Hir {
@@ -54,6 +62,10 @@ impl<'a> Lowering<'a> {
             predeclared_fns: HashMap::new(),
             discard_counter: 0,
         }
+    }
+
+    fn init_builtins(&mut self, registry: &crate::builtins::BuiltinRegistry) {
+        init_global_scope(&mut self.symbols, self.current_scope, registry);
     }
 
     fn lower_program(&mut self) {
@@ -917,9 +929,12 @@ fn map_compound_op(op: CompoundOp) -> BinOp {
     }
 }
 
-fn init_global_scope(symbols: &mut SymbolTable, registry: &crate::builtins::BuiltinRegistry) -> ScopeId {
-    let scope_id = symbols.create_scope(None);
-    for builtin in &registry.items {
+fn init_global_scope(
+    symbols: &mut SymbolTable,
+    scope_id: ScopeId,
+    registry: &crate::builtins::BuiltinRegistry,
+) {
+    for builtin in &registry.functions {
         symbols.define(
             scope_id,
             builtin.name.to_string(),
@@ -928,7 +943,6 @@ fn init_global_scope(symbols: &mut SymbolTable, registry: &crate::builtins::Buil
             true,
         );
     }
-    scope_id
 }
 
 /// Lexer includes surrounding `"`; runtime `print` expects the decoded content (no delimiter).

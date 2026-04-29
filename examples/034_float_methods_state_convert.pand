@@ -1,0 +1,7 @@
+a: f32 = 3.75
+b: f64 = (-1.0).sqrt()
+c: f64 = 0.0.log()
+
+print(a.is_nan(), a.is_inf(), a.is_finite())
+print(b.is_nan(), c.is_inf(), c.is_finite())
+print(a.to_i32(), a.to_str())

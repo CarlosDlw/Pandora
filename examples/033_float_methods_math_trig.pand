@@ -1,0 +1,8 @@
+x: f64 = 4.5
+y: f64 = 2.0
+
+print(x.add(y), x.sub(y), x.mul(y), x.div(y), x.mod(y), x.neg())
+print(x.eq(y), x.lt(y), x.gt(y), x.cmp(y))
+print(x.abs(), x.sqrt(), x.pow(y), x.exp(), x.log(), x.log10())
+print(x.floor(), x.ceil(), x.round(), x.trunc(), x.fract())
+print(x.sin(), x.cos(), x.tan(), x.asin(), x.acos(), x.atan())

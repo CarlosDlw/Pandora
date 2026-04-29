@@ -1,0 +1,5 @@
+arr: [i32] = [10, 20, 30]
+
+print(arr.pop())
+print(arr.remove(1), arr.remove(10))
+print(arr.push(99), arr.insert(1, 77), arr.set(0, 55), arr.clear())

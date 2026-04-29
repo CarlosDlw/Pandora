@@ -1,0 +1,10 @@
+s: str = "  Hello,World  "
+
+print(s.len(), s.is_empty(), s.char_at(2))
+print(s.contains("Hello"), s.starts_with("  He"), s.ends_with("  "))
+print(s.find("World"), s.rfind("l"))
+print(s.slice(2, 7))
+print(s.split(","))
+print(s.replace("World", "Pandora"))
+print(s.trim(), s.trim_start(), s.trim_end())
+print(s.to_upper(), s.to_lower(), s.reverse())

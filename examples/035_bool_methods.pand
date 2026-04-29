@@ -1,0 +1,5 @@
+a: bool = true
+b: bool = false
+
+print(a.and(b), a.or(b), a.xor(b), a.not(), a.eq(b))
+print(a.to_i32(), b.to_i32(), a.to_str(), b.to_str())

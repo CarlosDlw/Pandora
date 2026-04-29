@@ -8,14 +8,24 @@ use crate::{
 
 /// Compiles source for a [`FileId`]. Implemented in the `core` crate.
 pub trait PandoraFrontend {
-    fn compile_file(&mut self, file_id: FileId, source: &str) -> Diagnostics;
+    fn compile_file(
+        &mut self,
+        file_id: FileId,
+        source: &str,
+        builtins: Option<&std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+    ) -> Diagnostics;
 }
 
 impl<F> PandoraFrontend for F
 where
-    F: FnMut(FileId, &str) -> Diagnostics,
+    F: FnMut(FileId, &str, Option<&std::sync::Arc<dyn std::any::Any + Send + Sync>>) -> Diagnostics,
 {
-    fn compile_file(&mut self, file_id: FileId, source: &str) -> Diagnostics {
-        (*self)(file_id, source)
+    fn compile_file(
+        &mut self,
+        file_id: FileId,
+        source: &str,
+        builtins: Option<&std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+    ) -> Diagnostics {
+        (*self)(file_id, source, builtins)
     }
 }

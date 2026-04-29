@@ -604,6 +604,18 @@ fn emit_expr(
             method,
             args,
         } => {
+            if let Some(symbol_id) = model.method_builtin_targets.get(&id).copied() {
+                b.emit(Op::Load(symbol_id), span);
+                emit_expr(hir, model, *receiver, b, diagnostics, method_table);
+                for arg in args {
+                    emit_expr(hir, model, *arg, b, diagnostics, method_table);
+                }
+                match u8::try_from(args.len() + 1) {
+                    Ok(argc) => b.emit(Op::CallValue(argc), span),
+                    Err(_) => diagnostics.push(Diagnostic::new("too many arguments for builtin method call", span, Severity::Error)),
+                }
+                return;
+            }
             let recv_ty = model.types.get(receiver).cloned().unwrap_or(Type::Unknown);
             let Type::Struct(struct_id) = recv_ty else {
                 diagnostics.push(Diagnostic::new("method call receiver is not struct", span, Severity::Error));

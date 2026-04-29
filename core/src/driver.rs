@@ -5,15 +5,20 @@ use foundation::{
 };
 
 use crate::{
-    analyzer::analyze,
+    analyzer::analyze_with_registry,
+    builtins::{default_registry, BuiltinRegistry},
     lexer::lex,
-    lowering::lower,
+    lowering::lower_with_registry,
     parser::parse,
     vm::{compile_program, execute},
 };
 
 /// End-to-end compile/execute for one source file; always returns accumulated diagnostics.
 pub fn compile_file(file_id: FileId, source: &str) -> Diagnostics {
+    compile_file_with_registry(file_id, source, &default_registry())
+}
+
+pub fn compile_file_with_registry(file_id: FileId, source: &str, registry: &BuiltinRegistry) -> Diagnostics {
     let lex_output = lex(file_id, source);
     let mut diagnostics = lex_output.diagnostics;
 
@@ -23,13 +28,13 @@ pub fn compile_file(file_id: FileId, source: &str) -> Diagnostics {
         return diagnostics;
     }
 
-    let (hir, mut symbols, lower_diagnostics) = lower(&ast);
+    let (hir, mut symbols, lower_diagnostics) = lower_with_registry(&ast, registry);
     diagnostics.extend(lower_diagnostics);
     if diagnostics.has_errors() {
         return diagnostics;
     }
 
-    let (semantic_model, analyze_diagnostics) = analyze(&hir, &mut symbols);
+    let (semantic_model, analyze_diagnostics) = analyze_with_registry(&hir, &mut symbols, registry);
     diagnostics.extend(analyze_diagnostics);
     if diagnostics.has_errors() {
         return diagnostics;
@@ -52,7 +57,17 @@ pub fn compile_file(file_id: FileId, source: &str) -> Diagnostics {
 pub struct CoreFrontend;
 
 impl PandoraFrontend for CoreFrontend {
-    fn compile_file(&mut self, file_id: FileId, source: &str) -> Diagnostics {
+    fn compile_file(
+        &mut self,
+        file_id: FileId,
+        source: &str,
+        builtins: Option<&std::sync::Arc<dyn std::any::Any + Send + Sync>>,
+    ) -> Diagnostics {
+        if let Some(any_registry) = builtins {
+            if let Some(registry) = any_registry.downcast_ref::<BuiltinRegistry>() {
+                return compile_file_with_registry(file_id, source, registry);
+            }
+        }
         compile_file(file_id, source)
     }
 }

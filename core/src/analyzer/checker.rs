@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::Type as AnalyzerType,
+    builtins::{default_registry, BuiltinRegistry},
     hir::{BinOp, Hir, HirExpr, HirId, HirStmt, ScopeId, SymbolId, SymbolTable, UnaryOp},
     integer_lit::{literal_f64, literal_u128},
 };
@@ -13,9 +14,18 @@ use foundation::{
 #[derive(Debug, Default)]
 pub struct SemanticModel {
     pub types: HashMap<HirId, AnalyzerType>,
+    pub method_builtin_targets: HashMap<HirId, SymbolId>,
 }
 
 pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnostics) {
+    analyze_with_registry(hir, symbols, &default_registry())
+}
+
+pub fn analyze_with_registry(
+    hir: &Hir,
+    symbols: &mut SymbolTable,
+    registry: &BuiltinRegistry,
+) -> (SemanticModel, Diagnostics) {
     let mut checker = Checker {
         hir,
         symbols,
@@ -28,6 +38,7 @@ pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnost
         trait_methods: HashMap::new(),
         impl_methods: HashMap::new(),
         fn_required_params: HashMap::new(),
+        builtins: registry,
     };
     checker.check_program();
     (checker.model, checker.diagnostics)
@@ -45,6 +56,7 @@ struct Checker<'a> {
     trait_methods: HashMap<SymbolId, Vec<(String, Vec<AnalyzerType>, AnalyzerType, bool)>>,
     impl_methods: HashMap<(SymbolId, Option<SymbolId>, String, bool), (Vec<AnalyzerType>, AnalyzerType)>,
     fn_required_params: HashMap<SymbolId, usize>,
+    builtins: &'a BuiltinRegistry,
 }
 
 impl<'a> Checker<'a> {
@@ -681,8 +693,84 @@ impl<'a> Checker<'a> {
                 args,
             }) => {
                 let recv_ty = self.check_expr(*receiver, span);
+                if let Some(builtin_method) = self.builtins.method_for_type(&recv_ty, method) {
+                    if let Some(symbol_id) = self.find_builtin_symbol_by_name(builtin_method.symbol_name) {
+                        self.model.method_builtin_targets.insert(id, symbol_id);
+                    } else {
+                        self.push_error(
+                            format!("internal error: builtin method symbol '{}' not registered", builtin_method.symbol_name),
+                            span,
+                        );
+                    }
+                    let is_fn_call_like = matches!(recv_ty, AnalyzerType::Function { .. })
+                        && (*method == "call" || *method == "partial");
+                    if !is_fn_call_like && builtin_method.params.len() != args.len() {
+                        self.push_error(
+                            format!(
+                                "invalid argument count for method '{}': expected {}, got {}",
+                                method,
+                                builtin_method.params.len(),
+                                args.len()
+                            ),
+                            span,
+                        );
+                    }
+                    for (idx, arg) in args.iter().enumerate() {
+                        let mut expected = builtin_method
+                            .params
+                            .get(idx)
+                            .cloned()
+                            .unwrap_or(AnalyzerType::Unknown);
+                        if is_fn_call_like && idx >= builtin_method.params.len() {
+                            expected = AnalyzerType::Any;
+                        }
+                        if matches!(recv_ty, AnalyzerType::Function { .. })
+                            && *method == "compose"
+                            && idx == 0
+                        {
+                            expected = recv_ty.clone();
+                        }
+                        if matches!(expected, AnalyzerType::Any) {
+                            if let AnalyzerType::Array(inner) = &recv_ty {
+                                expected = *inner.clone();
+                            }
+                        }
+                        let actual = self.check_expr_expected(*arg, span, Some(&expected));
+                        if !is_assignable(&expected, &actual) {
+                            self.push_error(
+                                format!("invalid argument type at position {idx}: expected {expected:?}, got {actual:?}"),
+                                span,
+                            );
+                        }
+                    }
+                    let resolved_ret = match &builtin_method.ret {
+                        AnalyzerType::Any
+                            if matches!(recv_ty, AnalyzerType::Function { .. })
+                                && *method == "call" =>
+                        {
+                            if let AnalyzerType::Function { ret, .. } = &recv_ty {
+                                *ret.clone()
+                            } else {
+                                AnalyzerType::Unknown
+                            }
+                        }
+                        AnalyzerType::Any => recv_ty.clone(),
+                        AnalyzerType::Tuple(items) if items.len() == 2 && items[0] == AnalyzerType::Any && items[1] == AnalyzerType::Err => {
+                            let value_ty = match &recv_ty {
+                                AnalyzerType::Array(inner) => *inner.clone(),
+                                _ => recv_ty.clone(),
+                            };
+                            AnalyzerType::Tuple(vec![value_ty, AnalyzerType::Err])
+                        }
+                        other => other.clone(),
+                    };
+                    return resolved_ret;
+                }
                 let AnalyzerType::Struct(struct_id) = recv_ty.clone() else {
-                    self.push_error("instance method call requires struct receiver", span);
+                    self.push_error(
+                        format!("unknown method '{}' for receiver type {:?}", method, recv_ty),
+                        span,
+                    );
                     return AnalyzerType::Unknown;
                 };
                 let candidates = self
@@ -1335,6 +1423,19 @@ impl<'a> Checker<'a> {
         };
         let sym = self.symbols.symbol(*symbol_id)?;
         (sym.origin == crate::hir::SymbolOrigin::Builtin).then(|| sym.name.clone())
+    }
+
+    fn find_builtin_symbol_by_name(&self, name: &str) -> Option<SymbolId> {
+        for idx in 0..u32::MAX {
+            let id = SymbolId(idx);
+            let Some(sym) = self.symbols.symbol(id) else {
+                break;
+            };
+            if sym.origin == crate::hir::SymbolOrigin::Builtin && sym.name == name {
+                return Some(id);
+            }
+        }
+        None
     }
 
     fn check_special_builtin_contract(

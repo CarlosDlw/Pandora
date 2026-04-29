@@ -1,0 +1,10 @@
+x: u32 = 20
+y: u32 = 5
+
+print(x.wrapping_add(y), x.saturating_sub(y))
+ok := x.checked_add(y)
+print(ok.0, ok.1)
+
+z: i32 = -7
+print(z.to_i32(), z.to_bool(), z.to_str())
+print(x.to_u32(), x.to_i32(), x.to_f32(), x.to_str())

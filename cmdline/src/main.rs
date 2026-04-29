@@ -1,7 +1,8 @@
 use clap::{ArgGroup, CommandFactory, Parser};
-use core::analyzer::analyze;
+use core::analyzer::analyze_with_registry;
+use core::builtins::default_registry;
 use core::lexer::lex;
-use core::lowering::lower;
+use core::lowering::lower_with_registry;
 use core::parser::parse;
 use core::vm::{compile_program, execute};
 use foundation::diagnostics::Diagnostics;
@@ -56,6 +57,7 @@ fn main() -> ExitCode {
         }
     };
 
+    let builtins = default_registry();
     let output = lex(FileId::from_u32(0), &contents);
     let mut diagnostics = output.diagnostics;
 
@@ -83,7 +85,7 @@ fn main() -> ExitCode {
                 }
             }
         } else {
-            let (hir, symbols, lower_diagnostics) = lower(&ast);
+            let (hir, symbols, lower_diagnostics) = lower_with_registry(&ast, &builtins);
             diagnostics.extend(lower_diagnostics);
 
             if cli.hir {
@@ -98,7 +100,8 @@ fn main() -> ExitCode {
                 }
             } else {
                 let mut symbols = symbols;
-                let (semantic_model, analyze_diagnostics) = analyze(&hir, &mut symbols);
+                let (semantic_model, analyze_diagnostics) =
+                    analyze_with_registry(&hir, &mut symbols, &builtins);
                 diagnostics.extend(analyze_diagnostics);
 
                 if cli.check {

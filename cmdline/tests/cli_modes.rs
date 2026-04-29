@@ -550,3 +550,182 @@ fn runs_example_030_for_in_arrays() {
                 .and(contains("3")),
         );
 }
+
+#[test]
+fn runs_example_031_integer_methods_basics() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/031_integer_methods_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("13 7 30 3 1")
+                .and(contains("false true 1"))
+                .and(contains("false true false"))
+                .and(contains("-10 10")),
+        );
+}
+
+#[test]
+fn runs_example_032_integer_methods_checked_and_convert() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/032_integer_methods_checked_and_convert.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("25 15")
+                .and(contains("25 null"))
+                .and(contains("-7 true -7"))
+                .and(contains("20 20 20 20")),
+        );
+}
+
+#[test]
+fn runs_example_033_float_methods_math_trig() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/033_float_methods_math_trig.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("6.5 2.5 9 2.25 0.5 -4.5")
+                .and(contains("false false true 1"))
+                .and(contains("4 5 5 4 0.5")),
+        );
+}
+
+#[test]
+fn runs_example_034_float_methods_state_convert() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/034_float_methods_state_convert.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("false false true")
+                .and(contains("true true false"))
+                .and(contains("3 3.75")),
+        );
+}
+
+#[test]
+fn runs_example_035_bool_methods() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/035_bool_methods.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("false true true false false")
+                .and(contains("1 0 true false")),
+        );
+}
+
+#[test]
+fn runs_example_036_char_methods() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/036_char_methods.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true false true true false")
+                .and(contains("true false true"))
+                .and(contains("true"))
+                .and(contains("A a 97 a")),
+        );
+}
+
+#[test]
+fn runs_example_037_str_methods_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/037_str_methods_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("15 false (H, null)")
+                .and(contains("true true true"))
+                .and(contains("8 11"))
+                .and(contains("Hello"))
+                .and(contains("HELLO,WORLD"))
+                .and(contains("  dlroW,olleH  ")),
+        );
+}
+
+#[test]
+fn runs_example_038_str_methods_convert() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/038_str_methods_convert.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("(123, null)")
+                .and(contains("(3.14, null)"))
+                .and(contains("(0, err(")),
+        );
+}
+
+#[test]
+fn runs_example_039_array_methods_access_search_utils() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/039_array_methods_access_search_utils.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("4 false (2, null)")
+                .and(contains("(null, err("))
+                .and(contains("1 false true"))
+                .and(contains("[1, 2, 1, 3]"))
+                .and(contains("[1, 1, 2, 3]"))
+                .and(contains("[1, 2]")),
+        );
+}
+
+#[test]
+fn runs_example_040_array_methods_modify() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/040_array_methods_modify.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("30")
+                .and(contains("(20, null)"))
+                .and(contains("(null, err(")),
+        );
+}
+
+#[test]
+fn runs_example_041_function_methods() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/041_function_methods.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("2")
+                .and(contains("5"))
+                .and(contains("<fn>")),
+        );
+}

@@ -1,0 +1,5 @@
+arr: [i32] = [3, 1, 2, 1]
+
+print(arr.len(), arr.is_empty(), arr.get(2), arr.get(10))
+print(arr.find(1), arr.contains(9), arr.contains(2))
+print(arr.reverse(), arr.sort(), arr.slice(1, 3))

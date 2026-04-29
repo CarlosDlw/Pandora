@@ -1,0 +1,8 @@
+c: char = 'a'
+d: char = '1'
+e: char = ' '
+
+print(c.eq('a'), c.is_digit(), c.is_alpha(), c.is_alnum(), c.is_whitespace())
+print(d.is_digit(), d.is_alpha(), d.is_alnum())
+print(e.is_whitespace())
+print(c.to_upper(), c.to_lower(), c.to_i32(), c.to_str())

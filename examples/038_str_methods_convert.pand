@@ -1,0 +1,7 @@
+a: str = "123"
+b: str = "3.14"
+c: str = "x"
+
+print(a.to_i32())
+print(b.to_f64())
+print(c.to_i32())

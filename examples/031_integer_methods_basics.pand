@@ -1,0 +1,10 @@
+a: i32 = 10
+b: i32 = 3
+
+print(a.add(b), a.sub(b), a.mul(b), a.div(b), a.mod(b))
+print(a.eq(b), a.gt(b), a.cmp(b))
+print(a.and(7), a.or(1), a.xor(15), a.not())
+print(a.shl(1), a.shr(1), a.rotl(2), a.rotr(2))
+print(a.min(b), a.max(b), a.clamp(0, 8))
+print(a.is_zero(), a.is_even(), a.is_odd())
+print(a.neg(), a.abs())

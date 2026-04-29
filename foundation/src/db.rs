@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::{
     diagnostics::Diagnostics,
@@ -45,12 +46,13 @@ impl SemanticCache {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Database {
     vfs: VirtualFileSystem,
     syntax_cache: SyntaxCache,
     semantic_cache: SemanticCache,
     diagnostics_by_file: HashMap<FileId, Diagnostics>,
+    builtins: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl Database {
@@ -96,6 +98,14 @@ impl Database {
 
     pub fn clear_diagnostics(&mut self, file_id: FileId) {
         self.diagnostics_by_file.remove(&file_id);
+    }
+
+    pub fn set_builtins_any(&mut self, builtins: Arc<dyn std::any::Any + Send + Sync>) {
+        self.builtins = Some(builtins);
+    }
+
+    pub fn builtins_any(&self) -> Option<&Arc<dyn std::any::Any + Send + Sync>> {
+        self.builtins.as_ref()
     }
 }
 

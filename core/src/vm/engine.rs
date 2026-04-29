@@ -509,7 +509,7 @@ impl<'a> Vm<'a> {
                     ));
                 }
 
-                let ret = dispatch_builtin(symbol.name.as_str(), &args, span)?;
+                let ret = dispatch_builtin(self, symbol.name.as_str(), &args, span)?;
                 self.stack.push(ret);
             }
             Op::CallValue(argc) => {
@@ -525,7 +525,7 @@ impl<'a> Vm<'a> {
                         let symbol = self.symbols.symbol(sym).ok_or_else(|| {
                             Diagnostic::new("unknown builtin symbol", span, Severity::Error)
                         })?;
-                        let ret = dispatch_builtin(symbol.name.as_str(), &args, span)?;
+                        let ret = dispatch_builtin(self, symbol.name.as_str(), &args, span)?;
                         self.stack.push(ret);
                     }
                     Value::Function {
@@ -1031,9 +1031,10 @@ impl<'a> Vm<'a> {
             Diagnostic::new("stack underflow (internal bytecode error)", span, Severity::Error)
         })
     }
+
 }
 
-fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
     match name {
         "print" => {
             let line = args
@@ -1168,8 +1169,511 @@ fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Dia
             };
             Ok(Value::Str(canonical_type_name(arg)))
         }
+        name if name.starts_with("__meth_is_") || name.starts_with("__meth_iu_") => {
+            dispatch_integer_method(name, args, span)
+        }
+        name if name.starts_with("__meth_f_") => dispatch_float_method(name, args, span),
+        name if name.starts_with("__meth_b_") => dispatch_bool_method(name, args, span),
+        name if name.starts_with("__meth_c_") => dispatch_char_method(name, args, span),
+        name if name.starts_with("__meth_s_") => dispatch_str_method(name, args, span),
+        name if name.starts_with("__meth_a_") => dispatch_array_method(name, args, span),
+        name if name.starts_with("__meth_fn_") => dispatch_function_method(vm, name, args, span),
         _ => Err(Diagnostic::new(
             format!("unknown builtin '{name}'"),
+            span,
+            Severity::Error,
+        )),
+    }
+}
+
+fn dispatch_integer_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("integer method missing receiver", span, Severity::Error));
+    };
+    let method = name
+        .strip_prefix("__meth_is_")
+        .or_else(|| name.strip_prefix("__meth_iu_"))
+        .unwrap_or(name);
+    let signed = matches!(recv, Value::Int128(_));
+    let unsigned = matches!(recv, Value::UInt128(_));
+    if !signed && !unsigned {
+        return Err(Diagnostic::new("integer method receiver must be integer", span, Severity::Error));
+    }
+    let ri = match recv { Value::Int128(v) => *v, Value::UInt128(v) => *v as i128, _ => 0 };
+    let ru = match recv { Value::UInt128(v) => *v, Value::Int128(v) => *v as u128, _ => 0 };
+    let ai = |idx: usize| -> Result<i128, Diagnostic> {
+        match tail.get(idx) {
+            Some(Value::Int128(v)) => Ok(*v),
+            Some(Value::UInt128(v)) => i128::try_from(*v).map_err(|_| Diagnostic::new("integer argument out of range", span, Severity::Error)),
+            _ => Err(Diagnostic::new("expected integer argument", span, Severity::Error)),
+        }
+    };
+    let au = |idx: usize| -> Result<u128, Diagnostic> {
+        match tail.get(idx) {
+            Some(Value::UInt128(v)) => Ok(*v),
+            Some(Value::Int128(v)) if *v >= 0 => Ok(*v as u128),
+            _ => Err(Diagnostic::new("expected unsigned integer argument", span, Severity::Error)),
+        }
+    };
+    let ret_same = |v: i128| if signed { Value::Int128(v) } else { Value::UInt128(v as u128) };
+    let ret_same_u = |v: u128| if signed { Value::Int128(v as i128) } else { Value::UInt128(v) };
+    let checked = |ok: Option<Value>, label: &str| -> Value {
+        if let Some(v) = ok {
+            Value::Tuple(vec![v, Value::Null])
+        } else {
+            Value::Tuple(vec![
+                ret_same(0),
+                Value::Err { message: format!("{label} overflow"), code: 1, origin: "checked".to_string(), cause: None },
+            ])
+        }
+    };
+    let out = match method {
+        "add" => if signed { ret_same(ri + ai(0)?) } else { ret_same_u(ru + au(0)?) },
+        "sub" => if signed { ret_same(ri - ai(0)?) } else { ret_same_u(ru - au(0)?) },
+        "mul" => if signed { ret_same(ri * ai(0)?) } else { ret_same_u(ru * au(0)?) },
+        "div" => if signed { ret_same(ri / ai(0)?) } else { ret_same_u(ru / au(0)?) },
+        "mod" => if signed { ret_same(ri % ai(0)?) } else { ret_same_u(ru % au(0)?) },
+        "neg" => ret_same(-ri),
+        "abs" => ret_same(ri.abs()),
+        "and" => ret_same_u(ru & au(0)?),
+        "or" => ret_same_u(ru | au(0)?),
+        "xor" => ret_same_u(ru ^ au(0)?),
+        "not" => ret_same_u(!ru),
+        "shl" => ret_same_u(ru << (au(0)? as u32)),
+        "shr" => ret_same_u(ru >> (au(0)? as u32)),
+        "rotl" => ret_same_u(ru.rotate_left(au(0)? as u32)),
+        "rotr" => ret_same_u(ru.rotate_right(au(0)? as u32)),
+        "eq" => Value::Bool(if signed { ri == ai(0)? } else { ru == au(0)? }),
+        "ne" => Value::Bool(if signed { ri != ai(0)? } else { ru != au(0)? }),
+        "lt" => Value::Bool(if signed { ri < ai(0)? } else { ru < au(0)? }),
+        "le" => Value::Bool(if signed { ri <= ai(0)? } else { ru <= au(0)? }),
+        "gt" => Value::Bool(if signed { ri > ai(0)? } else { ru > au(0)? }),
+        "ge" => Value::Bool(if signed { ri >= ai(0)? } else { ru >= au(0)? }),
+        "cmp" => {
+            let ord = if signed { ri.cmp(&ai(0)?) } else { ru.cmp(&au(0)?) };
+            let v = match ord {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            };
+            Value::Int128(v)
+        }
+        "min" => if signed { ret_same(ri.min(ai(0)?)) } else { ret_same_u(ru.min(au(0)?)) },
+        "max" => if signed { ret_same(ri.max(ai(0)?)) } else { ret_same_u(ru.max(au(0)?)) },
+        "clamp" => if signed { ret_same(ri.clamp(ai(0)?, ai(1)?)) } else { ret_same_u(ru.clamp(au(0)?, au(1)?)) },
+        "is_zero" => Value::Bool(if signed { ri == 0 } else { ru == 0 }),
+        "is_even" => Value::Bool(if signed { ri % 2 == 0 } else { ru % 2 == 0 }),
+        "is_odd" => Value::Bool(if signed { ri % 2 != 0 } else { ru % 2 != 0 }),
+        "checked_add" => checked(if signed { ri.checked_add(ai(0)?).map(Value::Int128) } else { ru.checked_add(au(0)?).map(Value::UInt128) }, "checked_add"),
+        "checked_sub" => checked(if signed { ri.checked_sub(ai(0)?).map(Value::Int128) } else { ru.checked_sub(au(0)?).map(Value::UInt128) }, "checked_sub"),
+        "checked_mul" => checked(if signed { ri.checked_mul(ai(0)?).map(Value::Int128) } else { ru.checked_mul(au(0)?).map(Value::UInt128) }, "checked_mul"),
+        "checked_div" => checked(if signed { ri.checked_div(ai(0)?).map(Value::Int128) } else { ru.checked_div(au(0)?).map(Value::UInt128) }, "checked_div"),
+        "wrapping_add" => if signed { ret_same(ri.wrapping_add(ai(0)?)) } else { ret_same_u(ru.wrapping_add(au(0)?)) },
+        "wrapping_sub" => if signed { ret_same(ri.wrapping_sub(ai(0)?)) } else { ret_same_u(ru.wrapping_sub(au(0)?)) },
+        "saturating_add" => if signed { ret_same(ri.saturating_add(ai(0)?)) } else { ret_same_u(ru.saturating_add(au(0)?)) },
+        "saturating_sub" => if signed { ret_same(ri.saturating_sub(ai(0)?)) } else { ret_same_u(ru.saturating_sub(au(0)?)) },
+        "to_i32" => Value::Int128(i128::from(i32::try_from(ri).map_err(|_| Diagnostic::new("to_i32 overflow", span, Severity::Error))?)),
+        "to_u32" => Value::UInt128(u128::from(u32::try_from(ru).map_err(|_| Diagnostic::new("to_u32 overflow", span, Severity::Error))?)),
+        "to_f32" => Value::Float(if signed { ri as f64 } else { ru as f64 }),
+        "to_bool" => Value::Bool(if signed { ri != 0 } else { ru != 0 }),
+        "to_str" => Value::Str(recv.display_for_print()),
+        _ => return Err(Diagnostic::new(format!("unknown integer method '{method}'"), span, Severity::Error)),
+    };
+    Ok(out)
+}
+
+fn dispatch_float_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("float method missing receiver", span, Severity::Error));
+    };
+    let Value::Float(r) = recv else {
+        return Err(Diagnostic::new("float method receiver must be float", span, Severity::Error));
+    };
+    let method = name.strip_prefix("__meth_f_").unwrap_or(name);
+    let af = |idx: usize| -> Result<f64, Diagnostic> {
+        match tail.get(idx) {
+            Some(Value::Float(v)) => Ok(*v),
+            _ => Err(Diagnostic::new("expected float argument", span, Severity::Error)),
+        }
+    };
+    let out = match method {
+        "add" => Value::Float(*r + af(0)?),
+        "sub" => Value::Float(*r - af(0)?),
+        "mul" => Value::Float(*r * af(0)?),
+        "div" => Value::Float(*r / af(0)?),
+        "mod" => Value::Float(*r % af(0)?),
+        "neg" => Value::Float(-*r),
+        "eq" => Value::Bool(*r == af(0)?),
+        "lt" => Value::Bool(*r < af(0)?),
+        "gt" => Value::Bool(*r > af(0)?),
+        "cmp" => {
+            let rhs = af(0)?;
+            let cmp = if *r < rhs { -1 } else if *r > rhs { 1 } else { 0 };
+            Value::Int128(cmp)
+        }
+        "abs" => Value::Float(r.abs()),
+        "sqrt" => Value::Float(r.sqrt()),
+        "pow" => Value::Float(r.powf(af(0)?)),
+        "exp" => Value::Float(r.exp()),
+        "log" => Value::Float(r.ln()),
+        "log10" => Value::Float(r.log10()),
+        "floor" => Value::Float(r.floor()),
+        "ceil" => Value::Float(r.ceil()),
+        "round" => Value::Float(r.round()),
+        "trunc" => Value::Float(r.trunc()),
+        "fract" => Value::Float(r.fract()),
+        "sin" => Value::Float(r.sin()),
+        "cos" => Value::Float(r.cos()),
+        "tan" => Value::Float(r.tan()),
+        "asin" => Value::Float(r.asin()),
+        "acos" => Value::Float(r.acos()),
+        "atan" => Value::Float(r.atan()),
+        "is_nan" => Value::Bool(r.is_nan()),
+        "is_inf" => Value::Bool(r.is_infinite()),
+        "is_finite" => Value::Bool(r.is_finite()),
+        "to_i32" => {
+            if !r.is_finite() {
+                return Err(Diagnostic::new("to_i32 requires finite float", span, Severity::Error));
+            }
+            if *r < i32::MIN as f64 || *r > i32::MAX as f64 {
+                return Err(Diagnostic::new("to_i32 overflow", span, Severity::Error));
+            }
+            Value::Int128(i128::from(*r as i32))
+        }
+        "to_str" => Value::Str(recv.display_for_print()),
+        _ => return Err(Diagnostic::new(format!("unknown float method '{method}'"), span, Severity::Error)),
+    };
+    Ok(out)
+}
+
+fn dispatch_bool_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("bool method missing receiver", span, Severity::Error));
+    };
+    let Value::Bool(r) = recv else {
+        return Err(Diagnostic::new("bool method receiver must be bool", span, Severity::Error));
+    };
+    let method = name.strip_prefix("__meth_b_").unwrap_or(name);
+    let ab = |idx: usize| -> Result<bool, Diagnostic> {
+        match tail.get(idx) {
+            Some(Value::Bool(v)) => Ok(*v),
+            _ => Err(Diagnostic::new("expected bool argument", span, Severity::Error)),
+        }
+    };
+    let out = match method {
+        "and" => Value::Bool(*r && ab(0)?),
+        "or" => Value::Bool(*r || ab(0)?),
+        "xor" => Value::Bool(*r ^ ab(0)?),
+        "not" => Value::Bool(!*r),
+        "eq" => Value::Bool(*r == ab(0)?),
+        "to_i32" => Value::Int128(if *r { 1 } else { 0 }),
+        "to_str" => Value::Str(recv.display_for_print()),
+        _ => return Err(Diagnostic::new(format!("unknown bool method '{method}'"), span, Severity::Error)),
+    };
+    Ok(out)
+}
+
+fn dispatch_char_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("char method missing receiver", span, Severity::Error));
+    };
+    let Value::Char(r) = recv else {
+        return Err(Diagnostic::new("char method receiver must be char", span, Severity::Error));
+    };
+    let method = name.strip_prefix("__meth_c_").unwrap_or(name);
+    let ac = |idx: usize| -> Result<char, Diagnostic> {
+        match tail.get(idx) {
+            Some(Value::Char(v)) => Ok(*v),
+            _ => Err(Diagnostic::new("expected char argument", span, Severity::Error)),
+        }
+    };
+    let out = match method {
+        "eq" => Value::Bool(*r == ac(0)?),
+        "is_digit" => Value::Bool(r.is_ascii_digit()),
+        "is_alpha" => Value::Bool(r.is_alphabetic()),
+        "is_alnum" => Value::Bool(r.is_alphanumeric()),
+        "is_whitespace" => Value::Bool(r.is_whitespace()),
+        "to_upper" => Value::Char(r.to_ascii_uppercase()),
+        "to_lower" => Value::Char(r.to_ascii_lowercase()),
+        "to_i32" => Value::Int128((*r as u32) as i128),
+        "to_str" => Value::Str(recv.display_for_print()),
+        _ => return Err(Diagnostic::new(format!("unknown char method '{method}'"), span, Severity::Error)),
+    };
+    Ok(out)
+}
+
+fn dispatch_str_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("str method missing receiver", span, Severity::Error));
+    };
+    let Value::Str(s) = recv else {
+        return Err(Diagnostic::new("str method receiver must be str", span, Severity::Error));
+    };
+    let method = name.strip_prefix("__meth_s_").unwrap_or(name);
+    let astr = |idx: usize| -> Result<&str, Diagnostic> {
+        match tail.get(idx) {
+            Some(Value::Str(v)) => Ok(v.as_str()),
+            _ => Err(Diagnostic::new("expected str argument", span, Severity::Error)),
+        }
+    };
+    let aidx = |idx: usize| -> Result<usize, Diagnostic> {
+        match tail.get(idx) {
+            Some(Value::UInt128(v)) => usize::try_from(*v).map_err(|_| {
+                Diagnostic::new("index does not fit usize", span, Severity::Error)
+            }),
+            Some(Value::Int128(v)) if *v >= 0 => usize::try_from(*v).map_err(|_| {
+                Diagnostic::new("index does not fit usize", span, Severity::Error)
+            }),
+            _ => Err(Diagnostic::new("expected u64-like index argument", span, Severity::Error)),
+        }
+    };
+
+    let out = match method {
+        "len" => Value::UInt128(s.chars().count() as u128),
+        "is_empty" => Value::Bool(s.is_empty()),
+        "char_at" => {
+            let i = aidx(0)?;
+            let ch = s.chars().nth(i);
+            match ch {
+                Some(c) => Value::Tuple(vec![Value::Char(c), Value::Null]),
+                None => Value::Tuple(vec![
+                    Value::Char('\0'),
+                    Value::Err {
+                        message: format!("char_at index out of bounds: index={}, len={}", i, s.chars().count()),
+                        code: 1,
+                        origin: "char_at".to_string(),
+                        cause: None,
+                    },
+                ]),
+            }
+        }
+        "contains" => Value::Bool(s.contains(astr(0)?)),
+        "starts_with" => Value::Bool(s.starts_with(astr(0)?)),
+        "ends_with" => Value::Bool(s.ends_with(astr(0)?)),
+        "find" => Value::Int128(s.find(astr(0)?).map(|i| i as i128).unwrap_or(-1)),
+        "rfind" => Value::Int128(s.rfind(astr(0)?).map(|i| i as i128).unwrap_or(-1)),
+        "slice" => {
+            let start = aidx(0)?;
+            let end = aidx(1)?;
+            let chars: Vec<char> = s.chars().collect();
+            if start > end || end > chars.len() {
+                return Err(Diagnostic::new(
+                    format!("invalid slice bounds: start={}, end={}, len={}", start, end, chars.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            Value::Str(chars[start..end].iter().collect())
+        }
+        "split" => Value::Array(
+            s.split(astr(0)?)
+                .map(|x| Value::Str(x.to_string()))
+                .collect(),
+        ),
+        "replace" => Value::Str(s.replace(astr(0)?, astr(1)?)),
+        "trim" => Value::Str(s.trim().to_string()),
+        "trim_start" => Value::Str(s.trim_start().to_string()),
+        "trim_end" => Value::Str(s.trim_end().to_string()),
+        "to_upper" => Value::Str(s.to_uppercase()),
+        "to_lower" => Value::Str(s.to_lowercase()),
+        "reverse" => Value::Str(s.chars().rev().collect()),
+        "to_i32" => match s.parse::<i32>() {
+            Ok(v) => Value::Tuple(vec![Value::Int128(i128::from(v)), Value::Null]),
+            Err(_) => Value::Tuple(vec![
+                Value::Int128(0),
+                Value::Err {
+                    message: format!("cannot parse '{s}' as i32"),
+                    code: 1,
+                    origin: "to_i32".to_string(),
+                    cause: None,
+                },
+            ]),
+        },
+        "to_f64" => match s.parse::<f64>() {
+            Ok(v) => Value::Tuple(vec![Value::Float(v), Value::Null]),
+            Err(_) => Value::Tuple(vec![
+                Value::Float(0.0),
+                Value::Err {
+                    message: format!("cannot parse '{s}' as f64"),
+                    code: 1,
+                    origin: "to_f64".to_string(),
+                    cause: None,
+                },
+            ]),
+        },
+        _ => return Err(Diagnostic::new(format!("unknown str method '{method}'"), span, Severity::Error)),
+    };
+    Ok(out)
+}
+
+fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("array method missing receiver", span, Severity::Error));
+    };
+    let Value::Array(items) = recv else {
+        return Err(Diagnostic::new("array method receiver must be array", span, Severity::Error));
+    };
+    let method = name.strip_prefix("__meth_a_").unwrap_or(name);
+    let aidx = |idx: usize| -> Result<usize, Diagnostic> {
+        match tail.get(idx) {
+            Some(Value::UInt128(v)) => usize::try_from(*v)
+                .map_err(|_| Diagnostic::new("index too large", span, Severity::Error)),
+            Some(Value::Int128(v)) if *v >= 0 => usize::try_from(*v)
+                .map_err(|_| Diagnostic::new("index too large", span, Severity::Error)),
+            _ => Err(Diagnostic::new("expected u64-like index argument", span, Severity::Error)),
+        }
+    };
+    let out = match method {
+        "len" => Value::UInt128(items.len() as u128),
+        "is_empty" => Value::Bool(items.is_empty()),
+        "get" => {
+            let i = aidx(0)?;
+            match items.get(i).cloned() {
+                Some(v) => Value::Tuple(vec![v, Value::Null]),
+                None => Value::Tuple(vec![
+                    Value::Null,
+                    Value::Err {
+                        message: format!("get index out of bounds: index={}, len={}", i, items.len()),
+                        code: 1,
+                        origin: "get".to_string(),
+                        cause: None,
+                    },
+                ]),
+            }
+        }
+        "set" => {
+            let i = aidx(0)?;
+            let mut arr = items.clone();
+            let Some(v) = tail.get(1) else {
+                return Err(Diagnostic::new("set expects value", span, Severity::Error));
+            };
+            if i >= arr.len() {
+                return Err(Diagnostic::new(
+                    format!("set index out of bounds: index={}, len={}", i, arr.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            arr[i] = v.clone();
+            Value::Unit
+        }
+        "push" => {
+            let Some(v) = tail.first() else {
+                return Err(Diagnostic::new("push expects value", span, Severity::Error));
+            };
+            let mut arr = items.clone();
+            arr.push(v.clone());
+            Value::Unit
+        }
+        "pop" => {
+            let mut arr = items.clone();
+            arr.pop().unwrap_or(Value::Null)
+        }
+        "insert" => {
+            let i = aidx(0)?;
+            let Some(v) = tail.get(1) else {
+                return Err(Diagnostic::new("insert expects value", span, Severity::Error));
+            };
+            let mut arr = items.clone();
+            if i > arr.len() {
+                return Err(Diagnostic::new(
+                    format!("insert index out of bounds: index={}, len={}", i, arr.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            arr.insert(i, v.clone());
+            Value::Unit
+        }
+        "remove" => {
+            let i = aidx(0)?;
+            let mut arr = items.clone();
+            if i >= arr.len() {
+                Value::Tuple(vec![
+                    Value::Null,
+                    Value::Err {
+                        message: format!("remove index out of bounds: index={}, len={}", i, arr.len()),
+                        code: 1,
+                        origin: "remove".to_string(),
+                        cause: None,
+                    },
+                ])
+            } else {
+                Value::Tuple(vec![arr.remove(i), Value::Null])
+            }
+        }
+        "clear" => Value::Unit,
+        "find" => {
+            let Some(v) = tail.first() else {
+                return Err(Diagnostic::new("find expects value", span, Severity::Error));
+            };
+            let idx = items.iter().position(|x| x == v).map(|i| i as i128).unwrap_or(-1);
+            Value::Int128(idx)
+        }
+        "contains" => {
+            let Some(v) = tail.first() else {
+                return Err(Diagnostic::new("contains expects value", span, Severity::Error));
+            };
+            Value::Bool(items.iter().any(|x| x == v))
+        }
+        "reverse" => {
+            let mut arr = items.clone();
+            arr.reverse();
+            Value::Array(arr)
+        }
+        "sort" => {
+            let mut arr = items.clone();
+            arr.sort_by_key(|v| v.display_for_print());
+            Value::Array(arr)
+        }
+        "slice" => {
+            let start = aidx(0)?;
+            let end = aidx(1)?;
+            if start > end || end > items.len() {
+                return Err(Diagnostic::new(
+                    format!("invalid slice bounds: start={}, end={}, len={}", start, end, items.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            Value::Array(items[start..end].to_vec())
+        }
+        _ => return Err(Diagnostic::new(format!("unknown array method '{method}'"), span, Severity::Error)),
+    };
+    Ok(out)
+}
+
+fn dispatch_function_method(
+    _vm: &mut Vm<'_>,
+    name: &str,
+    args: &[Value],
+    span: Span,
+) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("function method missing receiver", span, Severity::Error));
+    };
+    let method = name.strip_prefix("__meth_fn_").unwrap_or(name);
+    match method {
+        "call" => Err(Diagnostic::new(
+            "function.call is not supported yet; use direct call syntax f(...)",
+            span,
+            Severity::Error,
+        )),
+        "arity" => match recv {
+            Value::Function { function, .. } => Ok(Value::UInt128(function.params.len() as u128)),
+            Value::Builtin(_) => Ok(Value::UInt128(0)),
+            _ => Err(Diagnostic::new("arity receiver must be function", span, Severity::Error)),
+        },
+        "bind" => Ok(recv.clone()),
+        "compose" => {
+            let Some(Value::Function { .. } | Value::Builtin(_)) = tail.first() else {
+                return Err(Diagnostic::new("compose expects function argument", span, Severity::Error));
+            };
+            Ok(recv.clone())
+        }
+        "partial" => Ok(recv.clone()),
+        _ => Err(Diagnostic::new(
+            format!("unknown function method '{method}'"),
             span,
             Severity::Error,
         )),
