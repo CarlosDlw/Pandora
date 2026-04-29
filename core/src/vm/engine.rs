@@ -3,13 +3,15 @@
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::fs::File;
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use sha2::{Digest, Sha256};
 
 use foundation::{
     diagnostics::{Diagnostic, Diagnostics, Severity},
@@ -3371,6 +3373,382 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 })
             }
         }
+        "http_parse_headers" | "parse_headers" => {
+            let [raw] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let raw = expect_str_arg(raw, "parse_headers raw", span)?;
+            Ok(Value::Tuple(vec![parse_http_headers(raw), Value::Null]))
+        }
+        "http_parse_response" | "parse_response" => {
+            let [raw] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let raw = expect_str_arg(raw, "parse_response raw", span)?;
+            match parse_http_response(raw) {
+                Ok((code, reason, headers, body)) => Ok(Value::Tuple(vec![
+                    Value::Int128(code as i128),
+                    Value::Str(reason),
+                    headers,
+                    Value::Str(body),
+                    Value::Null,
+                ])),
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Int128(0),
+                    Value::Str(String::new()),
+                    Value::Map(vec![]),
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "parse_response".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "http_parse_request" | "parse_request" => {
+            let [raw] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let raw = expect_str_arg(raw, "parse_request raw", span)?;
+            match parse_http_request(raw) {
+                Ok((method, path, version, headers, body)) => Ok(Value::Tuple(vec![
+                    Value::Str(method),
+                    Value::Str(path),
+                    Value::Str(version),
+                    headers,
+                    Value::Str(body),
+                    Value::Null,
+                ])),
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Str(String::new()),
+                    Value::Str(String::new()),
+                    Value::Map(vec![]),
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "parse_request".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "http_get" | "get" => {
+            let [url] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let url = expect_str_arg(url, "get url", span)?;
+            match http_get_simple(url) {
+                Ok(raw_response) => match parse_http_response(&raw_response) {
+                    Ok((code, reason, headers, body)) => Ok(Value::Tuple(vec![
+                        Value::Int128(code as i128),
+                        Value::Str(reason),
+                        headers,
+                        Value::Str(body),
+                        Value::Null,
+                    ])),
+                    Err(msg) => Ok(Value::Tuple(vec![
+                        Value::Int128(0),
+                        Value::Str(String::new()),
+                        Value::Map(vec![]),
+                        Value::Str(String::new()),
+                        Value::Err {
+                            message: msg,
+                            code: 1,
+                            origin: "get".to_string(),
+                            cause: None,
+                        },
+                    ])),
+                },
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Int128(0),
+                    Value::Str(String::new()),
+                    Value::Map(vec![]),
+                    Value::Str(String::new()),
+                    io_err("get", e),
+                ])),
+            }
+        }
+        "http_listen" | "listen" => {
+            let [addr] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let addr = expect_str_arg(addr, "listen addr", span)?;
+            match TcpListener::bind(addr) {
+                Ok(listener) => {
+                    let id = next_http_listener_id();
+                    let mut table = http_listener_table().lock().map_err(|_| {
+                        Diagnostic::new("failed to lock http listener table", span, Severity::Error)
+                    })?;
+                    table.insert(id, listener);
+                    Ok(Value::Tuple(vec![Value::UInt128(id as u128), Value::Null]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("listen", e)])),
+            }
+        }
+        "http_local_addr" | "local_addr" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "local_addr id", span)?;
+            let table = http_listener_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock http listener table", span, Severity::Error)
+            })?;
+            let Some(listener) = table.get(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: format!("unknown http listener id {id}"),
+                        code: 1,
+                        origin: "local_addr".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            match listener.local_addr() {
+                Ok(addr) => Ok(Value::Tuple(vec![Value::Str(addr.to_string()), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("local_addr", e)])),
+            }
+        }
+        "http_respond_once" | "respond_once" => {
+            let [id, response] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "respond_once id", span)?;
+            let response = expect_str_arg(response, "respond_once response", span)?;
+            let table = http_listener_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock http listener table", span, Severity::Error)
+            })?;
+            let Some(listener) = table.get(&id) else {
+                return Ok(Value::Err {
+                    message: format!("unknown http listener id {id}"),
+                    code: 1,
+                    origin: "respond_once".to_string(),
+                    cause: None,
+                });
+            };
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(400)));
+                    let mut sink = [0_u8; 1024];
+                    let _ = stream.read(&mut sink);
+                    match stream.write_all(response.as_bytes()) {
+                        Ok(_) => Ok(Value::Null),
+                        Err(e) => Ok(io_err("respond_once", e)),
+                    }
+                }
+                Err(e) => Ok(io_err("respond_once", e)),
+            }
+        }
+        "crypto_sha256" | "sha256" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "sha256 input", span)?;
+            Ok(Value::Str(sha256_hex(input.as_bytes())))
+        }
+        "crypto_random_bytes" | "random_bytes" => {
+            let [len] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let len = expect_u64_arg(len, "random_bytes len", span)? as usize;
+            let mut out = vec![0_u8; len];
+            match secure_random_fill(&mut out) {
+                Ok(()) => Ok(Value::Tuple(vec![Value::Str(hex_encode(&out)), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("random_bytes", e)])),
+            }
+        }
+        "crypto_random_u64" | "random_u64" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let mut out = [0_u8; 8];
+            match secure_random_fill(&mut out) {
+                Ok(()) => Ok(Value::Tuple(vec![
+                    Value::UInt128(u64::from_le_bytes(out) as u128),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("random_u64", e)])),
+            }
+        }
+        "crypto_encrypt" | "encrypt" => {
+            let [plain, key] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let plain = expect_str_arg(plain, "encrypt plaintext", span)?;
+            let key = expect_str_arg(key, "encrypt key", span)?;
+            match encrypt_with_key(plain.as_bytes(), key.as_bytes()) {
+                Ok(blob) => Ok(Value::Tuple(vec![Value::Str(blob), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("encrypt", e)])),
+            }
+        }
+        "crypto_decrypt" | "decrypt" => {
+            let [blob, key] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let blob = expect_str_arg(blob, "decrypt blob", span)?;
+            let key = expect_str_arg(key, "decrypt key", span)?;
+            match decrypt_with_key(blob, key.as_bytes()) {
+                Ok(plain) => Ok(Value::Tuple(vec![Value::Str(plain), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: e,
+                        code: 1,
+                        origin: "decrypt".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "rand_seed" | "seed" => {
+            let [seed] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let seed = expect_u64_arg(seed, "seed value", span)?;
+            rand_set_seed(seed);
+            Ok(Value::Null)
+        }
+        "rand_next_u64" | "next_u64" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::UInt128(math_next_u64() as u128))
+        }
+        "rand_next_f64" | "next_f64" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Float((math_next_u64() as f64) / (u64::MAX as f64)))
+        }
+        "rand_range_i32" | "range_i32" => {
+            let [min, max] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let min = expect_i32_like(min, "range_i32 min", span)?;
+            let max = expect_i32_like(max, "range_i32 max", span)?;
+            if min > max {
+                return Ok(Value::Tuple(vec![
+                    Value::Int128(0),
+                    Value::Err {
+                        message: "min must be <= max".to_string(),
+                        code: 1,
+                        origin: "range_i32".to_string(),
+                        cause: None,
+                    },
+                ]));
+            }
+            let width = (max as i64 - min as i64 + 1) as u64;
+            let v = min as i64 + (math_next_u64() % width) as i64;
+            Ok(Value::Tuple(vec![Value::Int128(v as i128), Value::Null]))
+        }
+        "rand_range_u64" | "range_u64" => {
+            let [min, max] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let min = expect_u64_arg(min, "range_u64 min", span)?;
+            let max = expect_u64_arg(max, "range_u64 max", span)?;
+            if min > max {
+                return Ok(Value::Tuple(vec![
+                    Value::UInt128(0),
+                    Value::Err {
+                        message: "min must be <= max".to_string(),
+                        code: 1,
+                        origin: "range_u64".to_string(),
+                        cause: None,
+                    },
+                ]));
+            }
+            let width = max.saturating_sub(min).saturating_add(1);
+            let v = min.saturating_add(math_next_u64() % width);
+            Ok(Value::Tuple(vec![Value::UInt128(v as u128), Value::Null]))
+        }
+        "rand_bytes_hex" | "bytes_hex" => {
+            let [len] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let len = expect_u64_arg(len, "bytes_hex len", span)? as usize;
+            let mut out = vec![0_u8; len];
+            for b in &mut out {
+                *b = (math_next_u64() & 0xff) as u8;
+            }
+            Ok(Value::Tuple(vec![Value::Str(hex_encode(&out)), Value::Null]))
+        }
         name if name.starts_with("__meth_is_") || name.starts_with("__meth_iu_") => {
             dispatch_integer_method(name, args, span)
         }
@@ -4553,6 +4931,180 @@ fn next_tcp_stream_id() -> u64 {
     NEXT_TCP_STREAM_ID.fetch_add(1, Ordering::Relaxed)
 }
 
+fn http_listener_table() -> &'static Mutex<HashMap<u64, TcpListener>> {
+    static HTTP_LISTENERS: OnceLock<Mutex<HashMap<u64, TcpListener>>> = OnceLock::new();
+    HTTP_LISTENERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_http_listener_id() -> u64 {
+    static NEXT_HTTP_LISTENER_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_HTTP_LISTENER_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn parse_http_headers(raw: &str) -> Value {
+    let mut entries = Vec::new();
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            break;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            entries.push((Value::Str(k.trim().to_string()), Value::Str(v.trim().to_string())));
+        }
+    }
+    Value::Map(entries)
+}
+
+fn parse_http_response(raw: &str) -> Result<(i32, String, Value, String), String> {
+    let (head, body) = raw
+        .split_once("\r\n\r\n")
+        .or_else(|| raw.split_once("\n\n"))
+        .ok_or_else(|| "invalid HTTP response: missing header/body separator".to_string())?;
+    let mut lines = head.lines();
+    let status_line = lines
+        .next()
+        .ok_or_else(|| "invalid HTTP response: missing status line".to_string())?;
+    let mut parts = status_line.splitn(3, ' ');
+    let _version = parts.next().ok_or_else(|| "invalid status line".to_string())?;
+    let code_str = parts.next().ok_or_else(|| "invalid status line".to_string())?;
+    let reason = parts.next().unwrap_or("").to_string();
+    let code = code_str
+        .parse::<i32>()
+        .map_err(|_| "invalid status code".to_string())?;
+    let headers = parse_http_headers(&lines.collect::<Vec<_>>().join("\n"));
+    Ok((code, reason, headers, body.to_string()))
+}
+
+fn parse_http_request(raw: &str) -> Result<(String, String, String, Value, String), String> {
+    let (head, body) = raw
+        .split_once("\r\n\r\n")
+        .or_else(|| raw.split_once("\n\n"))
+        .ok_or_else(|| "invalid HTTP request: missing header/body separator".to_string())?;
+    let mut lines = head.lines();
+    let request_line = lines
+        .next()
+        .ok_or_else(|| "invalid HTTP request: missing request line".to_string())?;
+    let mut parts = request_line.splitn(3, ' ');
+    let method = parts.next().ok_or_else(|| "invalid request line".to_string())?.to_string();
+    let path = parts.next().ok_or_else(|| "invalid request line".to_string())?.to_string();
+    let version = parts.next().ok_or_else(|| "invalid request line".to_string())?.to_string();
+    let headers = parse_http_headers(&lines.collect::<Vec<_>>().join("\n"));
+    Ok((method, path, version, headers, body.to_string()))
+}
+
+fn http_get_simple(url: &str) -> std::io::Result<String> {
+    let without_scheme = url.strip_prefix("http://").unwrap_or(url);
+    let (host_port, path) = match without_scheme.split_once('/') {
+        Some((hp, p)) => (hp, format!("/{}", p)),
+        None => (without_scheme, "/".to_string()),
+    };
+    let (host, port) = match host_port.split_once(':') {
+        Some((h, p)) => (h, p.parse::<u16>().unwrap_or(80)),
+        None => (host_port, 80),
+    };
+    let mut stream = TcpStream::connect((host, port))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(600)));
+    let req = format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        path, host
+    );
+    stream.write_all(req.as_bytes())?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf).to_string())
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let digest = hasher.finalize();
+    hex_encode(&digest)
+}
+
+fn hex_encode(data: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(data.len() * 2);
+    for b in data {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
+    if !s.len().is_multiple_of(2) {
+        return Err("invalid hex length".to_string());
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let bytes = s.as_bytes();
+    let to_nibble = |c: u8| -> Option<u8> {
+        match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            b'A'..=b'F' => Some(c - b'A' + 10),
+            _ => None,
+        }
+    };
+    let mut i = 0;
+    while i < bytes.len() {
+        let hi = to_nibble(bytes[i]).ok_or_else(|| "invalid hex char".to_string())?;
+        let lo = to_nibble(bytes[i + 1]).ok_or_else(|| "invalid hex char".to_string())?;
+        out.push((hi << 4) | lo);
+        i += 2;
+    }
+    Ok(out)
+}
+
+fn secure_random_fill(buf: &mut [u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut f = File::open("/dev/urandom")?;
+        f.read_exact(buf)?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = buf;
+        Err(std::io::Error::other(
+            "secure random is not implemented on this platform",
+        ))
+    }
+}
+
+fn keystream_bytes(key: &[u8], nonce: &[u8], len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(len);
+    let mut counter: u64 = 0;
+    while out.len() < len {
+        let mut h = Sha256::new();
+        h.update(key);
+        h.update(nonce);
+        h.update(counter.to_le_bytes());
+        let block = h.finalize();
+        let need = (len - out.len()).min(block.len());
+        out.extend_from_slice(&block[..need]);
+        counter = counter.wrapping_add(1);
+    }
+    out
+}
+
+fn encrypt_with_key(plain: &[u8], key: &[u8]) -> std::io::Result<String> {
+    let mut nonce = [0_u8; 12];
+    secure_random_fill(&mut nonce)?;
+    let stream = keystream_bytes(key, &nonce, plain.len());
+    let cipher: Vec<u8> = plain.iter().zip(stream.iter()).map(|(p, k)| p ^ k).collect();
+    Ok(format!("{}:{}", hex_encode(&nonce), hex_encode(&cipher)))
+}
+
+fn decrypt_with_key(blob: &str, key: &[u8]) -> Result<String, String> {
+    let (nonce_hex, cipher_hex) = blob
+        .split_once(':')
+        .ok_or_else(|| "invalid encrypted payload format".to_string())?;
+    let nonce = hex_decode(nonce_hex)?;
+    let cipher = hex_decode(cipher_hex)?;
+    let stream = keystream_bytes(key, &nonce, cipher.len());
+    let plain: Vec<u8> = cipher.iter().zip(stream.iter()).map(|(c, k)| c ^ k).collect();
+    String::from_utf8(plain).map_err(|_| "decrypted data is not valid utf-8".to_string())
+}
+
 fn format_unix_secs_iso_utc(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let sod = (secs % 86_400) as u32;
@@ -4580,8 +5132,8 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
 }
 
 fn math_next_u64() -> u64 {
-    static RNG_STATE: AtomicU64 = AtomicU64::new(0);
-    let mut s = RNG_STATE.load(Ordering::Relaxed);
+    let state = rand_state();
+    let mut s = state.load(Ordering::Relaxed);
     if s == 0 {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -4592,8 +5144,19 @@ fn math_next_u64() -> u64 {
     s = s
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
-    RNG_STATE.store(s, Ordering::Relaxed);
+    state.store(s, Ordering::Relaxed);
     s
+}
+
+fn rand_set_seed(seed: u64) {
+    let state = rand_state();
+    let seeded = seed ^ 0xD1B54A32D192ED03;
+    state.store(seeded.max(1), Ordering::Relaxed);
+}
+
+fn rand_state() -> &'static AtomicU64 {
+    static RNG_STATE: AtomicU64 = AtomicU64::new(0);
+    &RNG_STATE
 }
 
 fn as_i128(value: &Value) -> Option<i128> {

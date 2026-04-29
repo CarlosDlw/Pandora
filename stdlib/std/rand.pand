@@ -1,0 +1,12 @@
+# std/rand
+# Pseudorandom number generation.
+
+fn seed(value: u64) -> err { return rand_seed(value) }
+
+fn next_u64() -> u64 { return rand_next_u64() }
+fn next_f64() -> f64 { return rand_next_f64() }
+
+fn range_i32(min: i32, max: i32) -> (i32, err) { return rand_range_i32(min, max) }
+fn range_u64(min: u64, max: u64) -> (u64, err) { return rand_range_u64(min, max) }
+
+fn bytes_hex(len: u64) -> (str, err) { return rand_bytes_hex(len) }

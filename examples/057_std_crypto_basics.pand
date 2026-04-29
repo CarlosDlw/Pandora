@@ -1,0 +1,12 @@
+from "std/crypto" import sha256, random_bytes, random_u64, encrypt, decrypt
+
+h := sha256("pandora")
+rnd_hex, rnd_err := random_bytes(16)
+rnd_u64, rnd_u64_err := random_u64()
+
+enc, enc_err := encrypt("hello_crypto", "secret-key")
+dec, dec_err := decrypt(enc, "secret-key")
+
+print(len(h).eq((64).to_u32()), h != "")
+print(rnd_err == null, len(rnd_hex).eq((32).to_u32()), rnd_u64_err == null, rnd_u64.gt((0).to_u32()) || rnd_u64.eq((0).to_u32()))
+print(enc_err == null, dec_err == null, dec == "hello_crypto", enc != "")

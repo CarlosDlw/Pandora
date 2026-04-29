@@ -1599,6 +1599,9 @@ impl<'a> Checker<'a> {
             || name.starts_with("thread_")
             || name.starts_with("sync_")
             || name.starts_with("net_")
+            || name.starts_with("http_")
+            || name.starts_with("crypto_")
+            || name.starts_with("rand_")
         {
             self.push_error(
                 format!("internal intrinsic '{name}' is not part of the public stdlib API"),

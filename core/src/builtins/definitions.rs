@@ -2101,6 +2101,440 @@ pub fn default_registry() -> BuiltinRegistry {
             ret: Box::new(Type::Err),
         },
     },
+    BuiltinFunction {
+        name: "http_parse_headers",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Map(Box::new(Type::Str), Box::new(Type::Str)),
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "parse_headers",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Map(Box::new(Type::Str), Box::new(Type::Str)),
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "http_parse_response",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Map(Box::new(Type::Str), Box::new(Type::Str)),
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "parse_response",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Map(Box::new(Type::Str), Box::new(Type::Str)),
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "http_parse_request",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Str,
+                Type::Str,
+                Type::Str,
+                Type::Map(Box::new(Type::Str), Box::new(Type::Str)),
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "parse_request",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Str,
+                Type::Str,
+                Type::Str,
+                Type::Map(Box::new(Type::Str), Box::new(Type::Str)),
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "http_get",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Map(Box::new(Type::Str), Box::new(Type::Str)),
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "get",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Map(Box::new(Type::Str), Box::new(Type::Str)),
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "http_listen",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "listen",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "http_local_addr",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "local_addr",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "http_respond_once",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Str,
+            ],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "respond_once",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Str,
+            ],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "crypto_sha256",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "sha256",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "crypto_random_bytes",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "random_bytes",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "crypto_random_u64",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "random_u64",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "crypto_encrypt",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "encrypt",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "crypto_decrypt",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "decrypt",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "rand_seed",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "seed",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "rand_next_u64",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "next_u64",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "rand_next_f64",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "next_f64",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "rand_range_i32",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "range_i32",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "rand_range_u64",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "range_u64",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "rand_bytes_hex",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "bytes_hex",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
     ];
 
     let mut methods = Vec::new();

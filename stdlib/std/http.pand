@@ -1,0 +1,12 @@
+# std/http
+# HTTP client/server helpers, parsing and headers.
+
+fn parse_headers(raw: str) -> (map[str]str, err) { return http_parse_headers(raw) }
+fn parse_response(raw: str) -> (i32, str, map[str]str, str, err) { return http_parse_response(raw) }
+fn parse_request(raw: str) -> (str, str, str, map[str]str, str, err) { return http_parse_request(raw) }
+
+fn get(url: str) -> (i32, str, map[str]str, str, err) { return http_get(url) }
+
+fn listen(addr: str) -> (u64, err) { return http_listen(addr) }
+fn local_addr(id: u64) -> (str, err) { return http_local_addr(id) }
+fn respond_once(id: u64, response: str) -> err { return http_respond_once(id, response) }

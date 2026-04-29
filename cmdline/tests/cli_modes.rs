@@ -945,3 +945,48 @@ fn runs_example_055_std_net_basics() {
                 .and(contains("true true")),
         );
 }
+
+#[test]
+fn runs_example_056_std_http_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/056_std_http_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true")
+                .and(contains("true true true true true"))
+                .and(contains("true true true true true true")),
+        );
+}
+
+#[test]
+fn runs_example_057_std_crypto_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/057_std_crypto_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true")
+                .and(contains("true true true true"))
+                .and(contains("true true true true")),
+        );
+}
+
+#[test]
+fn runs_example_058_std_rand_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/058_std_rand_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true true")
+                .and(contains("true true true true true true"))
+                .and(contains("true true")),
+        );
+}

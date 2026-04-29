@@ -794,3 +794,81 @@ fn check_mode_reports_internal_net_intrinsic_forbidden() {
         .code(1)
         .stderr(contains("internal intrinsic 'net_dns_lookup'"));
 }
+
+#[test]
+fn check_mode_reports_http_parse_response_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(parse_response(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_http_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(http_parse_headers(\"a: b\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'http_parse_headers'"));
+}
+
+#[test]
+fn check_mode_reports_crypto_random_bytes_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(random_bytes(\"16\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_crypto_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(crypto_sha256(\"x\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'crypto_sha256'"));
+}
+
+#[test]
+fn check_mode_reports_rand_range_u64_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(range_u64(\"1\", 10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_rand_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(rand_next_u64())\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'rand_next_u64'"));
+}

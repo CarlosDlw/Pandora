@@ -1,0 +1,10 @@
+from "std/http" import parse_headers, parse_response, parse_request
+
+hdrs, h_err := parse_headers("Content-Type: text/plain\nX-Test: 1\n")
+
+status, reason, resp_headers, body, resp_err := parse_response("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nhello")
+method, path, version, req_headers, req_body, req_err := parse_request("GET /ping HTTP/1.1\r\nHost: localhost\r\n\r\n")
+
+print(h_err == null, hdrs.len().gt((0).to_u32()))
+print(resp_err == null, status.to_i32() == 200, reason == "OK", body == "hello", resp_headers.len().gt((0).to_u32()))
+print(req_err == null, method == "GET", path == "/ping", version == "HTTP/1.1", req_body == "", req_headers.len().gt((0).to_u32()))

@@ -1,0 +1,10 @@
+# std/crypto
+# Hashing, encryption and secure random generation.
+
+fn sha256(input: str) -> str { return crypto_sha256(input) }
+
+fn random_bytes(len: u64) -> (str, err) { return crypto_random_bytes(len) }
+fn random_u64() -> (u64, err) { return crypto_random_u64() }
+
+fn encrypt(plaintext: str, key: str) -> (str, err) { return crypto_encrypt(plaintext, key) }
+fn decrypt(ciphertext: str, key: str) -> (str, err) { return crypto_decrypt(ciphertext, key) }

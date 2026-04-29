@@ -1,0 +1,13 @@
+from "std/rand" import seed, next_u64, next_f64, range_i32, range_u64, bytes_hex
+
+seed_err := seed(12345)
+r1: u64 = next_u64()
+r2: u64 = next_u64()
+rf: f64 = next_f64()
+r_i32, ri_err := range_i32(10, 20)
+r_u64, ru_err := range_u64(100, 120)
+hx, hx_err := bytes_hex(8)
+
+print(seed_err == null, r1 != r2, rf >= 0.0, rf <= 1.0)
+print(ri_err == null, r_i32 >= 10, r_i32 <= 20, ru_err == null, r_u64.ge((100).to_u32()), r_u64.le((120).to_u32()))
+print(hx_err == null, len(hx).eq((16).to_u32()))
