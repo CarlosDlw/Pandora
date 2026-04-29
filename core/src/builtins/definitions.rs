@@ -2953,6 +2953,202 @@ pub fn default_registry() -> BuiltinRegistry {
             ret: Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
         },
     },
+    BuiltinFunction {
+        name: "log_set_level",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "set_log_level",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "log_set_prefix",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "set_log_prefix",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "log_set_json",
+        ty: Type::Function {
+            params: vec![Type::Bool],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "set_log_json",
+        ty: Type::Function {
+            params: vec![Type::Bool],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "log_write",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "log_trace",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "trace",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "log_debug",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "debug",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "log_info",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "info",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "log_warn",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "warn",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "log_error",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "write_log",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "error_msg",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "json_parse",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "parse_json",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "json_stringify",
+        ty: Type::Function {
+            params: vec![Type::Any],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "stringify_json",
+        ty: Type::Function {
+            params: vec![Type::Any],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "json_stringify_pretty",
+        ty: Type::Function {
+            params: vec![Type::Any],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "stringify_json_pretty",
+        ty: Type::Function {
+            params: vec![Type::Any],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "xml_parse",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "parse_xml",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "xml_stringify",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "stringify_xml",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
     ];
 
     let mut methods = Vec::new();

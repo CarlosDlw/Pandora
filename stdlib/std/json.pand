@@ -1,0 +1,6 @@
+# std/json
+# JSON parse and encode helpers.
+
+fn parse_json(raw: str) -> (any, err) { return json_parse(raw) }
+fn stringify_json(value: any) -> (str, err) { return json_stringify(value) }
+fn stringify_json_pretty(value: any) -> (str, err) { return json_stringify_pretty(value) }

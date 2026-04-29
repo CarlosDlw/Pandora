@@ -1,0 +1,13 @@
+# std/log
+# Logging levels and formatting helpers.
+
+fn set_log_level(level: str) -> err { return log_set_level(level) }
+fn set_log_prefix(prefix: str) -> err { return log_set_prefix(prefix) }
+fn set_log_json(enabled: bool) -> err { return log_set_json(enabled) }
+
+fn write_log(level: str, message: str) -> err { return log_write(level, message) }
+fn trace(message: str) -> err { return log_trace(message) }
+fn debug(message: str) -> err { return log_debug(message) }
+fn info(message: str) -> err { return log_info(message) }
+fn warn(message: str) -> err { return log_warn(message) }
+fn error_msg(message: str) -> err { return log_error(message) }

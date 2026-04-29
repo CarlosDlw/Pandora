@@ -1,0 +1,13 @@
+from "std/json" import parse_json, stringify_json, stringify_json_pretty
+
+obj, perr := parse_json("null")
+payload := ["pandora", "ok", "arr"]
+s1, serr := stringify_json(payload)
+s2, serr2 := stringify_json_pretty(payload)
+
+bad, bad_err := parse_json("{bad json")
+
+print(perr == null, obj == null, serr == null, serr2 == null)
+print(s1.contains("pandora"), s1.contains("ok"), s1.contains("arr"))
+print(len(s2).gt(len(s1)), s2.contains("pandora"))
+print(bad == null, bad_err != null)

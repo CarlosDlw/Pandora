@@ -13,7 +13,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
+use quick_xml::Reader as XmlReader;
+use quick_xml::events::Event as XmlEvent;
 use regex::Regex;
+use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 
 use foundation::{
@@ -4243,6 +4246,269 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 .collect::<Vec<_>>();
             Ok(Value::Map(entries))
         }
+        "log_set_level" | "set_log_level" => {
+            let [level] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let level = expect_str_arg(level, "set_log_level level", span)?;
+            match parse_log_level(level) {
+                Some(lv) => {
+                    log_state_set_level(lv);
+                    Ok(Value::Null)
+                }
+                None => Ok(Value::Err {
+                    message: format!("invalid log level '{level}'"),
+                    code: 1,
+                    origin: "set_log_level".to_string(),
+                    cause: None,
+                }),
+            }
+        }
+        "log_set_prefix" | "set_log_prefix" => {
+            let [prefix] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let prefix = expect_str_arg(prefix, "set_log_prefix prefix", span)?;
+            log_state_set_prefix(prefix.to_string());
+            Ok(Value::Null)
+        }
+        "log_set_json" | "set_log_json" => {
+            let [json] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let Value::Bool(json) = json else {
+                return Err(Diagnostic::new(
+                    "set_log_json expects bool argument",
+                    span,
+                    Severity::Error,
+                ));
+            };
+            log_state_set_json(*json);
+            Ok(Value::Null)
+        }
+        "log_write" | "write_log" => {
+            let [level, message] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let level = expect_str_arg(level, "log level", span)?;
+            let message = expect_str_arg(message, "log message", span)?;
+            match parse_log_level(level) {
+                Some(lv) => {
+                    log_emit(lv, message);
+                    Ok(Value::Null)
+                }
+                None => Ok(Value::Err {
+                    message: format!("invalid log level '{level}'"),
+                    code: 1,
+                    origin: "log".to_string(),
+                    cause: None,
+                }),
+            }
+        }
+        "log_trace" | "trace" => {
+            let [message] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            log_emit(LogLevel::Trace, expect_str_arg(message, "trace message", span)?);
+            Ok(Value::Null)
+        }
+        "log_debug" | "debug" => {
+            let [message] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            log_emit(LogLevel::Debug, expect_str_arg(message, "debug message", span)?);
+            Ok(Value::Null)
+        }
+        "log_info" | "info" => {
+            let [message] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            log_emit(LogLevel::Info, expect_str_arg(message, "info message", span)?);
+            Ok(Value::Null)
+        }
+        "log_warn" | "warn" => {
+            let [message] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            log_emit(LogLevel::Warn, expect_str_arg(message, "warn message", span)?);
+            Ok(Value::Null)
+        }
+        "log_error" | "error_msg" => {
+            let [message] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            log_emit(LogLevel::Error, expect_str_arg(message, "error message", span)?);
+            Ok(Value::Null)
+        }
+        "json_parse" | "parse_json" => {
+            let [raw] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let raw = expect_str_arg(raw, "parse_json raw", span)?;
+            match serde_json::from_str::<JsonValue>(raw) {
+                Ok(json) => Ok(Value::Tuple(vec![json_to_value(&json), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Null,
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "parse_json".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "json_stringify" | "stringify_json" => {
+            let [value] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            match value_to_json(value) {
+                Ok(json) => match serde_json::to_string(&json) {
+                    Ok(out) => Ok(Value::Tuple(vec![Value::Str(out), Value::Null])),
+                    Err(e) => Ok(Value::Tuple(vec![
+                        Value::Str(String::new()),
+                        Value::Err {
+                            message: e.to_string(),
+                            code: 1,
+                            origin: "stringify_json".to_string(),
+                            cause: None,
+                        },
+                    ])),
+                },
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "stringify_json".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "json_stringify_pretty" | "stringify_json_pretty" => {
+            let [value] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            match value_to_json(value) {
+                Ok(json) => match serde_json::to_string_pretty(&json) {
+                    Ok(out) => Ok(Value::Tuple(vec![Value::Str(out), Value::Null])),
+                    Err(e) => Ok(Value::Tuple(vec![
+                        Value::Str(String::new()),
+                        Value::Err {
+                            message: e.to_string(),
+                            code: 1,
+                            origin: "stringify_json_pretty".to_string(),
+                            cause: None,
+                        },
+                    ])),
+                },
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "stringify_json_pretty".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "xml_parse" | "parse_xml" => {
+            let [raw] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let raw = expect_str_arg(raw, "parse_xml raw", span)?;
+            match parse_xml_basic(raw) {
+                Ok(v) => Ok(Value::Tuple(vec![v, Value::Null])),
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Null,
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "parse_xml".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "xml_stringify" | "stringify_xml" => {
+            let [name, text] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let name = expect_str_arg(name, "stringify_xml name", span)?;
+            let text = expect_str_arg(text, "stringify_xml text", span)?;
+            if name.is_empty() {
+                return Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: "xml tag name cannot be empty".to_string(),
+                        code: 1,
+                        origin: "stringify_xml".to_string(),
+                        cause: None,
+                    },
+                ]));
+            }
+            let escaped = xml_escape_text(text);
+            let out = format!("<{name}>{escaped}</{name}>");
+            Ok(Value::Tuple(vec![Value::Str(out), Value::Null]))
+        }
         name if name.starts_with("__meth_is_") || name.starts_with("__meth_iu_") => {
             dispatch_integer_method(name, args, span)
         }
@@ -5697,6 +5963,201 @@ fn cli_flag_value(flag: &str) -> Option<String> {
         i += 1;
     }
     None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+struct LogState {
+    min_level: LogLevel,
+    prefix: String,
+    json: bool,
+}
+
+fn log_state() -> &'static Mutex<LogState> {
+    static LOG_STATE: OnceLock<Mutex<LogState>> = OnceLock::new();
+    LOG_STATE.get_or_init(|| {
+        Mutex::new(LogState {
+            min_level: LogLevel::Info,
+            prefix: String::new(),
+            json: false,
+        })
+    })
+}
+
+fn parse_log_level(level: &str) -> Option<LogLevel> {
+    match level.to_ascii_lowercase().as_str() {
+        "trace" => Some(LogLevel::Trace),
+        "debug" => Some(LogLevel::Debug),
+        "info" => Some(LogLevel::Info),
+        "warn" | "warning" => Some(LogLevel::Warn),
+        "error" => Some(LogLevel::Error),
+        _ => None,
+    }
+}
+
+fn level_name(level: LogLevel) -> &'static str {
+    match level {
+        LogLevel::Trace => "TRACE",
+        LogLevel::Debug => "DEBUG",
+        LogLevel::Info => "INFO",
+        LogLevel::Warn => "WARN",
+        LogLevel::Error => "ERROR",
+    }
+}
+
+fn log_state_set_level(level: LogLevel) {
+    if let Ok(mut state) = log_state().lock() {
+        state.min_level = level;
+    }
+}
+
+fn log_state_set_prefix(prefix: String) {
+    if let Ok(mut state) = log_state().lock() {
+        state.prefix = prefix;
+    }
+}
+
+fn log_state_set_json(json: bool) {
+    if let Ok(mut state) = log_state().lock() {
+        state.json = json;
+    }
+}
+
+fn log_emit(level: LogLevel, message: &str) {
+    if let Ok(state) = log_state().lock() {
+        if level < state.min_level {
+            return;
+        }
+        if state.json {
+            let escaped = message.replace('\\', "\\\\").replace('"', "\\\"");
+            if state.prefix.is_empty() {
+                println!(r#"{{"level":"{}","msg":"{}"}}"#, level_name(level), escaped);
+            } else {
+                let p = state.prefix.replace('\\', "\\\\").replace('"', "\\\"");
+                println!(
+                    r#"{{"level":"{}","prefix":"{}","msg":"{}"}}"#,
+                    level_name(level),
+                    p,
+                    escaped
+                );
+            }
+        } else if state.prefix.is_empty() {
+            println!("[{}] {}", level_name(level), message);
+        } else {
+            println!("{} [{}] {}", state.prefix, level_name(level), message);
+        }
+    }
+}
+
+fn json_to_value(json: &JsonValue) -> Value {
+    match json {
+        JsonValue::Null => Value::Null,
+        JsonValue::Bool(v) => Value::Bool(*v),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int128(i as i128)
+            } else if let Some(u) = n.as_u64() {
+                Value::UInt128(u as u128)
+            } else if let Some(f) = n.as_f64() {
+                Value::Float(f)
+            } else {
+                Value::Null
+            }
+        }
+        JsonValue::String(s) => Value::Str(s.clone()),
+        JsonValue::Array(items) => Value::Array(items.iter().map(json_to_value).collect()),
+        JsonValue::Object(map) => Value::Map(
+            map.iter()
+                .map(|(k, v)| (Value::Str(k.clone()), json_to_value(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn value_to_json(value: &Value) -> Result<JsonValue, String> {
+    match value {
+        Value::Null => Ok(JsonValue::Null),
+        Value::Bool(v) => Ok(JsonValue::Bool(*v)),
+        Value::Int128(v) => {
+            let iv = i64::try_from(*v).map_err(|_| "integer out of JSON i64 range".to_string())?;
+            Ok(JsonValue::from(iv))
+        }
+        Value::UInt128(v) => {
+            let uv = u64::try_from(*v).map_err(|_| "integer out of JSON u64 range".to_string())?;
+            Ok(JsonValue::from(uv))
+        }
+        Value::Float(v) => serde_json::Number::from_f64(*v)
+            .map(JsonValue::Number)
+            .ok_or_else(|| "cannot encode NaN/Infinity in JSON".to_string()),
+        Value::Str(s) => Ok(JsonValue::String(s.clone())),
+        Value::Array(items) => items
+            .iter()
+            .map(value_to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .map(JsonValue::Array),
+        Value::Map(entries) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in entries {
+                let Value::Str(key) = k else {
+                    return Err("json stringify supports map keys of type str only".to_string());
+                };
+                out.insert(key.clone(), value_to_json(v)?);
+            }
+            Ok(JsonValue::Object(out))
+        }
+        _ => Err("value is not JSON-serializable".to_string()),
+    }
+}
+
+fn parse_xml_basic(raw: &str) -> Result<Value, String> {
+    let mut reader = XmlReader::from_str(raw);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut root_name = String::new();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(XmlEvent::Start(e)) if root_name.is_empty() => {
+                root_name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+            }
+            Ok(XmlEvent::Text(t)) => {
+                let s = String::from_utf8_lossy(t.as_ref()).to_string();
+                if !s.trim().is_empty() {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(s.trim());
+                }
+            }
+            Ok(XmlEvent::Eof) => break,
+            Ok(_) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+        buf.clear();
+    }
+    if root_name.is_empty() {
+        return Err("xml has no root element".to_string());
+    }
+    Ok(Value::Map(vec![
+        (Value::Str("name".to_string()), Value::Str(root_name)),
+        (Value::Str("text".to_string()), Value::Str(text)),
+    ]))
+}
+
+fn xml_escape_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn format_unix_secs_iso_utc(secs: u64) -> String {

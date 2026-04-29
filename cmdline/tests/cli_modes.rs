@@ -1055,3 +1055,55 @@ fn runs_example_062_std_env_basics() {
                 .and(contains("true true")),
         );
 }
+
+#[test]
+fn runs_example_063_std_log_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/063_std_log_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("[APP] [INFO] hello")
+                .and(contains("[APP] [DEBUG] dbg"))
+                .and(contains("[APP] [INFO] inf"))
+                .and(contains("[APP] [WARN] wrn"))
+                .and(contains("[APP] [ERROR] err"))
+                .and(contains("{\"level\":\"INFO\",\"prefix\":\"[APP]\",\"msg\":\"json_mode\"}"))
+                .and(contains("true true true true"))
+                .and(contains("true true true true true true true")),
+        );
+}
+
+#[test]
+fn runs_example_064_std_json_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/064_std_json_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true")
+                .and(contains("true true true"))
+                .and(contains("true true"))
+                .and(contains("true true")),
+        );
+}
+
+#[test]
+fn runs_example_065_std_xml_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/065_std_xml_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true")
+                .and(contains("true"))
+                .and(contains("true"))
+                .and(contains("true true")),
+        );
+}

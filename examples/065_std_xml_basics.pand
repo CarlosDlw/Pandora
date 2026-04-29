@@ -1,0 +1,11 @@
+from "std/xml" import parse_xml, stringify_xml
+
+node, perr := parse_xml("<note>hello</note>")
+x, serr := stringify_xml("note", "hello & bye")
+
+bad, bad_err := parse_xml("<note")
+
+print(perr == null, serr == null)
+print(x == "<note>hello &amp; bye</note>")
+print(node != null)
+print(bad == null, bad_err != null)

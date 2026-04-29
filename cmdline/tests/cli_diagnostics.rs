@@ -976,3 +976,81 @@ fn check_mode_reports_internal_env_intrinsic_forbidden() {
         .code(1)
         .stderr(contains("internal intrinsic 'env_get'"));
 }
+
+#[test]
+fn check_mode_reports_log_set_level_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(set_log_level(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_log_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(log_write(\"info\", \"x\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'log_write'"));
+}
+
+#[test]
+fn check_mode_reports_json_parse_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(parse_json(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_json_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(json_parse(\"{}\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'json_parse'"));
+}
+
+#[test]
+fn check_mode_reports_xml_parse_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(parse_xml(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_xml_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(xml_parse(\"<a>x</a>\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'xml_parse'"));
+}

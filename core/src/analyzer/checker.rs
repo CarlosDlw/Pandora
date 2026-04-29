@@ -1606,6 +1606,9 @@ impl<'a> Checker<'a> {
             || name.starts_with("regex_")
             || name.starts_with("cli_")
             || name.starts_with("env_")
+            || name.starts_with("log_")
+            || name.starts_with("json_")
+            || name.starts_with("xml_")
         {
             self.push_error(
                 format!("internal intrinsic '{name}' is not part of the public stdlib API"),

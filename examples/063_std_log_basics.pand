@@ -1,0 +1,16 @@
+from "std/log" import set_log_level, set_log_prefix, set_log_json, write_log, trace, debug, info, warn, error_msg
+
+e1 := set_log_level("debug")
+e2 := set_log_prefix("[APP]")
+e3 := set_log_json(false)
+e4 := write_log("info", "hello")
+e5 := trace("skip_me")
+e6 := debug("dbg")
+e7 := info("inf")
+e8 := warn("wrn")
+e9 := error_msg("err")
+e10 := set_log_json(true)
+e11 := info("json_mode")
+
+print(e1 == null, e2 == null, e3 == null, e4 == null)
+print(e5 == null, e6 == null, e7 == null, e8 == null, e9 == null, e10 == null, e11 == null)

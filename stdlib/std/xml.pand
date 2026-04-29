@@ -1,0 +1,5 @@
+# std/xml
+# XML parse and encode helpers.
+
+fn parse_xml(raw: str) -> (any, err) { return xml_parse(raw) }
+fn stringify_xml(name: str, text: str) -> (str, err) { return xml_stringify(name, text) }
