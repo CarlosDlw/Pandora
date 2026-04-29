@@ -8,8 +8,8 @@ use foundation::{
 use crate::{
     analyzer::{SemanticModel, Type},
     hir::{
-        BinOp, Hir, HirExpr, HirId, HirStmt, IncDecOp as HirIncDecOp, IncDecPosition as HirIncDecPosition, SymbolId,
-        UnaryOp as HirUnaryOp,
+        BinOp, Hir, HirArrayItem, HirExpr, HirId, HirStmt, IncDecOp as HirIncDecOp,
+        IncDecPosition as HirIncDecPosition, SymbolId, UnaryOp as HirUnaryOp,
     },
     integer_lit::{bytecode_int_from_checked_literal, literal_f64, literal_u128, IntConst},
 };
@@ -100,12 +100,20 @@ fn emit_stmt(
         HirStmt::FnDecl {
             symbol,
             params,
+            param_defaults,
             body,
             span,
             ..
         } => {
-            let function_chunk =
-                compile_function_chunk(hir, model, params.clone(), body, diagnostics, method_table);
+            let function_chunk = compile_function_chunk(
+                hir,
+                model,
+                params.clone(),
+                param_defaults.clone(),
+                body,
+                diagnostics,
+                method_table,
+            );
             b.define_function(*symbol, function_chunk);
             b.emit(Op::MakeClosure(*symbol), *span);
             b.emit(Op::Bind(*symbol), *span);
@@ -493,7 +501,18 @@ fn emit_expr(
             for a in args {
                 emit_expr(hir, model, *a, b, diagnostics, method_table);
             }
-            match u8::try_from(args.len()) {
+            let mut final_argc = args.len();
+            if let Some(HirExpr::Var(sym)) = hir.exprs.get(*callee) {
+                if let Some(defaults) = find_fn_param_defaults(hir, *sym) {
+                    if args.len() < defaults.len() {
+                        for default_expr in defaults.iter().skip(args.len()).flatten() {
+                            emit_expr(hir, model, *default_expr, b, diagnostics, method_table);
+                            final_argc += 1;
+                        }
+                    }
+                }
+            }
+            match u8::try_from(final_argc) {
                 Ok(argc) => b.emit(Op::CallValue(argc), span),
                 Err(_) => {
                     diagnostics.push(Diagnostic::new(
@@ -591,12 +610,19 @@ fn emit_expr(
             }
         }
         HirExpr::Array(items) => {
+            b.emit(Op::MakeArray(0), span);
             for item in items {
-                emit_expr(hir, model, *item, b, diagnostics, method_table);
-            }
-            match u8::try_from(items.len()) {
-                Ok(count) => b.emit(Op::MakeArray(count), span),
-                Err(_) => diagnostics.push(Diagnostic::new("array literal too large", span, Severity::Error)),
+                match item {
+                    HirArrayItem::Expr(item_expr) => {
+                        emit_expr(hir, model, *item_expr, b, diagnostics, method_table);
+                        b.emit(Op::MakeArray(1), span);
+                        b.emit(Op::ArrayExtend, span);
+                    }
+                    HirArrayItem::SpreadExpr(item_expr) => {
+                        emit_expr(hir, model, *item_expr, b, diagnostics, method_table);
+                        b.emit(Op::ArrayExtend, span);
+                    }
+                }
             }
         }
         HirExpr::TupleAccess { tuple, index } => {
@@ -734,6 +760,7 @@ fn compile_function_chunk(
     hir: &Hir,
     model: &SemanticModel,
     params: Vec<crate::hir::SymbolId>,
+    _param_defaults: Vec<Option<HirId>>,
     body: &[HirStmt],
     diagnostics: &mut Diagnostics,
     method_table: &std::collections::HashMap<(SymbolId, String, bool), SymbolId>,
@@ -794,6 +821,34 @@ fn resolve_struct_symbol_id_from_type_name(hir: &Hir, _model: &SemanticModel, ty
             if name == type_name {
                 return Some(*symbol);
             }
+        }
+    }
+    None
+}
+
+fn find_fn_param_defaults(hir: &Hir, symbol: SymbolId) -> Option<&[Option<HirId>]> {
+    for stmt in &hir.stmts {
+        match stmt {
+            HirStmt::FnDecl {
+                symbol: fn_symbol,
+                param_defaults,
+                ..
+            } if *fn_symbol == symbol => return Some(param_defaults.as_slice()),
+            HirStmt::ImplBlock { methods, .. } => {
+                for method in methods {
+                    if let HirStmt::FnDecl {
+                        symbol: fn_symbol,
+                        param_defaults,
+                        ..
+                    } = method
+                    {
+                        if *fn_symbol == symbol {
+                            return Some(param_defaults.as_slice());
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
     None

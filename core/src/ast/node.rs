@@ -58,6 +58,12 @@ pub enum CompoundOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArrayItem {
+    Expr(ArenaId),
+    SpreadExpr(ArenaId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AstNode {
     Invalid {
         span: Span,
@@ -122,7 +128,7 @@ pub enum AstNode {
         span: Span,
     },
     ArrayLiteral {
-        items: Vec<ArenaId>,
+        items: Vec<ArrayItem>,
         span: Span,
     },
     ArrayAccessExpr {
@@ -185,6 +191,7 @@ pub enum AstNode {
     FnDecl {
         name: ArenaId,
         params: Vec<(ArenaId, ArenaId)>,
+        param_defaults: Vec<Option<ArenaId>>,
         return_ty: ArenaId,
         body: ArenaId,
         span: Span,

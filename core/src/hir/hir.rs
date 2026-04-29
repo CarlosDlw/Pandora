@@ -85,7 +85,7 @@ pub enum HirExpr {
     },
     Tuple(Vec<HirId>),
     TupleAccess { tuple: HirId, index: usize },
-    Array(Vec<HirId>),
+    Array(Vec<HirArrayItem>),
     ArrayAccess { array: HirId, index: HirId },
     Propagate { expr: HirId },
     TryCatch {
@@ -95,6 +95,12 @@ pub enum HirExpr {
         catch_value: HirId,
     },
     Invalid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HirArrayItem {
+    Expr(HirId),
+    SpreadExpr(HirId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +140,7 @@ pub enum HirStmt {
         name: String,
         is_instance: bool,
         params: Vec<SymbolId>,
+        param_defaults: Vec<Option<HirId>>,
         return_ty: crate::analyzer::Type,
         body: Vec<HirStmt>,
         span: Span,

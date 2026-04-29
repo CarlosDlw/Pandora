@@ -2,11 +2,15 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::Type,
-    ast::{Ast, AstNode, BinaryOp, CompoundOp, IncDecOp as AstIncDecOp, IncDecPosition as AstIncDecPosition, UnaryOp},
+    ast::{
+        ArrayItem as AstArrayItem, Ast, AstNode, BinaryOp, CompoundOp, IncDecOp as AstIncDecOp,
+        IncDecPosition as AstIncDecPosition, UnaryOp,
+    },
     builtins::default_registry,
     hir::{
-        BinOp, Hir, HirExpr, HirStmt, IncDecOp as HirIncDecOp, IncDecPosition as HirIncDecPosition, ScopeId,
-        SymbolId, SymbolOrigin, SymbolTable, UnaryOp as HirUnaryOp,
+        BinOp, Hir, HirArrayItem, HirExpr, HirStmt, IncDecOp as HirIncDecOp,
+        IncDecPosition as HirIncDecPosition, ScopeId, SymbolId, SymbolOrigin, SymbolTable,
+        UnaryOp as HirUnaryOp,
     },
 };
 use foundation::{
@@ -113,12 +117,13 @@ impl<'a> Lowering<'a> {
             AstNode::FnDecl {
                 name,
                 params,
+                param_defaults,
                 return_ty,
                 body,
                 span,
             } => {
                 let symbol = self.predeclared_fns.get(&id).copied();
-                self.lower_fn_decl(*name, params, *return_ty, *body, *span, symbol)
+                self.lower_fn_decl(*name, params, param_defaults, *return_ty, *body, *span, symbol)
             }
             AstNode::StructDecl { name, fields, span } => {
                 let struct_name = match self.ast.get(*name) {
@@ -551,7 +556,13 @@ impl<'a> Lowering<'a> {
                 )
             }
             AstNode::ArrayLiteral { items, .. } => {
-                let items = items.iter().map(|item| self.lower_expr(*item)).collect::<Vec<_>>();
+                let items = items
+                    .iter()
+                    .map(|item| match item {
+                        AstArrayItem::Expr(id) => HirArrayItem::Expr(self.lower_expr(*id)),
+                        AstArrayItem::SpreadExpr(id) => HirArrayItem::SpreadExpr(self.lower_expr(*id)),
+                    })
+                    .collect::<Vec<_>>();
                 self.insert_hir_expr(HirExpr::Array(items), self.node_span(id))
             }
             AstNode::ArrayAccessExpr { base, index, .. } => {
@@ -639,6 +650,7 @@ impl<'a> Lowering<'a> {
         &mut self,
         name_id: ArenaId,
         params: &[(ArenaId, ArenaId)],
+        param_defaults: &[Option<ArenaId>],
         return_ty_id: ArenaId,
         body_id: ArenaId,
         span: Span,
@@ -667,10 +679,14 @@ impl<'a> Lowering<'a> {
         self.current_scope = fn_scope;
 
         let mut param_symbols = Vec::with_capacity(params.len());
+        let mut lowered_defaults = Vec::with_capacity(params.len());
         for (param_name, param_ty_id) in params {
             let param_ty = self.resolve_decl_type(Some(*param_ty_id));
             let param_symbol = self.bind_symbol(*param_name, param_ty, false);
             param_symbols.push(param_symbol);
+        }
+        for default in param_defaults {
+            lowered_defaults.push(default.map(|d| self.lower_expr(d)));
         }
 
         let body = self.lower_if_branch(body_id);
@@ -680,6 +696,7 @@ impl<'a> Lowering<'a> {
             name: fn_name,
             is_instance,
             params: param_symbols,
+            param_defaults: lowered_defaults,
             return_ty: ret_ty,
             body,
             span,

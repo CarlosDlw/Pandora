@@ -492,3 +492,31 @@ fn runtime_reports_array_bounds_error() {
         .code(1)
         .stderr(contains("index out of bounds: index=5, len=2"));
 }
+
+#[test]
+fn runs_example_027_array_spread() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/027_array_spread.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("[1, 2, 3, 4]"));
+}
+
+#[test]
+fn runs_example_028_optional_params_typeof() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/028_optional_params_typeof.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("hello pandora!")
+                .and(contains("hello dev!!"))
+                .and(contains("i128"))
+                .and(contains("[i128]")),
+        );
+}

@@ -44,6 +44,13 @@ pub fn default_registry() -> BuiltinRegistry {
                 params: vec![Type::Any],
                 ret: Box::new(Type::Err),
             },
+        },
+        Builtin {
+            name: "typeof",
+            ty: Type::Function {
+                params: vec![Type::Any],
+                ret: Box::new(Type::Str),
+            },
         }],
     }
 }

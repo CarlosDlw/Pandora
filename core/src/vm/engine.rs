@@ -146,6 +146,23 @@ impl<'a> Vm<'a> {
                 items.reverse();
                 self.stack.push(Value::Array(items));
             }
+            Op::ArrayExtend => {
+                let rhs = self.pop_one(span)?;
+                let lhs = self.pop_one(span)?;
+                match (lhs, rhs) {
+                    (Value::Array(mut base), Value::Array(extra)) => {
+                        base.extend(extra);
+                        self.stack.push(Value::Array(base));
+                    }
+                    (a, b) => {
+                        return Err(Diagnostic::new(
+                            format!("array spread expects arrays, got {:?} and {:?}", a, b),
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                }
+            }
             Op::TupleGet(index) => {
                 let tuple = self.pop_one(span)?;
                 match tuple {
@@ -1088,6 +1105,16 @@ fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Dia
             };
             wrap_err_value(base_err, message, code, "wrap".to_string(), span)
         }
+        "typeof" => {
+            let [arg] = args else {
+                return Err(Diagnostic::new(
+                    format!("typeof expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Str(canonical_type_name(arg)))
+        }
         _ => Err(Diagnostic::new(
             format!("unknown builtin '{name}'"),
             span,
@@ -1134,6 +1161,33 @@ fn builtin_type_name(v: &Value) -> &'static str {
         Value::Array(_) => "array",
         Value::Err { .. } => "err",
         Value::StructInstance { .. } => "struct",
+    }
+}
+
+fn canonical_type_name(v: &Value) -> String {
+    match v {
+        Value::Int128(_) => "i128".to_string(),
+        Value::UInt128(_) => "u128".to_string(),
+        Value::Bool(_) => "bool".to_string(),
+        Value::Str(_) => "str".to_string(),
+        Value::Float(_) => "f64".to_string(),
+        Value::Char(_) => "char".to_string(),
+        Value::Unit => "unit".to_string(),
+        Value::Null => "null".to_string(),
+        Value::Builtin(_) | Value::Function { .. } => "fn(any) -> any".to_string(),
+        Value::Tuple(items) => {
+            let inner = items.iter().map(canonical_type_name).collect::<Vec<_>>().join(", ");
+            format!("({inner})")
+        }
+        Value::Array(items) => {
+            if let Some(first) = items.first() {
+                format!("[{}]", canonical_type_name(first))
+            } else {
+                "[unknown]".to_string()
+            }
+        }
+        Value::Err { .. } => "err".to_string(),
+        Value::StructInstance { type_name, .. } => type_name.clone(),
     }
 }
 
@@ -1743,5 +1797,45 @@ mod tests {
         let symbols = SymbolTable::new();
         let err = execute(&b.finish(), &symbols).expect_err("array get oob");
         assert!(err.iter().any(|d| d.message.contains("index out of bounds")));
+    }
+
+    #[test]
+    fn array_extend_opcode_merges_arrays() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::MakeArray(1), s);
+        b.emit(Op::ConstI128(2), s);
+        b.emit(Op::ConstI128(3), s);
+        b.emit(Op::MakeArray(2), s);
+        b.emit(Op::ArrayExtend, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let symbols = SymbolTable::new();
+        execute(&b.finish(), &symbols).expect("array extend should execute");
+    }
+
+    #[test]
+    fn builtin_typeof_returns_type_name() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::Load(SymbolId(0)), s);
+        b.emit(Op::ConstI128(7), s);
+        b.emit(Op::CallValue(1), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        symbols.define(
+            root,
+            "typeof".to_string(),
+            crate::analyzer::Type::Function {
+                params: vec![crate::analyzer::Type::Any],
+                ret: Box::new(crate::analyzer::Type::Str),
+            },
+            crate::hir::SymbolOrigin::Builtin,
+            true,
+        );
+        execute(&b.finish(), &symbols).expect("typeof should execute");
     }
 }

@@ -82,6 +82,7 @@ pub enum Op {
     MakeTuple(u8),
     TupleGet(usize),
     MakeArray(u8),
+    ArrayExtend,
     ArrayGet,
     ArrayAssign(SymbolId),
     MakeStruct(String, Vec<String>),

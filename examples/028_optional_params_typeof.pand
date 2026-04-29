@@ -1,0 +1,8 @@
+fn greet(name: str, suffix: str = "!") -> str {
+    return "hello " + name + suffix
+}
+
+print(greet("pandora"))
+print(greet("dev", "!!"))
+print(typeof(1))
+print(typeof([1, 2, 3]))

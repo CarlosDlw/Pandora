@@ -1,34 +1,11 @@
-# agora implementaremos arrays
+arr: [i32] = [1, 2, 3]
+arr2 := [0, ...arr, 4]
+print(arr2)
 
-arr: [i32] = [1, 2, 3, 4, 5]
-print(arr)
-print(arr[0])
-print(arr[1])
-print(arr[2])
-print(arr[3])
-print(arr[4])
+fn sum(a: i32, b: i32 = 10) -> i32 {
+    return a + b
+}
 
-arr[0] = 10
-print(arr)
-print(arr[0])
-
-# constante array
-arr_const:: [i32] = [1, 2, 3, 4, 5]
-
-print(arr_const)
-
-# nested arrays
-arr_nested:: [[i32]] = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
-print(arr_nested)
-print(arr_nested[0])
-print(arr_nested[0][0])
-print(arr_nested[0][1])
-print(arr_nested[0][2])
-print(arr_nested[1])
-print(arr_nested[1][0])
-print(arr_nested[1][1])
-print(arr_nested[1][2])
-print(arr_nested[2])
-print(len(arr))
-print(len(arr_nested))
-print(len(arr_nested[0]))
+print(sum(5))
+print(sum(5, 1))
+print(typeof(arr2))

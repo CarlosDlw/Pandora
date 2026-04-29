@@ -249,7 +249,17 @@ impl<'a> Lexer<'a> {
                 }
                 '.' => {
                     self.bump();
-                    self.push_token(TokenKind::Dot, start, self.cursor);
+                    if self.peek() == Some('.') {
+                        self.bump();
+                        if self.peek() == Some('.') {
+                            self.bump();
+                            self.push_token(TokenKind::Ellipsis, start, self.cursor);
+                        } else {
+                            self.push_invalid_char_diagnostic(start, self.cursor);
+                        }
+                    } else {
+                        self.push_token(TokenKind::Dot, start, self.cursor);
+                    }
                 }
                 ';' => {
                     self.bump();

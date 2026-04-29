@@ -274,6 +274,32 @@ fn check_mode_reports_invalid_array_index_type() {
 }
 
 #[test]
+fn check_mode_reports_non_trailing_optional_parameter() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"fn bad(a: i32 = 1, b: i32) -> i32 { return a + b }\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("optional parameters must be trailing"));
+}
+
+#[test]
+fn check_mode_reports_array_spread_with_non_array_value() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"x := 1\narr := [...x]\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("array spread expects array value"));
+}
+
+#[test]
 fn check_mode_reports_tuple_fn_returning_single_tuple_symbol() {
     let mut file = NamedTempFile::new().expect("temp file");
     std::io::Write::write_all(

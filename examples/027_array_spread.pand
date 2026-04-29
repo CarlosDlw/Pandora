@@ -1,0 +1,3 @@
+base: [i32] = [2, 3]
+combined := [1, ...base, 4]
+print(combined)

@@ -27,6 +27,7 @@ pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnost
         struct_fields: HashMap::new(),
         trait_methods: HashMap::new(),
         impl_methods: HashMap::new(),
+        fn_required_params: HashMap::new(),
     };
     checker.check_program();
     (checker.model, checker.diagnostics)
@@ -43,12 +44,43 @@ struct Checker<'a> {
     struct_fields: HashMap<SymbolId, Vec<(String, AnalyzerType)>>,
     trait_methods: HashMap<SymbolId, Vec<(String, Vec<AnalyzerType>, AnalyzerType, bool)>>,
     impl_methods: HashMap<(SymbolId, Option<SymbolId>, String, bool), (Vec<AnalyzerType>, AnalyzerType)>,
+    fn_required_params: HashMap<SymbolId, usize>,
 }
 
 impl<'a> Checker<'a> {
     fn check_program(&mut self) {
+        self.collect_function_param_requirements();
         for stmt in &self.hir.stmts {
             self.check_stmt(stmt);
+        }
+    }
+
+    fn collect_function_param_requirements(&mut self) {
+        for stmt in &self.hir.stmts {
+            match stmt {
+                HirStmt::FnDecl {
+                    symbol,
+                    param_defaults,
+                    ..
+                } => {
+                    let required_count = param_defaults.iter().filter(|d| d.is_none()).count();
+                    self.fn_required_params.insert(*symbol, required_count);
+                }
+                HirStmt::ImplBlock { methods, .. } => {
+                    for method in methods {
+                        if let HirStmt::FnDecl {
+                            symbol,
+                            param_defaults,
+                            ..
+                        } = method
+                        {
+                            let required_count = param_defaults.iter().filter(|d| d.is_none()).count();
+                            self.fn_required_params.insert(*symbol, required_count);
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -84,12 +116,34 @@ impl<'a> Checker<'a> {
                 final_ty
             }
             HirStmt::FnDecl {
+                symbol,
                 params,
+                param_defaults,
                 return_ty,
                 body,
                 span,
                 ..
             } => {
+                let required_count = param_defaults.iter().filter(|d| d.is_none()).count();
+                self.fn_required_params.insert(*symbol, required_count);
+                for (idx, default) in param_defaults.iter().enumerate() {
+                    if let Some(default_expr) = default {
+                        let expected = self
+                            .symbols
+                            .symbol(params[idx])
+                            .map(|s| s.ty.clone())
+                            .unwrap_or(AnalyzerType::Unknown);
+                        let actual = self.check_expr_expected(*default_expr, *span, Some(&expected));
+                        if !is_assignable(&expected, &actual) {
+                            self.push_error(
+                                format!(
+                                    "invalid default value type for parameter {idx}: expected {expected:?}, got {actual:?}"
+                                ),
+                                *span,
+                            );
+                        }
+                    }
+                }
                 self.fn_return_stack.push(return_ty.clone());
                 for stmt in body {
                     let _ = self.check_stmt(stmt);
@@ -704,7 +758,11 @@ impl<'a> Checker<'a> {
                     return self.check_special_builtin_contract(&name, args, span);
                 }
                 let callee_ty = self.check_expr(*callee, span);
-                self.check_call(callee_ty, args, span)
+                let callee_symbol = match self.hir.exprs.get(*callee) {
+                    Some(HirExpr::Var(sym)) => Some(*sym),
+                    _ => None,
+                };
+                self.check_call(callee_ty, args, span, callee_symbol)
             }
             Some(HirExpr::Tuple(items)) => {
                 let item_tys = items
@@ -749,9 +807,39 @@ impl<'a> Checker<'a> {
                         AnalyzerType::Unknown
                     }
                 } else {
-                    let mut inferred = expected_item.unwrap_or_else(|| self.check_expr(items[0], span));
+                    let seed_ty = match &items[0] {
+                        crate::hir::HirArrayItem::Expr(item) => self.check_expr(*item, span),
+                        crate::hir::HirArrayItem::SpreadExpr(item) => match self.check_expr(*item, span) {
+                            AnalyzerType::Array(inner) => *inner,
+                            other => {
+                                self.push_error(
+                                    format!("array spread expects array value, got {other:?}"),
+                                    span,
+                                );
+                                AnalyzerType::Unknown
+                            }
+                        },
+                    };
+                    let mut inferred = expected_item.unwrap_or(seed_ty);
                     for item in items {
-                        let actual = self.check_expr_expected(*item, span, Some(&inferred));
+                        let actual = match item {
+                            crate::hir::HirArrayItem::Expr(item) => {
+                                self.check_expr_expected(*item, span, Some(&inferred))
+                            }
+                            crate::hir::HirArrayItem::SpreadExpr(item) => {
+                                let spread_ty = self.check_expr(*item, span);
+                                match spread_ty {
+                                    AnalyzerType::Array(inner) => *inner,
+                                    other => {
+                                        self.push_error(
+                                            format!("array spread expects array value, got {other:?}"),
+                                            span,
+                                        );
+                                        AnalyzerType::Unknown
+                                    }
+                                }
+                            }
+                        };
                         if !is_assignable(&inferred, &actual) {
                             if matches!(inferred, AnalyzerType::Unknown) {
                                 inferred = actual;
@@ -1123,7 +1211,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_call(&mut self, callee_ty: AnalyzerType, args: &[HirId], span: Span) -> AnalyzerType {
+    fn check_call(
+        &mut self,
+        callee_ty: AnalyzerType,
+        args: &[HirId],
+        span: Span,
+        callee_symbol: Option<SymbolId>,
+    ) -> AnalyzerType {
         let AnalyzerType::Function { params, ret } = callee_ty else {
             self.push_error("attempted call on non-function value", span);
             for arg in args {
@@ -1134,11 +1228,21 @@ impl<'a> Checker<'a> {
 
         let is_variadic_any = params.len() == 1 && params[0] == AnalyzerType::Any;
 
-        if !is_variadic_any && params.len() != args.len() {
-            self.push_error(
-                format!("invalid argument count: expected {}, got {}", params.len(), args.len()),
-                span,
-            );
+        if !is_variadic_any {
+            let required = callee_symbol
+                .and_then(|sym| self.fn_required_params.get(&sym).copied())
+                .unwrap_or(params.len());
+            if args.len() < required || args.len() > params.len() {
+                self.push_error(
+                    format!(
+                        "invalid argument count: expected between {} and {}, got {}",
+                        required,
+                        params.len(),
+                        args.len()
+                    ),
+                    span,
+                );
+            }
         }
 
         for (idx, arg) in args.iter().enumerate() {
@@ -1300,10 +1404,21 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            "typeof" => {
+                if args.len() != 1 {
+                    self.push_error(
+                        format!("typeof expects exactly 1 argument, got {}", args.len()),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                }
+                let _ = self.check_expr(args[0], span);
+                AnalyzerType::Str
+            }
             _ => {
                 // fall through to generic behavior for other builtins
                 let callee_ty = self.resolve_named_type(name);
-                self.check_call(callee_ty, args, span)
+                self.check_call(callee_ty, args, span, None)
             }
         }
     }
@@ -1653,6 +1768,20 @@ mod tests {
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
         assert!(diagnostics.iter().any(|d| d.message.contains("array index must be integer")));
+    }
+
+    #[test]
+    fn supports_optional_params_and_typeof_builtin() {
+        let src = r#"
+            fn add(a: i32, b: i32 = 10) -> i32 { return a + b }
+            x := add(5)
+            y := typeof(x)
+        "#;
+        let lex_output = lex(FileId::from_u32(622), src);
+        let (ast, _) = parse(FileId::from_u32(622), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
     }
 
     #[test]

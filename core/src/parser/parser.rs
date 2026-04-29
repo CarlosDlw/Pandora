@@ -560,7 +560,7 @@ impl Parser {
             self.push_error("expected '(' after function name", span);
             return self.invalid_node(span);
         }
-        let params = self.parse_fn_params(true);
+        let (params, param_defaults) = self.parse_fn_params(true);
         if !self.consume_if(TokenKind::RightParen) {
             self.push_error("expected ')' after function parameters", self.current_span_or_eof());
             return self.invalid_node(name_token.span);
@@ -575,6 +575,7 @@ impl Parser {
         self.insert_node(AstNode::FnDecl {
             name,
             params,
+            param_defaults,
             return_ty,
             body,
             span,
@@ -679,7 +680,7 @@ impl Parser {
             self.push_error("expected '(' after method name", self.current_span_or_eof());
             return self.invalid_node(fn_span);
         }
-        let params = self.parse_fn_params(true);
+        let (params, param_defaults) = self.parse_fn_params(true);
         if !self.consume_if(TokenKind::RightParen) {
             self.push_error("expected ')' after method parameters", self.current_span_or_eof());
         }
@@ -694,16 +695,19 @@ impl Parser {
         self.insert_node(AstNode::FnDecl {
             name,
             params,
+            param_defaults,
             return_ty,
             body: empty_body,
             span: merge_span(fn_span, self.node_span(return_ty)),
         })
     }
 
-    fn parse_fn_params(&mut self, allow_self: bool) -> Vec<(ArenaId, ArenaId)> {
+    fn parse_fn_params(&mut self, allow_self: bool) -> (Vec<(ArenaId, ArenaId)>, Vec<Option<ArenaId>>) {
         let mut params = Vec::new();
+        let mut defaults = Vec::new();
+        let mut saw_optional = false;
         if self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
-            return params;
+            return (params, defaults);
         }
         loop {
             if allow_self && self.current().is_some_and(|t| t.kind == TokenKind::SelfKw) {
@@ -715,6 +719,7 @@ impl Parser {
                 });
                 let self_ty = self.insert_node(AstNode::SelfTypeRef { span: self_span });
                 params.push((self_name, self_ty));
+                defaults.push(None);
             } else {
                 let param_name = self.parse_required_identifier("expected parameter name");
                 if !self.consume_if(TokenKind::Colon) {
@@ -722,14 +727,27 @@ impl Parser {
                     break;
                 }
                 let param_ty = self.parse_type_ref();
+                let default_value = if self.consume_if(TokenKind::Assign) {
+                    saw_optional = true;
+                    Some(self.parse_expression())
+                } else {
+                    if saw_optional {
+                        self.push_error(
+                            "optional parameters must be trailing (all required params must come first)",
+                            self.current_span_or_eof(),
+                        );
+                    }
+                    None
+                };
                 params.push((param_name, param_ty));
+                defaults.push(default_value);
             }
             if self.consume_if(TokenKind::Comma) {
                 continue;
             }
             break;
         }
-        params
+        (params, defaults)
     }
 
     fn parse_required_identifier(&mut self, message: &str) -> ArenaId {
@@ -1568,6 +1586,28 @@ mod tests {
             Some(AstNode::LetDecl { value, .. })
                 if matches!(ast.get(*value), Some(AstNode::ArrayAccessExpr { .. }))
         ));
+    }
+
+    #[test]
+    fn parses_array_spread_and_optional_param_defaults() {
+        let source = "fn f(a: i32, b: i32 = 2) -> i32 { return a + b }\narr: [i32] = [1, ...[2, 3]]";
+        let lex_out = lex(FileId::from_u32(532), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(532), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let Some(AstNode::FnDecl { param_defaults, .. }) = ast.get(ast.roots[0]) else {
+            panic!("expected fn");
+        };
+        assert_eq!(param_defaults.len(), 2);
+        assert!(param_defaults[0].is_none());
+        assert!(param_defaults[1].is_some());
+        let Some(AstNode::LetDecl { value, .. }) = ast.get(ast.roots[1]) else {
+            panic!("expected let");
+        };
+        let Some(AstNode::ArrayLiteral { items, .. }) = ast.get(*value) else {
+            panic!("expected array literal");
+        };
+        assert_eq!(items.len(), 2);
+        assert!(matches!(items[1], crate::ast::ArrayItem::SpreadExpr(_)));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{AstNode, BinaryOp, IncDecOp, IncDecPosition, UnaryOp},
+    ast::{ArrayItem, AstNode, BinaryOp, IncDecOp, IncDecPosition, UnaryOp},
     lexer::TokenKind,
 };
 use foundation::ids::ArenaId;
@@ -440,7 +440,7 @@ impl Parser {
     fn parse_array_literal(&mut self) -> ArenaId {
         let open_span = self.current_span_or_eof();
         self.bump();
-        let mut items = Vec::new();
+        let mut items: Vec<ArrayItem> = Vec::new();
         if self.consume_if(TokenKind::RightBracket) {
             return self.insert_node(AstNode::ArrayLiteral {
                 items,
@@ -448,7 +448,12 @@ impl Parser {
             });
         }
         loop {
-            items.push(self.parse_expression());
+            if self.consume_if(TokenKind::Ellipsis) {
+                let expr = self.parse_expression();
+                items.push(ArrayItem::SpreadExpr(expr));
+            } else {
+                items.push(ArrayItem::Expr(self.parse_expression()));
+            }
             if self.consume_if(TokenKind::Comma) {
                 if self.current().is_some_and(|t| t.kind == TokenKind::RightBracket) {
                     break;
