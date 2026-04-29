@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
+use csv::{ReaderBuilder as CsvReaderBuilder, WriterBuilder as CsvWriterBuilder};
 use quick_xml::Reader as XmlReader;
 use quick_xml::events::Event as XmlEvent;
 use regex::Regex;
@@ -2130,6 +2131,62 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     },
                 ])),
             }
+        }
+        "fs_path_stem" | "path_stem" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_path_stem expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_path_stem path", span)?;
+            let p = std::path::Path::new(path);
+            match p.file_stem().and_then(|s| s.to_str()) {
+                Some(stem) => Ok(Value::Tuple(vec![Value::Str(stem.to_string()), Value::Null])),
+                None => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: "path has no stem".to_string(),
+                        code: 1,
+                        origin: "fs_path_stem".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "fs_path_normalize" | "path_normalize" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_path_normalize expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_path_normalize path", span)?;
+            Ok(Value::Str(path_normalize_lex(path)))
+        }
+        "fs_path_is_abs" | "path_is_abs" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_path_is_abs expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_path_is_abs path", span)?;
+            Ok(Value::Bool(std::path::Path::new(path).is_absolute()))
+        }
+        "fs_path_is_relative" | "path_is_relative" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_path_is_relative expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_path_is_relative path", span)?;
+            Ok(Value::Bool(std::path::Path::new(path).is_relative()))
         }
         "fs_metadata_len" | "metadata_len" => {
             let [path] = args else {
@@ -4462,6 +4519,163 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ])),
             }
         }
+        "csv_parse" | "parse_csv" => {
+            let [raw] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let raw = expect_str_arg(raw, "parse_csv raw", span)?;
+            match parse_csv_basic(raw) {
+                Ok(rows) => Ok(Value::Tuple(vec![rows, Value::Null])),
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Null,
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "parse_csv".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "csv_stringify" | "stringify_csv" => {
+            let [rows] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            match stringify_csv_basic(rows) {
+                Ok(out) => Ok(Value::Tuple(vec![Value::Str(out), Value::Null])),
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "stringify_csv".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "mime_guess" | "guess_mime" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "guess_mime path", span)?;
+            Ok(Value::Str(mime_guess_from_path(path)))
+        }
+        "mime_from_ext" | "from_extension" => {
+            let [ext] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let ext = expect_str_arg(ext, "from_extension ext", span)?;
+            Ok(Value::Str(mime_from_extension(ext)))
+        }
+        "mime_is_text" | "is_text_mime" => {
+            let [mime] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let mime = expect_str_arg(mime, "is_text_mime mime", span)?;
+            Ok(Value::Bool(mime_is_textual(mime)))
+        }
+        "url_parse" | "parse_url" => {
+            let [raw] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let raw = expect_str_arg(raw, "parse_url raw", span)?;
+            match parse_url_basic(raw) {
+                Ok(parts) => Ok(Value::Tuple(vec![parts, Value::Null])),
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Map(vec![]),
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "parse_url".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "url_build" | "build_url" => {
+            let [scheme, host, path, query, fragment] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 5 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let scheme = expect_str_arg(scheme, "build_url scheme", span)?;
+            let host = expect_str_arg(host, "build_url host", span)?;
+            let path = expect_str_arg(path, "build_url path", span)?;
+            let query = expect_str_arg(query, "build_url query", span)?;
+            let fragment = expect_str_arg(fragment, "build_url fragment", span)?;
+            match build_url_basic(scheme, host, path, query, fragment) {
+                Ok(url) => Ok(Value::Tuple(vec![Value::Str(url), Value::Null])),
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "build_url".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "url_encode_component" | "encode_url_component" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "encode_url_component input", span)?;
+            Ok(Value::Str(url_encode_component_basic(input)))
+        }
+        "url_decode_component" | "decode_url_component" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "decode_url_component input", span)?;
+            match url_decode_component_basic(input) {
+                Ok(out) => Ok(Value::Tuple(vec![Value::Str(out), Value::Null])),
+                Err(msg) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: msg,
+                        code: 1,
+                        origin: "decode_url_component".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
         "xml_parse" | "parse_xml" => {
             let [raw] = args else {
                 return Err(Diagnostic::new(
@@ -6117,6 +6331,214 @@ fn value_to_json(value: &Value) -> Result<JsonValue, String> {
     }
 }
 
+fn parse_csv_basic(raw: &str) -> Result<Value, String> {
+    let mut reader = CsvReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(raw.as_bytes());
+    let mut rows = Vec::new();
+    for record in reader.records() {
+        let record = record.map_err(|e| e.to_string())?;
+        rows.push(Value::Array(
+            record
+                .iter()
+                .map(|field| Value::Str(field.to_string()))
+                .collect(),
+        ));
+    }
+    Ok(Value::Array(rows))
+}
+
+fn stringify_csv_basic(value: &Value) -> Result<String, String> {
+    let Value::Array(rows) = value else {
+        return Err("csv stringify expects array rows".to_string());
+    };
+    let mut writer = CsvWriterBuilder::new()
+        .has_headers(false)
+        .from_writer(Vec::new());
+    for row in rows {
+        let Value::Array(cells) = row else {
+            return Err("csv stringify expects rows as arrays".to_string());
+        };
+        let mut record = Vec::with_capacity(cells.len());
+        for cell in cells {
+            let Value::Str(text) = cell else {
+                return Err("csv stringify expects cell values of type str".to_string());
+            };
+            record.push(text.as_str());
+        }
+        writer.write_record(&record).map_err(|e| e.to_string())?;
+    }
+    let bytes = writer.into_inner().map_err(|e| e.to_string())?;
+    String::from_utf8(bytes).map_err(|e| e.to_string())
+}
+
+fn mime_guess_from_path(path: &str) -> String {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    mime_from_extension(ext)
+}
+
+fn mime_from_extension(ext: &str) -> String {
+    let normalized = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    match normalized.as_str() {
+        "txt" => "text/plain; charset=utf-8",
+        "html" | "htm" => "text/html; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "csv" => "text/csv; charset=utf-8",
+        "js" | "mjs" => "application/javascript; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "xml" => "application/xml; charset=utf-8",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "gz" => "application/gzip",
+        "wasm" => "application/wasm",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+fn mime_is_textual(mime: &str) -> bool {
+    let bare = mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    bare.starts_with("text/")
+        || bare == "application/json"
+        || bare == "application/xml"
+        || bare == "application/javascript"
+        || bare == "image/svg+xml"
+}
+
+fn parse_url_basic(raw: &str) -> Result<Value, String> {
+    let scheme_end = raw
+        .find("://")
+        .ok_or_else(|| "url must contain scheme separator '://'".to_string())?;
+    let scheme = &raw[..scheme_end];
+    if scheme.is_empty() {
+        return Err("url scheme is empty".to_string());
+    }
+    let rest = &raw[(scheme_end + 3)..];
+    if rest.is_empty() {
+        return Err("url host is empty".to_string());
+    }
+    let (before_fragment, fragment) = match rest.split_once('#') {
+        Some((a, b)) => (a, b),
+        None => (rest, ""),
+    };
+    let (before_query, query) = match before_fragment.split_once('?') {
+        Some((a, b)) => (a, b),
+        None => (before_fragment, ""),
+    };
+    let (host, path) = match before_query.find('/') {
+        Some(idx) => (&before_query[..idx], &before_query[idx..]),
+        None => (before_query, "/"),
+    };
+    if host.is_empty() {
+        return Err("url host is empty".to_string());
+    }
+    Ok(Value::Map(vec![
+        (Value::Str("scheme".to_string()), Value::Str(scheme.to_string())),
+        (Value::Str("host".to_string()), Value::Str(host.to_string())),
+        (Value::Str("path".to_string()), Value::Str(path.to_string())),
+        (Value::Str("query".to_string()), Value::Str(query.to_string())),
+        (Value::Str("fragment".to_string()), Value::Str(fragment.to_string())),
+    ]))
+}
+
+fn build_url_basic(scheme: &str, host: &str, path: &str, query: &str, fragment: &str) -> Result<String, String> {
+    if scheme.is_empty() {
+        return Err("url scheme cannot be empty".to_string());
+    }
+    if host.is_empty() {
+        return Err("url host cannot be empty".to_string());
+    }
+    let safe_path = if path.is_empty() {
+        "/".to_string()
+    } else if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
+    let mut out = format!("{scheme}://{host}{safe_path}");
+    if !query.is_empty() {
+        out.push('?');
+        out.push_str(query);
+    }
+    if !fragment.is_empty() {
+        out.push('#');
+        out.push_str(fragment);
+    }
+    Ok(out)
+}
+
+fn url_encode_component_basic(input: &str) -> String {
+    let mut out = String::new();
+    for b in input.as_bytes() {
+        let keep = (*b >= b'a' && *b <= b'z')
+            || (*b >= b'A' && *b <= b'Z')
+            || (*b >= b'0' && *b <= b'9')
+            || matches!(*b, b'-' | b'_' | b'.' | b'~');
+        if keep {
+            out.push(*b as char);
+        } else {
+            out.push('%');
+            out.push_str(&format!("{:02X}", b));
+        }
+    }
+    out
+}
+
+fn url_decode_component_basic(input: &str) -> Result<String, String> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' => {
+                if i + 2 >= bytes.len() {
+                    return Err("incomplete percent-encoding".to_string());
+                }
+                let hi = hex_val(bytes[i + 1]).ok_or_else(|| "invalid percent-encoding".to_string())?;
+                let lo = hex_val(bytes[i + 2]).ok_or_else(|| "invalid percent-encoding".to_string())?;
+                out.push((hi << 4) | lo);
+                i += 3;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).map_err(|_| "decoded url component is not valid utf-8".to_string())
+}
+
+fn hex_val(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(10 + (c - b'a')),
+        b'A'..=b'F' => Some(10 + (c - b'A')),
+        _ => None,
+    }
+}
+
 fn parse_xml_basic(raw: &str) -> Result<Value, String> {
     let mut reader = XmlReader::from_str(raw);
     reader.config_mut().trim_text(true);
@@ -6158,6 +6580,66 @@ fn xml_escape_text(text: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+fn path_normalize_lex(path: &str) -> String {
+    use std::path::{Component, Path};
+
+    let p = Path::new(path);
+    let mut prefix: Option<String> = None;
+    let mut has_root = false;
+    let mut parts: Vec<String> = Vec::new();
+
+    for comp in p.components() {
+        match comp {
+            Component::Prefix(px) => {
+                prefix = Some(px.as_os_str().to_string_lossy().to_string());
+            }
+            Component::RootDir => {
+                has_root = true;
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if let Some(last) = parts.last() {
+                    if last != ".." {
+                        parts.pop();
+                    } else if !has_root {
+                        parts.push("..".to_string());
+                    }
+                } else if !has_root {
+                    parts.push("..".to_string());
+                }
+            }
+            Component::Normal(seg) => {
+                parts.push(seg.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    let mut out = String::new();
+    if let Some(px) = prefix {
+        out.push_str(&px);
+    }
+    if has_root {
+        out.push(std::path::MAIN_SEPARATOR);
+    }
+    if !parts.is_empty() {
+        if !out.is_empty() && !out.ends_with(std::path::MAIN_SEPARATOR) {
+            out.push(std::path::MAIN_SEPARATOR);
+        }
+        let sep = std::path::MAIN_SEPARATOR.to_string();
+        out.push_str(&parts.join(&sep));
+    }
+
+    if out.is_empty() {
+        if has_root {
+            std::path::MAIN_SEPARATOR.to_string()
+        } else {
+            ".".to_string()
+        }
+    } else {
+        out
+    }
 }
 
 fn format_unix_secs_iso_utc(secs: u64) -> String {

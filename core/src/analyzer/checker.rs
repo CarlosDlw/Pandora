@@ -1608,6 +1608,9 @@ impl<'a> Checker<'a> {
             || name.starts_with("env_")
             || name.starts_with("log_")
             || name.starts_with("json_")
+            || name.starts_with("csv_")
+            || name.starts_with("mime_")
+            || name.starts_with("url_")
             || name.starts_with("xml_")
         {
             self.push_error(

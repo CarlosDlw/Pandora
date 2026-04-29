@@ -1,0 +1,13 @@
+# std/path
+# Safe, lexical path manipulation helpers.
+
+fn path_join(a: str, b: str) -> str { return fs_path_join(a, b) }
+fn path_normalize(path: str) -> str { return fs_path_normalize(path) }
+
+fn path_parent(path: str) -> (str, err) { return fs_path_parent(path) }
+fn path_filename(path: str) -> (str, err) { return fs_path_filename(path) }
+fn path_extension(path: str) -> (str, err) { return fs_path_extension(path) }
+fn path_stem(path: str) -> (str, err) { return fs_path_stem(path) }
+
+fn path_is_abs(path: str) -> bool { return fs_path_is_abs(path) }
+fn path_is_relative(path: str) -> bool { return fs_path_is_relative(path) }

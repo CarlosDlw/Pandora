@@ -1,0 +1,13 @@
+from "std/url" import parse_url, build_url, encode_url_component, decode_url_component
+
+url, uerr := build_url("https", "example.com", "/search", "q=pandora", "top")
+parts, perr := parse_url(url)
+
+enc: str = encode_url_component("a b+c?")
+dec, derr := decode_url_component(enc)
+bad_dec, bad_err := decode_url_component("%ZZ")
+
+print(uerr == null, perr == null, parts.len().gt((0).to_u32()))
+print(url == "https://example.com/search?q=pandora#top")
+print(enc == "a%20b%2Bc%3F", derr == null, dec == "a b+c?")
+print(bad_dec == "", bad_err != null)

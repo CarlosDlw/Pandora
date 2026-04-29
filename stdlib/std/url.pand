@@ -1,0 +1,7 @@
+# std/url
+# URL parsing and building helpers.
+
+fn parse_url(raw: str) -> (map[str]str, err) { return url_parse(raw) }
+fn build_url(scheme: str, host: str, path: str, query: str, fragment: str) -> (str, err) { return url_build(scheme, host, path, query, fragment) }
+fn encode_url_component(input: str) -> str { return url_encode_component(input) }
+fn decode_url_component(input: str) -> (str, err) { return url_decode_component(input) }

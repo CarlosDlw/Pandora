@@ -1,0 +1,19 @@
+from "std/path" import path_join, path_normalize, path_parent, path_filename, path_extension, path_stem, path_is_abs, path_is_relative
+
+p1 := path_join("/tmp", "pandora")
+p2 := path_join(p1, "../demo/./file.txt")
+n1 := path_normalize(p2)
+
+pp, perr := path_parent(n1)
+name, nerr := path_filename(n1)
+ext, eerr := path_extension(n1)
+base, berr := path_stem(n1)
+
+no_parent, np_err := path_parent("/")
+no_ext, ne_err := path_extension("/tmp/readme")
+
+print(n1.contains("tmp"), n1.contains("demo"), n1.contains("file.txt"))
+print(pp != "", perr == null, name == "file.txt", nerr == null)
+print(ext == "txt", eerr == null, base == "file", berr == null)
+print(no_parent == "", np_err != null, no_ext == "", ne_err != null)
+print(path_is_abs("/tmp"), path_is_relative("a/b"))

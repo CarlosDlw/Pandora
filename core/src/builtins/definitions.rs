@@ -532,6 +532,62 @@ pub fn default_registry() -> BuiltinRegistry {
         },
     },
     BuiltinFunction {
+        name: "fs_path_stem",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "path_stem",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_path_normalize",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "path_normalize",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_path_is_abs",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "path_is_abs",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_path_is_relative",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "path_is_relative",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
         name: "fs_metadata_len",
         ty: Type::Function {
             params: vec![Type::Str],
@@ -3118,6 +3174,132 @@ pub fn default_registry() -> BuiltinRegistry {
         name: "stringify_json_pretty",
         ty: Type::Function {
             params: vec![Type::Any],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "csv_parse",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "parse_csv",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "csv_stringify",
+        ty: Type::Function {
+            params: vec![Type::Any],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "stringify_csv",
+        ty: Type::Function {
+            params: vec![Type::Any],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "mime_guess",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "guess_mime",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "mime_from_ext",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "from_extension",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "mime_is_text",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "is_text_mime",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "url_parse",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Map(Box::new(Type::Str), Box::new(Type::Str)), Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "parse_url",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Map(Box::new(Type::Str), Box::new(Type::Str)), Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "url_build",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str, Type::Str, Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "build_url",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str, Type::Str, Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "url_encode_component",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "encode_url_component",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "url_decode_component",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "decode_url_component",
+        ty: Type::Function {
+            params: vec![Type::Str],
             ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
         },
     },

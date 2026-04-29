@@ -1,0 +1,10 @@
+from "std/mime" import guess_mime, from_extension, is_text_mime
+
+m1: str = guess_mime("index.html")
+m2: str = from_extension("json")
+m3: str = guess_mime("archive.unknownext")
+m4: str = from_extension(".svg")
+
+print(m1 == "text/html; charset=utf-8", m2 == "application/json; charset=utf-8")
+print(m3 == "application/octet-stream", m4 == "image/svg+xml")
+print(is_text_mime(m1), is_text_mime(m2), is_text_mime(m3))

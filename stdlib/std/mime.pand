@@ -1,0 +1,6 @@
+# std/mime
+# MIME type helpers by extension/path.
+
+fn guess_mime(path: str) -> str { return mime_guess(path) }
+fn from_extension(ext: str) -> str { return mime_from_ext(ext) }
+fn is_text_mime(mime: str) -> bool { return mime_is_text(mime) }

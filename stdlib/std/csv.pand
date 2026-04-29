@@ -1,0 +1,5 @@
+# std/csv
+# CSV parse and encode helpers.
+
+fn parse_csv(raw: str) -> (any, err) { return csv_parse(raw) }
+fn stringify_csv(rows: any) -> (str, err) { return csv_stringify(rows) }

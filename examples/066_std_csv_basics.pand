@@ -1,0 +1,10 @@
+from "std/csv" import parse_csv, stringify_csv
+
+rows, perr := parse_csv("name,age\nana,30\nbob,25\n")
+out, serr := stringify_csv(rows)
+
+bad_out, bad_err := stringify_csv(["name", "age"])
+
+print(perr == null, serr == null)
+print(out.contains("name,age"), out.contains("ana,30"), out.contains("bob,25"))
+print(bad_out == "", bad_err != null)

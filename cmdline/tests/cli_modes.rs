@@ -1107,3 +1107,67 @@ fn runs_example_065_std_xml_basics() {
                 .and(contains("true true")),
         );
 }
+
+#[test]
+fn runs_example_066_std_csv_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/066_std_csv_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true")
+                .and(contains("true true true"))
+                .and(contains("true true true"))
+                .and(contains("true true")),
+        );
+}
+
+#[test]
+fn runs_example_067_std_path_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/067_std_path_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true")
+                .and(contains("true true true true"))
+                .and(contains("true true true true"))
+                .and(contains("true true true true"))
+                .and(contains("true true")),
+        );
+}
+
+#[test]
+fn runs_example_068_std_mime_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/068_std_mime_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true")
+                .and(contains("true true"))
+                .and(contains("true true false")),
+        );
+}
+
+#[test]
+fn runs_example_069_std_url_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/069_std_url_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true")
+                .and(contains("true"))
+                .and(contains("true true true"))
+                .and(contains("true true")),
+        );
+}

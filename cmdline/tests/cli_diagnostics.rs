@@ -1054,3 +1054,107 @@ fn check_mode_reports_internal_xml_intrinsic_forbidden() {
         .code(1)
         .stderr(contains("internal intrinsic 'xml_parse'"));
 }
+
+#[test]
+fn check_mode_reports_parse_csv_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(parse_csv(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_csv_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(csv_parse(\"a,b\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'csv_parse'"));
+}
+
+#[test]
+fn check_mode_reports_path_normalize_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(path_normalize(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_fs_path_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(fs_path_normalize(\"a/../b\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'fs_path_normalize'"));
+}
+
+#[test]
+fn check_mode_reports_guess_mime_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(guess_mime(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_mime_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(mime_guess(\"a.txt\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'mime_guess'"));
+}
+
+#[test]
+fn check_mode_reports_parse_url_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(parse_url(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_url_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(url_parse(\"https://a/b\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'url_parse'"));
+}
