@@ -2667,6 +2667,292 @@ pub fn default_registry() -> BuiltinRegistry {
             ret: Box::new(Type::Bool),
         },
     },
+    BuiltinFunction {
+        name: "regex_is_match",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Bool, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "is_match",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Bool, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "regex_find",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "find",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "regex_find_all",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Array(Box::new(Type::Str)), Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "find_all",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Array(Box::new(Type::Str)), Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "regex_replace",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "replace_regex",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "regex_replace_all",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "replace_all_regex",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "cli_args",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Array(Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "args_cli",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Array(Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "cli_arg_count",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "arg_count",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "cli_positional",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Array(Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "positional",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Array(Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "cli_command",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "command",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "cli_has_flag",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "has_flag",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "cli_flag_value",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "flag_value",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "cli_help_requested",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "help_requested",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "cli_version_requested",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "version_requested",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "env_get",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "get_env",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "env_get_or",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "get_env_or",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "env_set",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "set_env",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "env_unset",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "unset_env",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "env_has",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "has_env",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "env_list",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "list_env",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "env_list_prefix",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "list_env_prefix",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Map(Box::new(Type::Str), Box::new(Type::Str))),
+        },
+    },
     ];
 
     let mut methods = Vec::new();

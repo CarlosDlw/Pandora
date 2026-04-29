@@ -1,0 +1,12 @@
+from "std/cli" import args_cli, arg_count, positional, command, has_flag, flag_value, help_requested, version_requested
+
+all := args_cli()
+pos := positional()
+cmd, cmd_err := command()
+v, v_err := flag_value("name")
+
+print(arg_count().eq((0).to_u32()), len(all).eq((0).to_u32()), len(pos).eq((0).to_u32()))
+print(cmd_err != null, cmd == "")
+print(has_flag("help") == false, has_flag("h") == false, help_requested() == false)
+print(has_flag("version") == false, version_requested() == false)
+print(v_err != null, v == "")

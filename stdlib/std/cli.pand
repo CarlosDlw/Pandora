@@ -1,0 +1,13 @@
+# std/cli
+# CLI argument and flag parsing helpers.
+
+fn args_cli() -> [str] { return cli_args() }
+fn arg_count() -> u64 { return cli_arg_count() }
+fn positional() -> [str] { return cli_positional() }
+fn command() -> (str, err) { return cli_command() }
+
+fn has_flag(flag: str) -> bool { return cli_has_flag(flag) }
+fn flag_value(flag: str) -> (str, err) { return cli_flag_value(flag) }
+
+fn help_requested() -> bool { return cli_help_requested() }
+fn version_requested() -> bool { return cli_version_requested() }

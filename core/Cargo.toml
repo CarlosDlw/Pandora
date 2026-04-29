@@ -7,3 +7,4 @@ edition = "2024"
 foundation = { path = "../foundation" }
 sha2 = "0.10"
 base64 = "0.22"
+regex = "1"

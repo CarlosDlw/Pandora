@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
+use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use foundation::{
@@ -3894,6 +3895,354 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             let input = expect_str_arg(input, "utf8_is_valid input", span)?;
             Ok(Value::Bool(std::str::from_utf8(input.as_bytes()).is_ok()))
         }
+        "regex_is_match" | "is_match" => {
+            let [pattern, input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let pattern = expect_str_arg(pattern, "is_match pattern", span)?;
+            let input = expect_str_arg(input, "is_match input", span)?;
+            match Regex::new(pattern) {
+                Ok(re) => Ok(Value::Tuple(vec![Value::Bool(re.is_match(input)), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Bool(false),
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "is_match".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "regex_find" | "find" => {
+            let [pattern, input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let pattern = expect_str_arg(pattern, "find pattern", span)?;
+            let input = expect_str_arg(input, "find input", span)?;
+            match Regex::new(pattern) {
+                Ok(re) => {
+                    let out = re.find(input).map(|m| m.as_str().to_string()).unwrap_or_default();
+                    Ok(Value::Tuple(vec![Value::Str(out), Value::Null]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "find".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "regex_find_all" | "find_all" => {
+            let [pattern, input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let pattern = expect_str_arg(pattern, "find_all pattern", span)?;
+            let input = expect_str_arg(input, "find_all input", span)?;
+            match Regex::new(pattern) {
+                Ok(re) => {
+                    let out = re
+                        .find_iter(input)
+                        .map(|m| Value::Str(m.as_str().to_string()))
+                        .collect::<Vec<_>>();
+                    Ok(Value::Tuple(vec![Value::Array(out), Value::Null]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Array(vec![]),
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "find_all".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "regex_replace" | "replace_regex" => {
+            let [pattern, input, replacement] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 3 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let pattern = expect_str_arg(pattern, "replace_regex pattern", span)?;
+            let input = expect_str_arg(input, "replace_regex input", span)?;
+            let replacement = expect_str_arg(replacement, "replace_regex replacement", span)?;
+            match Regex::new(pattern) {
+                Ok(re) => Ok(Value::Tuple(vec![
+                    Value::Str(re.replace(input, replacement).to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "replace_regex".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "regex_replace_all" | "replace_all_regex" => {
+            let [pattern, input, replacement] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 3 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let pattern = expect_str_arg(pattern, "replace_all_regex pattern", span)?;
+            let input = expect_str_arg(input, "replace_all_regex input", span)?;
+            let replacement = expect_str_arg(replacement, "replace_all_regex replacement", span)?;
+            match Regex::new(pattern) {
+                Ok(re) => Ok(Value::Tuple(vec![
+                    Value::Str(re.replace_all(input, replacement).to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "replace_all_regex".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "cli_args" | "args_cli" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Array(
+                cli_script_args()
+                    .into_iter()
+                    .map(Value::Str)
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        "cli_arg_count" | "arg_count" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::UInt128(cli_script_args().len() as u128))
+        }
+        "cli_positional" | "positional" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Array(
+                cli_positional_args()
+                    .into_iter()
+                    .map(Value::Str)
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        "cli_command" | "command" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let positional = cli_positional_args();
+            if let Some(cmd) = positional.first() {
+                Ok(Value::Tuple(vec![Value::Str(cmd.clone()), Value::Null]))
+            } else {
+                Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: "no command provided".to_string(),
+                        code: 1,
+                        origin: "command".to_string(),
+                        cause: None,
+                    },
+                ]))
+            }
+        }
+        "cli_has_flag" | "has_flag" => {
+            let [flag] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let flag = expect_str_arg(flag, "has_flag flag", span)?;
+            Ok(Value::Bool(cli_has_flag(flag)))
+        }
+        "cli_flag_value" | "flag_value" => {
+            let [flag] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let flag = expect_str_arg(flag, "flag_value flag", span)?;
+            match cli_flag_value(flag) {
+                Some(v) => Ok(Value::Tuple(vec![Value::Str(v), Value::Null])),
+                None => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: format!("flag '{flag}' not found"),
+                        code: 1,
+                        origin: "flag_value".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "cli_help_requested" | "help_requested" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Bool(cli_has_flag("help") || cli_has_flag("h")))
+        }
+        "cli_version_requested" | "version_requested" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Bool(cli_has_flag("version") || cli_has_flag("v")))
+        }
+        "env_get" | "get_env" => {
+            let [key] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let key = expect_str_arg(key, "get_env key", span)?;
+            match std::env::var(key) {
+                Ok(v) => Ok(Value::Tuple(vec![Value::Str(v), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "get_env".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "env_get_or" | "get_env_or" => {
+            let [key, default] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let key = expect_str_arg(key, "get_env_or key", span)?;
+            let default = expect_str_arg(default, "get_env_or default", span)?;
+            Ok(Value::Str(std::env::var(key).unwrap_or_else(|_| default.to_string())))
+        }
+        "env_set" | "set_env" => {
+            let [key, value] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let key = expect_str_arg(key, "set_env key", span)?;
+            let value = expect_str_arg(value, "set_env value", span)?;
+            // SAFETY: process-level env mutation is intended std/env behavior.
+            unsafe { std::env::set_var(key, value) };
+            Ok(Value::Null)
+        }
+        "env_unset" | "unset_env" => {
+            let [key] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let key = expect_str_arg(key, "unset_env key", span)?;
+            // SAFETY: process-level env mutation is intended std/env behavior.
+            unsafe { std::env::remove_var(key) };
+            Ok(Value::Null)
+        }
+        "env_has" | "has_env" => {
+            let [key] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let key = expect_str_arg(key, "has_env key", span)?;
+            Ok(Value::Bool(std::env::var(key).is_ok()))
+        }
+        "env_list" | "list_env" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let entries = std::env::vars()
+                .map(|(k, v)| (Value::Str(k), Value::Str(v)))
+                .collect::<Vec<_>>();
+            Ok(Value::Map(entries))
+        }
+        "env_list_prefix" | "list_env_prefix" => {
+            let [prefix] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let prefix = expect_str_arg(prefix, "list_env_prefix prefix", span)?;
+            let entries = std::env::vars()
+                .filter(|(k, _)| k.starts_with(prefix))
+                .map(|(k, v)| (Value::Str(k), Value::Str(v)))
+                .collect::<Vec<_>>();
+            Ok(Value::Map(entries))
+        }
         name if name.starts_with("__meth_is_") || name.starts_with("__meth_iu_") => {
             dispatch_integer_method(name, args, span)
         }
@@ -5248,6 +5597,106 @@ fn decrypt_with_key(blob: &str, key: &[u8]) -> Result<String, String> {
     let stream = keystream_bytes(key, &nonce, cipher.len());
     let plain: Vec<u8> = cipher.iter().zip(stream.iter()).map(|(c, k)| c ^ k).collect();
     String::from_utf8(plain).map_err(|_| "decrypted data is not valid utf-8".to_string())
+}
+
+fn cli_script_args() -> Vec<String> {
+    let all = std::env::args().collect::<Vec<_>>();
+    if all.len() <= 2 {
+        Vec::new()
+    } else {
+        all.into_iter().skip(2).collect()
+    }
+}
+
+fn cli_positional_args() -> Vec<String> {
+    let args = cli_script_args();
+    let mut positional = Vec::new();
+    let mut parse_options = true;
+    for arg in args {
+        if parse_options && arg == "--" {
+            parse_options = false;
+            continue;
+        }
+        if parse_options && arg.starts_with('-') {
+            continue;
+        }
+        positional.push(arg);
+    }
+    positional
+}
+
+fn normalize_flag(flag: &str) -> String {
+    flag.trim_start_matches('-').to_string()
+}
+
+fn cli_has_flag(flag: &str) -> bool {
+    let want = normalize_flag(flag);
+    let args = cli_script_args();
+    let mut parse_options = true;
+    for arg in args {
+        if parse_options && arg == "--" {
+            parse_options = false;
+            continue;
+        }
+        if !parse_options {
+            continue;
+        }
+        if let Some(long) = arg.strip_prefix("--") {
+            let name = long.split('=').next().unwrap_or_default();
+            if name == want {
+                return true;
+            }
+            continue;
+        }
+        if let Some(shorts) = arg.strip_prefix('-') {
+            if shorts.is_empty() {
+                continue;
+            }
+            if shorts.chars().any(|c| c.to_string() == want) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn cli_flag_value(flag: &str) -> Option<String> {
+    let want = normalize_flag(flag);
+    let args = cli_script_args();
+    let mut parse_options = true;
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if parse_options && arg == "--" {
+            parse_options = false;
+            i += 1;
+            continue;
+        }
+        if !parse_options {
+            i += 1;
+            continue;
+        }
+        if let Some(long) = arg.strip_prefix("--") {
+            if let Some((name, value)) = long.split_once('=') {
+                if name == want {
+                    return Some(value.to_string());
+                }
+            } else if long == want && i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                return Some(args[i + 1].clone());
+            }
+            i += 1;
+            continue;
+        }
+        if let Some(shorts) = arg.strip_prefix('-') {
+            if shorts == want && i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                return Some(args[i + 1].clone());
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    None
 }
 
 fn format_unix_secs_iso_utc(secs: u64) -> String {

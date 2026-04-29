@@ -1,0 +1,13 @@
+from "std/regex" import is_match, find, find_all, replace_regex, replace_all_regex
+
+m, m_err := is_match("^[a-z]+\\d+$", "abc123")
+f, f_err := find("\\d+", "id=42;ok")
+all, all_err := find_all("\\d+", "x1y22z333")
+r1, r1_err := replace_regex("\\d+", "v1-v2-v3", "#")
+r2, r2_err := replace_all_regex("\\d+", "v1-v2-v3", "#")
+
+print(m_err == null, m == true)
+print(f_err == null, f == "42")
+print(all_err == null, len(all).eq((3).to_u32()))
+print(r1_err == null, r1 == "v#-v2-v3")
+print(r2_err == null, r2 == "v#-v#-v#")

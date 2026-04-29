@@ -1,0 +1,8 @@
+# std/regex
+# Regular expressions and matching helpers.
+
+fn is_match(pattern: str, input: str) -> (bool, err) { return regex_is_match(pattern, input) }
+fn find(pattern: str, input: str) -> (str, err) { return regex_find(pattern, input) }
+fn find_all(pattern: str, input: str) -> ([str], err) { return regex_find_all(pattern, input) }
+fn replace_regex(pattern: str, input: str, replacement: str) -> (str, err) { return regex_replace(pattern, input, replacement) }
+fn replace_all_regex(pattern: str, input: str, replacement: str) -> (str, err) { return regex_replace_all(pattern, input, replacement) }

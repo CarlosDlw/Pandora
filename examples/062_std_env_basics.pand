@@ -1,0 +1,16 @@
+from "std/env" import get_env, get_env_or, set_env, unset_env, has_env, list_env, list_env_prefix
+
+set_err := set_env("PANDORA_STD_ENV_TEST", "ok")
+v, get_err := get_env("PANDORA_STD_ENV_TEST")
+fallback: str = get_env_or("PANDORA_STD_ENV_MISSING", "default")
+has_before: bool = has_env("PANDORA_STD_ENV_TEST")
+
+env_all := list_env()
+env_pref := list_env_prefix("PANDORA_STD_ENV_")
+
+unset_err := unset_env("PANDORA_STD_ENV_TEST")
+has_after: bool = has_env("PANDORA_STD_ENV_TEST")
+
+print(set_err == null, get_err == null, v == "ok", fallback == "default")
+print(has_before == true, has_after == false, unset_err == null)
+print(env_all.len().gt((0).to_u32()), env_pref.len().ge((0).to_u32()))

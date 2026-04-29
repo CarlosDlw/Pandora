@@ -1006,3 +1006,52 @@ fn runs_example_059_std_encoding_basics() {
                 .and(contains("true true")),
         );
 }
+
+#[test]
+fn runs_example_060_std_regex_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/060_std_regex_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true")
+                .and(contains("true true"))
+                .and(contains("true true"))
+                .and(contains("true true"))
+                .and(contains("true true")),
+        );
+}
+
+#[test]
+fn runs_example_061_std_cli_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/061_std_cli_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true")
+                .and(contains("true true"))
+                .and(contains("true true true"))
+                .and(contains("true true"))
+                .and(contains("true true")),
+        );
+}
+
+#[test]
+fn runs_example_062_std_env_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/062_std_env_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true true")
+                .and(contains("true true true"))
+                .and(contains("true true")),
+        );
+}
