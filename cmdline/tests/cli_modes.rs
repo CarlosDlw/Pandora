@@ -729,3 +729,34 @@ fn runs_example_041_function_methods() {
                 .and(contains("<fn>")),
         );
 }
+
+#[test]
+fn runs_example_042_map_methods() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/042_map_methods.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("2 false 1 null")
+                .and(contains("9 9 true"))
+                .and(contains("1 null 2"))
+                .and(contains("true true")),
+        );
+}
+
+#[test]
+fn runs_example_043_set_methods() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/043_set_methods.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("3 false true")
+                .and(contains("false true true false"))
+                .and(contains("true false")),
+        );
+}

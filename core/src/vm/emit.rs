@@ -697,6 +697,25 @@ fn emit_expr(
                 }
             }
         }
+        HirExpr::Map(entries) => {
+            for (k, v) in entries {
+                emit_expr(hir, model, *k, b, diagnostics, method_table);
+                emit_expr(hir, model, *v, b, diagnostics, method_table);
+            }
+            match u8::try_from(entries.len()) {
+                Ok(count) => b.emit(Op::MakeMap(count), span),
+                Err(_) => diagnostics.push(Diagnostic::new("map literal too large", span, Severity::Error)),
+            }
+        }
+        HirExpr::Set(items) => {
+            for item in items {
+                emit_expr(hir, model, *item, b, diagnostics, method_table);
+            }
+            match u8::try_from(items.len()) {
+                Ok(count) => b.emit(Op::MakeSet(count), span),
+                Err(_) => diagnostics.push(Diagnostic::new("set literal too large", span, Severity::Error)),
+            }
+        }
         HirExpr::TupleAccess { tuple, index } => {
             emit_expr(hir, model, *tuple, b, diagnostics, method_table);
             b.emit(Op::TupleGet(*index), span);

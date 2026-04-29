@@ -61,6 +61,8 @@ pub fn default_registry() -> BuiltinRegistry {
     register_str_methods(&mut methods);
     register_array_methods(&mut methods);
     register_function_methods(&mut methods);
+    register_map_methods(&mut methods);
+    register_set_methods(&mut methods);
 
     // Method callables are also registered as builtin functions with deterministic names,
     // so VM keeps receiving only Call(SymbolId, argc).
@@ -442,4 +444,66 @@ fn register_function_methods(out: &mut Vec<BuiltinMethod>) {
     out.push(mk("bind", vec![Type::Any], Type::Any, "__meth_fn_bind"));
     out.push(mk("compose", vec![Type::Any], Type::Any, "__meth_fn_compose"));
     out.push(mk("partial", vec![Type::Any], Type::Any, "__meth_fn_partial"));
+}
+
+fn register_map_methods(out: &mut Vec<BuiltinMethod>) {
+    let mk = |name: &'static str, params: Vec<Type>, ret: Type, symbol_name: &'static str| BuiltinMethod {
+        receiver: ReceiverMatcher::MapAny,
+        name,
+        symbol_name,
+        kind: BuiltinMethodKind::Instance,
+        params,
+        ret,
+    };
+    out.push(mk("len", vec![], Type::Int { signed: false, bits: 64 }, "__meth_m_len"));
+    out.push(mk("is_empty", vec![], Type::Bool, "__meth_m_is_empty"));
+    out.push(mk("get", vec![Type::Any], Type::Any, "__meth_m_get"));
+    out.push(mk("get_or", vec![Type::Any, Type::Any], Type::Any, "__meth_m_get_or"));
+    out.push(mk("get_or_insert", vec![Type::Any, Type::Any], Type::Any, "__meth_m_get_or_insert"));
+    out.push(mk("contains_key", vec![Type::Any], Type::Bool, "__meth_m_contains_key"));
+    out.push(mk("insert", vec![Type::Any, Type::Any], Type::Any, "__meth_m_insert"));
+    out.push(mk("remove", vec![Type::Any], Type::Any, "__meth_m_remove"));
+    out.push(mk("clear", vec![], Type::Unit, "__meth_m_clear"));
+    out.push(mk("update", vec![Type::Any, Type::Any], Type::Any, "__meth_m_update"));
+    out.push(mk("keys", vec![], Type::Any, "__meth_m_keys"));
+    out.push(mk("values", vec![], Type::Any, "__meth_m_values"));
+    out.push(mk("entries", vec![], Type::Any, "__meth_m_entries"));
+    out.push(mk("merge", vec![Type::Any], Type::Any, "__meth_m_merge"));
+    out.push(mk("merge_with", vec![Type::Any, Type::Any], Type::Any, "__meth_m_merge_with"));
+    out.push(mk("clone", vec![], Type::Any, "__meth_m_clone"));
+    out.push(mk("eq", vec![Type::Any], Type::Bool, "__meth_m_eq"));
+    out.push(mk("ne", vec![Type::Any], Type::Bool, "__meth_m_ne"));
+}
+
+fn register_set_methods(out: &mut Vec<BuiltinMethod>) {
+    let mk = |name: &'static str, params: Vec<Type>, ret: Type, symbol_name: &'static str| BuiltinMethod {
+        receiver: ReceiverMatcher::SetAny,
+        name,
+        symbol_name,
+        kind: BuiltinMethodKind::Instance,
+        params,
+        ret,
+    };
+    out.push(mk("len", vec![], Type::Int { signed: false, bits: 64 }, "__meth_set_len"));
+    out.push(mk("is_empty", vec![], Type::Bool, "__meth_set_is_empty"));
+    out.push(mk("contains", vec![Type::Any], Type::Bool, "__meth_set_contains"));
+    out.push(mk("insert", vec![Type::Any], Type::Bool, "__meth_set_insert"));
+    out.push(mk("remove", vec![Type::Any], Type::Bool, "__meth_set_remove"));
+    out.push(mk("clear", vec![], Type::Unit, "__meth_set_clear"));
+    out.push(mk("values", vec![], Type::Any, "__meth_set_values"));
+    out.push(mk("union", vec![Type::Any], Type::Any, "__meth_set_union"));
+    out.push(mk("intersection", vec![Type::Any], Type::Any, "__meth_set_intersection"));
+    out.push(mk("difference", vec![Type::Any], Type::Any, "__meth_set_difference"));
+    out.push(mk(
+        "symmetric_difference",
+        vec![Type::Any],
+        Type::Any,
+        "__meth_set_symmetric_difference",
+    ));
+    out.push(mk("is_subset", vec![Type::Any], Type::Bool, "__meth_set_is_subset"));
+    out.push(mk("is_superset", vec![Type::Any], Type::Bool, "__meth_set_is_superset"));
+    out.push(mk("is_disjoint", vec![Type::Any], Type::Bool, "__meth_set_is_disjoint"));
+    out.push(mk("clone", vec![], Type::Any, "__meth_set_clone"));
+    out.push(mk("eq", vec![Type::Any], Type::Bool, "__meth_set_eq"));
+    out.push(mk("ne", vec![Type::Any], Type::Bool, "__meth_set_ne"));
 }

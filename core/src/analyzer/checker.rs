@@ -733,6 +733,47 @@ impl<'a> Checker<'a> {
                         if matches!(expected, AnalyzerType::Any) {
                             if let AnalyzerType::Array(inner) = &recv_ty {
                                 expected = *inner.clone();
+                            } else if let AnalyzerType::Set(inner) = &recv_ty {
+                                expected = match method.as_str() {
+                                    "union"
+                                    | "intersection"
+                                    | "difference"
+                                    | "symmetric_difference"
+                                    | "is_subset"
+                                    | "is_superset"
+                                    | "is_disjoint"
+                                    | "eq"
+                                    | "ne" => AnalyzerType::Set(Box::new(*inner.clone())),
+                                    _ => *inner.clone(),
+                                };
+                            } else if let AnalyzerType::Map(key, value) = &recv_ty {
+                                expected = match (method.as_str(), idx) {
+                                    ("get", 0)
+                                    | ("get_or", 0)
+                                    | ("get_or_insert", 0)
+                                    | ("contains_key", 0)
+                                    | ("insert", 0)
+                                    | ("remove", 0)
+                                    | ("update", 0) => *key.clone(),
+                                    ("merge", 0) | ("merge_with", 0) | ("eq", 0) | ("ne", 0) => {
+                                        AnalyzerType::Map(
+                                            Box::new(*key.clone()),
+                                            Box::new(*value.clone()),
+                                        )
+                                    }
+                                    ("get_or", 1)
+                                    | ("get_or_insert", 1)
+                                    | ("insert", 1) => *value.clone(),
+                                    ("update", 1) => AnalyzerType::Function {
+                                        params: vec![*value.clone()],
+                                        ret: Box::new(*value.clone()),
+                                    },
+                                    ("merge_with", 1) => AnalyzerType::Function {
+                                        params: vec![*value.clone(), *value.clone()],
+                                        ret: Box::new(*value.clone()),
+                                    },
+                                    _ => expected,
+                                };
                             }
                         }
                         let actual = self.check_expr_expected(*arg, span, Some(&expected));
@@ -754,10 +795,31 @@ impl<'a> Checker<'a> {
                                 AnalyzerType::Unknown
                             }
                         }
-                        AnalyzerType::Any => recv_ty.clone(),
+                        AnalyzerType::Any => match (&recv_ty, method.as_str()) {
+                            (AnalyzerType::Map(_, v), "get")
+                            | (AnalyzerType::Map(_, v), "get_or")
+                            | (AnalyzerType::Map(_, v), "get_or_insert")
+                            | (AnalyzerType::Map(_, v), "insert")
+                            | (AnalyzerType::Map(_, v), "remove")
+                            | (AnalyzerType::Map(_, v), "update") => *v.clone(),
+                            (AnalyzerType::Map(k, _), "keys") => {
+                                AnalyzerType::Array(Box::new(*k.clone()))
+                            }
+                            (AnalyzerType::Map(_, v), "values") => {
+                                AnalyzerType::Array(Box::new(*v.clone()))
+                            }
+                            (AnalyzerType::Map(k, v), "entries") => AnalyzerType::Array(Box::new(
+                                AnalyzerType::Tuple(vec![*k.clone(), *v.clone()]),
+                            )),
+                            (AnalyzerType::Set(item), "values") => {
+                                AnalyzerType::Array(Box::new(*item.clone()))
+                            }
+                            _ => recv_ty.clone(),
+                        },
                         AnalyzerType::Tuple(items) if items.len() == 2 && items[0] == AnalyzerType::Any && items[1] == AnalyzerType::Err => {
                             let value_ty = match &recv_ty {
                                 AnalyzerType::Array(inner) => *inner.clone(),
+                                AnalyzerType::Set(inner) => *inner.clone(),
                                 _ => recv_ty.clone(),
                             };
                             AnalyzerType::Tuple(vec![value_ty, AnalyzerType::Err])
@@ -1004,6 +1066,89 @@ impl<'a> Checker<'a> {
                         }
                     }
                     AnalyzerType::Array(Box::new(inferred))
+                }
+            }
+            Some(HirExpr::Map(entries)) => {
+                let expected_kv = match expected {
+                    Some(AnalyzerType::Map(k, v)) => Some(((**k).clone(), (**v).clone())),
+                    _ => None,
+                };
+                if entries.is_empty() {
+                    if let Some((k, v)) = expected_kv {
+                        AnalyzerType::Map(Box::new(k), Box::new(v))
+                    } else {
+                        self.push_error("empty map literal requires explicit map type context", span);
+                        AnalyzerType::Unknown
+                    }
+                } else {
+                    let (seed_k, seed_v) = expected_kv.unwrap_or_else(|| {
+                        let (k0, v0) = entries[0];
+                        (self.check_expr(k0, span), self.check_expr(v0, span))
+                    });
+                    if !is_hashable_map_key(&seed_k) {
+                        self.push_error(format!("map key type must be hashable, got {seed_k:?}"), span);
+                    }
+                    let mut key_ty = seed_k;
+                    let mut value_ty = seed_v;
+                    for (k, v) in entries {
+                        let actual_k = self.check_expr_expected(*k, span, Some(&key_ty));
+                        let actual_v = self.check_expr_expected(*v, span, Some(&value_ty));
+                        if !is_assignable(&key_ty, &actual_k) {
+                            if matches!(key_ty, AnalyzerType::Unknown) {
+                                key_ty = actual_k;
+                            } else {
+                                self.push_error(
+                                    format!("map key type mismatch: expected {key_ty:?}, got {actual_k:?}"),
+                                    span,
+                                );
+                            }
+                        }
+                        if !is_assignable(&value_ty, &actual_v) {
+                            if matches!(value_ty, AnalyzerType::Unknown) {
+                                value_ty = actual_v;
+                            } else {
+                                self.push_error(
+                                    format!("map value type mismatch: expected {value_ty:?}, got {actual_v:?}"),
+                                    span,
+                                );
+                            }
+                        }
+                    }
+                    AnalyzerType::Map(Box::new(key_ty), Box::new(value_ty))
+                }
+            }
+            Some(HirExpr::Set(items)) => {
+                let expected_item = match expected {
+                    Some(AnalyzerType::Set(item)) => Some((**item).clone()),
+                    _ => None,
+                };
+                if items.is_empty() {
+                    if let Some(item) = expected_item {
+                        AnalyzerType::Set(Box::new(item))
+                    } else {
+                        self.push_error("empty set literal requires explicit set type context", span);
+                        AnalyzerType::Unknown
+                    }
+                } else {
+                    let seed = expected_item.unwrap_or_else(|| self.check_expr(items[0], span));
+                    if !is_hashable_map_key(&seed) {
+                        self.push_error(format!("set item type must be hashable, got {seed:?}"), span);
+                    }
+                    let mut inferred = seed;
+                    for item in items {
+                        let actual = self.check_expr_expected(*item, span, Some(&inferred));
+                        if !is_assignable(&inferred, &actual) {
+                            if matches!(inferred, AnalyzerType::Unknown) {
+                                inferred = actual;
+                            } else {
+                                self.push_error(
+                                    format!("set literal item type mismatch: expected {inferred:?}, got {actual:?}"),
+                                    span,
+                                );
+                            }
+                        }
+                    }
+                    AnalyzerType::Set(Box::new(inferred))
                 }
             }
             Some(HirExpr::ArrayAccess { array, index }) => {
@@ -1716,6 +1861,10 @@ fn is_assignable(expected: &AnalyzerType, actual: &AnalyzerType) -> bool {
         (AnalyzerType::Array(expected_item), AnalyzerType::Array(actual_item)) => {
             is_assignable(expected_item, actual_item)
         }
+        (AnalyzerType::Map(ek, ev), AnalyzerType::Map(ak, av)) => {
+            is_assignable(ek, ak) && is_assignable(ev, av)
+        }
+        (AnalyzerType::Set(e), AnalyzerType::Set(a)) => is_assignable(e, a),
         _ => false,
     }
 }
@@ -1802,8 +1951,25 @@ fn resolve_self_type(ty: AnalyzerType, concrete: AnalyzerType) -> AnalyzerType {
                 .collect(),
         ),
         AnalyzerType::Array(item) => AnalyzerType::Array(Box::new(resolve_self_type(*item, concrete))),
+        AnalyzerType::Map(k, v) => AnalyzerType::Map(
+            Box::new(resolve_self_type(*k, concrete.clone())),
+            Box::new(resolve_self_type(*v, concrete)),
+        ),
+        AnalyzerType::Set(item) => AnalyzerType::Set(Box::new(resolve_self_type(*item, concrete))),
         other => other,
     }
+}
+
+fn is_hashable_map_key(ty: &AnalyzerType) -> bool {
+    matches!(
+        ty,
+        AnalyzerType::Int { .. }
+            | AnalyzerType::Float { .. }
+            | AnalyzerType::Bool
+            | AnalyzerType::Str
+            | AnalyzerType::Char
+            | AnalyzerType::Unknown
+    )
 }
 
 #[cfg(test)]

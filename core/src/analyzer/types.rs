@@ -18,6 +18,8 @@ pub enum Type {
     },
     Tuple(Vec<Type>),
     Array(Box<Type>),
+    Map(Box<Type>, Box<Type>),
+    Set(Box<Type>),
     Struct(SymbolId),
     Trait(SymbolId),
     SelfType,

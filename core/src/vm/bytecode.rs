@@ -82,6 +82,8 @@ pub enum Op {
     MakeTuple(u8),
     TupleGet(usize),
     MakeArray(u8),
+    MakeMap(u8),
+    MakeSet(u8),
     ArrayExtend,
     MakeRange(bool),
     ArrayLen,

@@ -38,3 +38,7 @@ fn addm(a: i32, b: i32) -> i32 {
     return a + b
 }
 print(addm.arity(), addm(2, 4))
+
+mm: map[str]i32 = {"x": 1, "y": 2}
+ss: set[i32] = set{1, 2, 3}
+print(mm.get("x"), mm.keys(), ss.contains(2), ss.union(set{3, 4}))

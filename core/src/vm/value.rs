@@ -25,6 +25,8 @@ pub enum Value {
     },
     Tuple(Vec<Value>),
     Array(Vec<Value>),
+    Map(Vec<(Value, Value)>),
+    Set(Vec<Value>),
     Err {
         message: String,
         code: i32,
@@ -57,6 +59,17 @@ impl Value {
             Value::Array(items) => {
                 let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
                 format!("[{}]", rendered.join(", "))
+            }
+            Value::Map(entries) => {
+                let rendered = entries
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k.display_for_print(), v.display_for_print()))
+                    .collect::<Vec<_>>();
+                format!("{{{}}}", rendered.join(", "))
+            }
+            Value::Set(items) => {
+                let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
+                format!("set{{{}}}", rendered.join(", "))
             }
             Value::Err {
                 message,

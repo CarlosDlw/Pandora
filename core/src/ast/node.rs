@@ -137,6 +137,14 @@ pub enum AstNode {
         items: Vec<ArrayItem>,
         span: Span,
     },
+    MapLiteral {
+        entries: Vec<(ArenaId, ArenaId)>,
+        span: Span,
+    },
+    SetLiteral {
+        items: Vec<ArenaId>,
+        span: Span,
+    },
     ArrayAccessExpr {
         base: ArenaId,
         index: ArenaId,
@@ -294,6 +302,8 @@ impl AstNode {
             | Self::TupleLiteral { span, .. }
             | Self::TupleAccess { span, .. }
             | Self::ArrayLiteral { span, .. }
+            | Self::MapLiteral { span, .. }
+            | Self::SetLiteral { span, .. }
             | Self::ArrayAccessExpr { span, .. }
             | Self::FieldAccessExpr { span, .. }
             | Self::MethodCallExpr { span, .. }

@@ -142,6 +142,11 @@ impl Parser {
                     name: token.lexeme,
                     span: token.span,
                 });
+                if self.identifier_name_from_node(ident) == "set"
+                    && self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace)
+                {
+                    return self.parse_set_literal_suffix(token.span);
+                }
                 if self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
                     return self.parse_struct_literal_suffix(ident);
                 }
@@ -285,6 +290,7 @@ impl Parser {
                 }
             }
             TokenKind::LeftBracket => self.parse_array_literal(),
+            TokenKind::LeftBrace => self.parse_map_literal(),
             _ => {
                 self.bump();
                 self.push_error("expected expression", token.span);
@@ -485,6 +491,66 @@ impl Parser {
         }
         let span = merge_pair(open_span, self.previous_span_or(open_span));
         self.insert_node(AstNode::ArrayLiteral { items, span })
+    }
+
+    fn parse_map_literal(&mut self) -> ArenaId {
+        let open_span = self.current_span_or_eof();
+        self.bump();
+        let mut entries: Vec<(ArenaId, ArenaId)> = Vec::new();
+        if self.consume_if(TokenKind::RightBrace) {
+            return self.insert_node(AstNode::MapLiteral {
+                entries,
+                span: merge_pair(open_span, open_span),
+            });
+        }
+        loop {
+            let key = self.parse_expression();
+            if !self.consume_if(TokenKind::Colon) {
+                self.push_error("expected ':' between map key and value", self.current_span_or_eof());
+                return self.invalid_node(open_span);
+            }
+            let value = self.parse_expression();
+            entries.push((key, value));
+            if self.consume_if(TokenKind::Comma) {
+                if self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        if !self.consume_if(TokenKind::RightBrace) {
+            self.push_error("expected '}' after map literal", self.current_span_or_eof());
+        }
+        let span = merge_pair(open_span, self.previous_span_or(open_span));
+        self.insert_node(AstNode::MapLiteral { entries, span })
+    }
+
+    fn parse_set_literal_suffix(&mut self, set_kw_span: foundation::span::Span) -> ArenaId {
+        let open_span = self.current_span_or_eof();
+        self.bump();
+        let mut items = Vec::new();
+        if self.consume_if(TokenKind::RightBrace) {
+            return self.insert_node(AstNode::SetLiteral {
+                items,
+                span: merge_pair(set_kw_span, open_span),
+            });
+        }
+        loop {
+            items.push(self.parse_expression());
+            if self.consume_if(TokenKind::Comma) {
+                if self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        if !self.consume_if(TokenKind::RightBrace) {
+            self.push_error("expected '}' after set literal", self.current_span_or_eof());
+        }
+        let span = merge_pair(set_kw_span, self.previous_span_or(open_span));
+        self.insert_node(AstNode::SetLiteral { items, span })
     }
 
     fn parse_struct_literal_suffix(&mut self, type_ident: ArenaId) -> ArenaId {

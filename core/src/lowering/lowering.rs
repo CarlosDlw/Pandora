@@ -628,6 +628,17 @@ impl<'a> Lowering<'a> {
                     .collect::<Vec<_>>();
                 self.insert_hir_expr(HirExpr::Array(items), self.node_span(id))
             }
+            AstNode::MapLiteral { entries, .. } => {
+                let entries = entries
+                    .iter()
+                    .map(|(k, v)| (self.lower_expr(*k), self.lower_expr(*v)))
+                    .collect::<Vec<_>>();
+                self.insert_hir_expr(HirExpr::Map(entries), self.node_span(id))
+            }
+            AstNode::SetLiteral { items, .. } => {
+                let items = items.iter().map(|item| self.lower_expr(*item)).collect::<Vec<_>>();
+                self.insert_hir_expr(HirExpr::Set(items), self.node_span(id))
+            }
             AstNode::ArrayAccessExpr { base, index, .. } => {
                 let array = self.lower_expr(*base);
                 let index = self.lower_expr(*index);
@@ -974,6 +985,12 @@ fn unquote_string_literal(raw: &str) -> String {
 }
 
 fn map_type_name(name: &str) -> Option<Type> {
+    if let Some(map_ty) = parse_map_type_name(name) {
+        return Some(map_ty);
+    }
+    if let Some(set_ty) = parse_set_type_name(name) {
+        return Some(set_ty);
+    }
     if let Some(array_ty) = parse_array_type_name(name) {
         return Some(array_ty);
     }
@@ -1007,6 +1024,33 @@ fn map_type_name(name: &str) -> Option<Type> {
         "Self" => Some(Type::SelfType),
         _ => None,
     }
+}
+
+fn parse_map_type_name(name: &str) -> Option<Type> {
+    if !name.starts_with("map[") {
+        return None;
+    }
+    let close = name.find(']')?;
+    let key_src = &name[4..close];
+    let value_src = name.get(close + 1..)?.trim();
+    if key_src.trim().is_empty() || value_src.is_empty() {
+        return None;
+    }
+    let key = map_type_name(key_src.trim())?;
+    let value = map_type_name(value_src)?;
+    Some(Type::Map(Box::new(key), Box::new(value)))
+}
+
+fn parse_set_type_name(name: &str) -> Option<Type> {
+    if !(name.starts_with("set[") && name.ends_with(']')) {
+        return None;
+    }
+    let inner = name[4..name.len() - 1].trim();
+    if inner.is_empty() {
+        return None;
+    }
+    let item = map_type_name(inner)?;
+    Some(Type::Set(Box::new(item)))
 }
 
 fn parse_array_type_name(name: &str) -> Option<Type> {

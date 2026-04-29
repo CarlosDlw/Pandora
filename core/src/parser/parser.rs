@@ -500,6 +500,12 @@ impl Parser {
         if self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket) {
             return self.parse_array_type_ref();
         }
+        if self.current().is_some_and(|t| t.kind == TokenKind::Identifier && t.lexeme == "map") {
+            return self.parse_map_type_ref();
+        }
+        if self.current().is_some_and(|t| t.kind == TokenKind::Identifier && t.lexeme == "set") {
+            return self.parse_set_type_ref();
+        }
         let token = match self.current() {
             Some(token) if token.kind == TokenKind::TypeName => token.clone(),
             Some(token) if token.kind == TokenKind::Identifier => token.clone(),
@@ -583,6 +589,43 @@ impl Parser {
         }
         let item_name = self.type_name_from_node(item);
         let name = format!("[{}]", item_name);
+        let span = merge_span(start, self.previous_span_or(start));
+        self.insert_node(AstNode::TypeName { name, span })
+    }
+
+    fn parse_map_type_ref(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        if !self.consume_if(TokenKind::LeftBracket) {
+            self.push_error("expected '[' after 'map' in map type", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let key = self.parse_type_ref();
+        if !self.consume_if(TokenKind::RightBracket) {
+            self.push_error("expected ']' after map key type", self.current_span_or_eof());
+        }
+        let value = self.parse_type_ref();
+        let name = format!(
+            "map[{}]{}",
+            self.type_name_from_node(key),
+            self.type_name_from_node(value)
+        );
+        let span = merge_span(start, self.node_span(value));
+        self.insert_node(AstNode::TypeName { name, span })
+    }
+
+    fn parse_set_type_ref(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        if !self.consume_if(TokenKind::LeftBracket) {
+            self.push_error("expected '[' after 'set' in set type", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let item = self.parse_type_ref();
+        if !self.consume_if(TokenKind::RightBracket) {
+            self.push_error("expected ']' after set item type", self.current_span_or_eof());
+        }
+        let name = format!("set[{}]", self.type_name_from_node(item));
         let span = merge_span(start, self.previous_span_or(start));
         self.insert_node(AstNode::TypeName { name, span })
     }

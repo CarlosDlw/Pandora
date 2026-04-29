@@ -1,0 +1,18 @@
+fn inc(v: i32) -> i32 {
+    return v + 1
+}
+
+fn sum2(a: i32, b: i32) -> i32 {
+    return a + b
+}
+
+m: map[str]i32 = {"a": 1, "b": 2}
+n: map[str]i32 = {"b": 10, "c": 3}
+
+print(m.len(), m.is_empty(), m.get("a"), m.get("x"))
+print(m.get_or("x", 9), m.get_or_insert("x", 9), m.contains_key("b"))
+print(m.insert("a", 7), m.remove("k"), m.update("b", inc))
+print(m.keys(), m.values(), m.entries())
+print(m.merge(n))
+print(m.merge_with(n, sum2))
+print(m.clone(), m.eq(m), m.ne(n))

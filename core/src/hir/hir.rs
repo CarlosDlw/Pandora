@@ -87,6 +87,8 @@ pub enum HirExpr {
     Tuple(Vec<HirId>),
     TupleAccess { tuple: HirId, index: usize },
     Array(Vec<HirArrayItem>),
+    Map(Vec<(HirId, HirId)>),
+    Set(Vec<HirId>),
     ArrayAccess { array: HirId, index: HirId },
     Propagate { expr: HirId },
     TryCatch {

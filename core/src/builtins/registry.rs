@@ -15,6 +15,8 @@ pub enum ReceiverMatcher {
     Char,
     Str,
     ArrayAny,
+    MapAny,
+    SetAny,
     FunctionAny,
     Exact(TypeTag),
 }
@@ -71,6 +73,8 @@ pub fn match_receiver(ty: &Type, matcher: ReceiverMatcher) -> bool {
         ReceiverMatcher::Char => matches!(ty, Type::Char),
         ReceiverMatcher::Str => matches!(ty, Type::Str),
         ReceiverMatcher::ArrayAny => matches!(ty, Type::Array(_)),
+        ReceiverMatcher::MapAny => matches!(ty, Type::Map(_, _)),
+        ReceiverMatcher::SetAny => matches!(ty, Type::Set(_)),
         ReceiverMatcher::FunctionAny => matches!(ty, Type::Function { .. }),
         ReceiverMatcher::Exact(TypeTag::Err) => matches!(ty, Type::Err),
         ReceiverMatcher::Exact(TypeTag::Unit) => matches!(ty, Type::Unit),

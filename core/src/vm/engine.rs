@@ -146,6 +146,29 @@ impl<'a> Vm<'a> {
                 items.reverse();
                 self.stack.push(Value::Array(items));
             }
+            Op::MakeMap(count) => {
+                let count = *count as usize;
+                let mut entries = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let value = self.pop_one(span)?;
+                    let key = self.pop_one(span)?;
+                    entries.push((key, value));
+                }
+                entries.reverse();
+                self.stack.push(Value::Map(entries));
+            }
+            Op::MakeSet(count) => {
+                let count = *count as usize;
+                let mut items = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let value = self.pop_one(span)?;
+                    if !items.contains(&value) {
+                        items.push(value);
+                    }
+                }
+                items.reverse();
+                self.stack.push(Value::Set(items));
+            }
             Op::MakeRange(inclusive) => {
                 let end = self.pop_one(span)?;
                 let start = self.pop_one(span)?;
@@ -1178,6 +1201,8 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         name if name.starts_with("__meth_s_") => dispatch_str_method(name, args, span),
         name if name.starts_with("__meth_a_") => dispatch_array_method(name, args, span),
         name if name.starts_with("__meth_fn_") => dispatch_function_method(vm, name, args, span),
+        name if name.starts_with("__meth_m_") => dispatch_map_method(vm, name, args, span),
+        name if name.starts_with("__meth_set_") => dispatch_set_method(name, args, span),
         _ => Err(Diagnostic::new(
             format!("unknown builtin '{name}'"),
             span,
@@ -1680,6 +1705,215 @@ fn dispatch_function_method(
     }
 }
 
+fn dispatch_map_method(
+    _vm: &mut Vm<'_>,
+    name: &str,
+    args: &[Value],
+    span: Span,
+) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("map method missing receiver", span, Severity::Error));
+    };
+    let Value::Map(entries) = recv else {
+        return Err(Diagnostic::new("map method receiver must be map", span, Severity::Error));
+    };
+    let method = name.strip_prefix("__meth_m_").unwrap_or(name);
+    let map = entries.clone();
+    let find_idx = |m: &[(Value, Value)], key: &Value| m.iter().position(|(k, _)| k == key);
+    let out = match method {
+        "len" => Value::UInt128(map.len() as u128),
+        "is_empty" => Value::Bool(map.is_empty()),
+        "get" => tail
+            .first()
+            .and_then(|k| find_idx(&map, k).map(|i| map[i].1.clone()))
+            .unwrap_or(Value::Null),
+        "get_or" => {
+            let k = tail.first().ok_or_else(|| Diagnostic::new("get_or expects key", span, Severity::Error))?;
+            let d = tail.get(1).ok_or_else(|| Diagnostic::new("get_or expects default", span, Severity::Error))?;
+            find_idx(&map, k).map(|i| map[i].1.clone()).unwrap_or_else(|| d.clone())
+        }
+        "get_or_insert" => {
+            let k = tail.first().ok_or_else(|| Diagnostic::new("get_or_insert expects key", span, Severity::Error))?;
+            let d = tail.get(1).ok_or_else(|| Diagnostic::new("get_or_insert expects default", span, Severity::Error))?;
+            if let Some(i) = find_idx(&map, k) {
+                map[i].1.clone()
+            } else {
+                d.clone()
+            }
+        }
+        "contains_key" => {
+            let k = tail.first().ok_or_else(|| Diagnostic::new("contains_key expects key", span, Severity::Error))?;
+            Value::Bool(find_idx(&map, k).is_some())
+        }
+        "insert" => {
+            let k = tail.first().ok_or_else(|| Diagnostic::new("insert expects key", span, Severity::Error))?;
+            let _v = tail.get(1).ok_or_else(|| Diagnostic::new("insert expects value", span, Severity::Error))?;
+            if let Some(i) = find_idx(&map, k) {
+                map[i].1.clone()
+            } else {
+                Value::Null
+            }
+        }
+        "remove" => {
+            let k = tail.first().ok_or_else(|| Diagnostic::new("remove expects key", span, Severity::Error))?;
+            find_idx(&map, k).map(|i| map[i].1.clone()).unwrap_or(Value::Null)
+        }
+        "clear" => Value::Unit,
+        "update" => {
+            let k = tail.first().ok_or_else(|| Diagnostic::new("update expects key", span, Severity::Error))?;
+            if let Some(i) = find_idx(&map, k) {
+                map[i].1.clone()
+            } else {
+                Value::Null
+            }
+        }
+        "keys" => Value::Array(map.iter().map(|(k, _)| k.clone()).collect()),
+        "values" => Value::Array(map.iter().map(|(_, v)| v.clone()).collect()),
+        "entries" => Value::Array(
+            map.iter()
+                .map(|(k, v)| Value::Tuple(vec![k.clone(), v.clone()]))
+                .collect(),
+        ),
+        "merge" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("merge expects other map", span, Severity::Error))?;
+            if let Value::Map(other_entries) = other {
+                let mut merged = map.clone();
+                for (k, v) in other_entries {
+                    if let Some(i) = find_idx(&merged, k) {
+                        merged[i].1 = v.clone();
+                    } else {
+                        merged.push((k.clone(), v.clone()));
+                    }
+                }
+                Value::Map(merged)
+            } else {
+                return Err(Diagnostic::new("merge expects map argument", span, Severity::Error));
+            }
+        }
+        "merge_with" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("merge_with expects other map", span, Severity::Error))?;
+            if let Value::Map(other_entries) = other {
+                let mut merged = map.clone();
+                for (k, v_other) in other_entries {
+                    if let Some(i) = find_idx(&merged, k) {
+                        merged[i].1 = v_other.clone();
+                    } else {
+                        merged.push((k.clone(), v_other.clone()));
+                    }
+                }
+                Value::Map(merged)
+            } else {
+                return Err(Diagnostic::new("merge_with expects map argument", span, Severity::Error));
+            }
+        }
+        "clone" => Value::Map(map.clone()),
+        "eq" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("eq expects map argument", span, Severity::Error))?;
+            Value::Bool(matches!(other, Value::Map(o) if o == &map))
+        }
+        "ne" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("ne expects map argument", span, Severity::Error))?;
+            Value::Bool(!matches!(other, Value::Map(o) if o == &map))
+        }
+        _ => return Err(Diagnostic::new(format!("unknown map method '{method}'"), span, Severity::Error)),
+    };
+    Ok(out)
+}
+
+fn dispatch_set_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+    let [recv, tail @ ..] = args else {
+        return Err(Diagnostic::new("set method missing receiver", span, Severity::Error));
+    };
+    let Value::Set(items) = recv else {
+        return Err(Diagnostic::new("set method receiver must be set", span, Severity::Error));
+    };
+    let method = name.strip_prefix("__meth_set_").unwrap_or(name);
+    let mut set = items.clone();
+    let contains = |s: &[Value], v: &Value| s.iter().any(|x| x == v);
+    let out = match method {
+        "len" => Value::UInt128(set.len() as u128),
+        "is_empty" => Value::Bool(set.is_empty()),
+        "contains" => {
+            let v = tail.first().ok_or_else(|| Diagnostic::new("contains expects value", span, Severity::Error))?;
+            Value::Bool(contains(&set, v))
+        }
+        "insert" => {
+            let v = tail.first().ok_or_else(|| Diagnostic::new("insert expects value", span, Severity::Error))?;
+            let fresh = !contains(&set, v);
+            Value::Bool(fresh)
+        }
+        "remove" => {
+            let v = tail.first().ok_or_else(|| Diagnostic::new("remove expects value", span, Severity::Error))?;
+            Value::Bool(contains(&set, v))
+        }
+        "clear" => Value::Unit,
+        "values" => Value::Array(set.clone()),
+        "union" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("union expects set argument", span, Severity::Error))?;
+            let Value::Set(other_set) = other else { return Err(Diagnostic::new("union expects set argument", span, Severity::Error)); };
+            for v in other_set {
+                if !contains(&set, v) {
+                    set.push(v.clone());
+                }
+            }
+            Value::Set(set)
+        }
+        "intersection" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("intersection expects set argument", span, Severity::Error))?;
+            let Value::Set(other_set) = other else { return Err(Diagnostic::new("intersection expects set argument", span, Severity::Error)); };
+            Value::Set(set.into_iter().filter(|v| contains(other_set, v)).collect())
+        }
+        "difference" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("difference expects set argument", span, Severity::Error))?;
+            let Value::Set(other_set) = other else { return Err(Diagnostic::new("difference expects set argument", span, Severity::Error)); };
+            Value::Set(set.into_iter().filter(|v| !contains(other_set, v)).collect())
+        }
+        "symmetric_difference" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("symmetric_difference expects set argument", span, Severity::Error))?;
+            let Value::Set(other_set) = other else { return Err(Diagnostic::new("symmetric_difference expects set argument", span, Severity::Error)); };
+            let mut out = Vec::new();
+            for v in &set {
+                if !contains(other_set, v) {
+                    out.push(v.clone());
+                }
+            }
+            for v in other_set {
+                if !contains(&set, v) {
+                    out.push(v.clone());
+                }
+            }
+            Value::Set(out)
+        }
+        "is_subset" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("is_subset expects set argument", span, Severity::Error))?;
+            let Value::Set(other_set) = other else { return Err(Diagnostic::new("is_subset expects set argument", span, Severity::Error)); };
+            Value::Bool(set.iter().all(|v| contains(other_set, v)))
+        }
+        "is_superset" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("is_superset expects set argument", span, Severity::Error))?;
+            let Value::Set(other_set) = other else { return Err(Diagnostic::new("is_superset expects set argument", span, Severity::Error)); };
+            Value::Bool(other_set.iter().all(|v| contains(&set, v)))
+        }
+        "is_disjoint" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("is_disjoint expects set argument", span, Severity::Error))?;
+            let Value::Set(other_set) = other else { return Err(Diagnostic::new("is_disjoint expects set argument", span, Severity::Error)); };
+            Value::Bool(set.iter().all(|v| !contains(other_set, v)))
+        }
+        "clone" => Value::Set(set.clone()),
+        "eq" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("eq expects set argument", span, Severity::Error))?;
+            Value::Bool(matches!(other, Value::Set(o) if o == &set))
+        }
+        "ne" => {
+            let other = tail.first().ok_or_else(|| Diagnostic::new("ne expects set argument", span, Severity::Error))?;
+            Value::Bool(!matches!(other, Value::Set(o) if o == &set))
+        }
+        _ => return Err(Diagnostic::new(format!("unknown set method '{method}'"), span, Severity::Error)),
+    };
+    Ok(out)
+}
+
+
 fn err_value_from_panic(diagnostic: &Diagnostic) -> Value {
     let msg = diagnostic.message.strip_prefix("panic: ").unwrap_or(&diagnostic.message);
     if let Some((message, code_part)) = msg.rsplit_once(" (code=") {
@@ -1716,6 +1950,8 @@ fn builtin_type_name(v: &Value) -> &'static str {
         Value::Function { .. } => "function",
         Value::Tuple(_) => "tuple",
         Value::Array(_) => "array",
+        Value::Map(_) => "map",
+        Value::Set(_) => "set",
         Value::Err { .. } => "err",
         Value::StructInstance { .. } => "struct",
     }
@@ -1743,6 +1979,20 @@ fn canonical_type_name(v: &Value) -> String {
                 "[unknown]".to_string()
             }
         }
+        Value::Map(entries) => {
+            if let Some((k, v)) = entries.first() {
+                format!("map[{}]{}", canonical_type_name(k), canonical_type_name(v))
+            } else {
+                "map[unknown]unknown".to_string()
+            }
+        }
+        Value::Set(items) => {
+            if let Some(first) = items.first() {
+                format!("set[{}]", canonical_type_name(first))
+            } else {
+                "set[unknown]".to_string()
+            }
+        }
         Value::Err { .. } => "err".to_string(),
         Value::StructInstance { type_name, .. } => type_name.clone(),
     }
@@ -1761,6 +2011,8 @@ fn is_truthy(v: &Value) -> bool {
         Value::Builtin(_) | Value::Function { .. } => true,
         Value::Tuple(items) => !items.is_empty(),
         Value::Array(items) => !items.is_empty(),
+        Value::Map(entries) => !entries.is_empty(),
+        Value::Set(items) => !items.is_empty(),
         Value::Err { .. } => true,
         Value::StructInstance { .. } => true,
     }

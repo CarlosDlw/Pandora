@@ -1,0 +1,12 @@
+s: set[i32] = set{1, 2, 3}
+t: set[i32] = set{3, 4}
+
+print(s.len(), s.is_empty(), s.contains(2))
+print(s.insert(2), s.insert(5), s.remove(1), s.remove(9))
+print(s.values())
+print(s.union(t))
+print(s.intersection(t))
+print(s.difference(t))
+print(s.symmetric_difference(t))
+print(s.is_subset(t), s.is_superset(t), s.is_disjoint(t))
+print(s.clone(), s.eq(s), s.ne(t))

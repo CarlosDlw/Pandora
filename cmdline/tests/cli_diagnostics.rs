@@ -539,3 +539,37 @@ fn check_mode_reports_function_method_arity_mismatch() {
         .code(1)
         .stderr(contains("invalid argument count for method 'arity'"));
 }
+
+#[test]
+fn check_mode_reports_map_key_non_hashable_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"m: map[[i32]]i32 = {[1,2]: 10}\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("map key type must be hashable"));
+}
+
+#[test]
+fn check_mode_reports_map_update_callback_type_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"m: map[str]i32 = {\"a\": 1}\nfn bad(v: i32) -> bool { return true }\nprint(m.update(\"a\", bad))\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
