@@ -53,6 +53,9 @@ pub enum Op {
     BitNot,
 
     Add,
+    AddInt,
+    AddFloat,
+    StrConcat,
     Sub,
     Mul,
     Div,

@@ -70,6 +70,8 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         | HirStmt::Break { span, .. }
         | HirStmt::Continue { span, .. }
         | HirStmt::Return { span, .. }
+        | HirStmt::Import { span, .. }
+        | HirStmt::FromImport { span, .. }
         | HirStmt::Invalid { span } => *span,
     }
 }
@@ -420,6 +422,7 @@ fn emit_stmt(
             }
             b.emit(Op::Return, *span);
         }
+        HirStmt::Import { .. } | HirStmt::FromImport { .. } => {}
         HirStmt::Invalid { span } => {
             diagnostics.push(Diagnostic::new("invalid statement skipped in bytecode", *span, Severity::Error));
         }
@@ -525,8 +528,22 @@ fn emit_expr(
             emit_expr(hir, model, *lhs, b, diagnostics, method_table);
             emit_expr(hir, model, *rhs, b, diagnostics, method_table);
             let span_merge = expr_span(hir, id);
+            let lhs_ty = model.types.get(lhs).cloned().unwrap_or(Type::Unknown);
+            let rhs_ty = model.types.get(rhs).cloned().unwrap_or(Type::Unknown);
             match binop {
-                BinOp::Add => b.emit(Op::Add, span_merge),
+                BinOp::Add => {
+                    let specialized = match (&lhs_ty, &rhs_ty) {
+                        (Type::Int { .. }, Type::Int { .. }) => Some(Op::AddInt),
+                        (Type::Float { .. }, Type::Float { .. }) => Some(Op::AddFloat),
+                        (Type::Str, Type::Str) => Some(Op::StrConcat),
+                        _ => None,
+                    };
+                    if let Some(op) = specialized {
+                        b.emit(op, span_merge);
+                    } else {
+                        b.emit(Op::Add, span_merge);
+                    }
+                }
                 BinOp::Subtract => b.emit(Op::Sub, span_merge),
                 BinOp::Multiply => b.emit(Op::Mul, span_merge),
                 BinOp::Divide => b.emit(Op::Div, span_merge),

@@ -1,0 +1,163 @@
+# std/core
+# Foundational helpers intentionally explicit (no generics yet).
+
+# --- Identity / predicates ---
+fn identity_i32(x: i32) -> i32 { return x }
+fn identity_f64(x: f64) -> f64 { return x }
+fn identity_str(x: str) -> str { return x }
+fn identity_bool(x: bool) -> bool { return x }
+
+fn always_true() -> bool { return true }
+fn always_false() -> bool { return false }
+fn helper() -> str { return "std/core ready" }
+
+fn is_null_i32(x: i32) -> bool { return x == null }
+fn is_null_str(x: str) -> bool { return x == null }
+fn is_not_null_i32(x: i32) -> bool { return x != null }
+fn is_not_null_str(x: str) -> bool { return x != null }
+
+# --- Safety / assertions ---
+fn assert(cond: bool, message: str = "assertion failed") -> unit {
+    if !cond {
+        panic(message)
+    }
+}
+
+fn assert_eq_i32(a: i32, b: i32, message: str = "i32 values differ") -> unit {
+    if a != b {
+        panic(message)
+    }
+}
+
+fn assert_eq_str(a: str, b: str, message: str = "str values differ") -> unit {
+    if a != b {
+        panic(message)
+    }
+}
+
+fn expect_i32(x: i32, message: str = "expected non-null i32") -> i32 {
+    if x == null {
+        panic(message)
+    }
+    return x
+}
+
+fn expect_str(x: str, message: str = "expected non-null str") -> str {
+    if x == null {
+        panic(message)
+    }
+    return x
+}
+
+# --- Numeric helpers ---
+fn abs_i32(x: i32) -> i32 { return x.abs() }
+fn clamp_i32(x: i32, lo: i32, hi: i32) -> i32 { return x.clamp(lo, hi) }
+fn between_i32(x: i32, lo: i32, hi: i32) -> bool { return x >= lo && x <= hi }
+fn is_positive_i32(x: i32) -> bool { return x > 0 }
+fn is_negative_i32(x: i32) -> bool { return x < 0 }
+
+fn clamp_f64(x: f64, lo: f64, hi: f64) -> f64 {
+    if x < lo { return lo }
+    if x > hi { return hi }
+    return x
+}
+
+fn between_f64(x: f64, lo: f64, hi: f64) -> bool { return x >= lo && x <= hi }
+
+# --- String helpers ---
+fn str_is_blank(s: str) -> bool { return s.trim().len() == 0 }
+fn str_non_empty(s: str) -> bool { return s.len() > 0 }
+fn str_or(default_value: str, s: str) -> str {
+    if s == null || s.len() == 0 {
+        return default_value
+    }
+    return s
+}
+
+fn str_repeat(s: str, times: i32) -> str {
+    if times == 0 {
+        return ""
+    }
+    out: str = ""
+    for _ in 0..times {
+        out = out + s
+    }
+    return out
+}
+
+fn str_pad_left(s: str, total: i32, pad: str = " ") -> str {
+    n: i32 = s.len().to_i32()
+    if n >= total {
+        return s
+    }
+    need: i32 = total - n
+    return str_repeat(pad, need) + s
+}
+
+fn str_pad_right(s: str, total: i32, pad: str = " ") -> str {
+    n: i32 = s.len().to_i32()
+    if n >= total {
+        return s
+    }
+    need: i32 = total - n
+    return s + str_repeat(pad, need)
+}
+
+# --- Array helpers (typed) ---
+fn first_i32(arr: [i32]) -> (i32, err) { return arr.get(0) }
+fn last_i32(arr: [i32]) -> (i32, err) {
+    if arr.len() == 0 {
+        return 0, error("empty array")
+    }
+    return arr.get(arr.len() - 1)
+}
+
+fn sum_i32(arr: [i32]) -> i32 {
+    acc: i32 = 0
+    for x in arr {
+        acc = acc + x
+    }
+    return acc
+}
+
+fn avg_i32(arr: [i32]) -> (f64, err) {
+    if arr.len() == 0 {
+        return 0.0, error("cannot average empty array")
+    }
+    s: i32 = sum_i32(arr)
+    return s.to_f32() / arr.len().to_f32(), null
+}
+
+fn count_true(arr: [bool]) -> i32 {
+    c: i32 = 0
+    for b in arr {
+        if b {
+            c = c + 1
+        }
+    }
+    return c
+}
+
+# --- Map / set convenience ---
+fn map_or_i32(m: map[str]i32, key: str, default_value: i32) -> i32 {
+    return m.get_or(key, default_value)
+}
+
+fn map_has_all_i32(m: map[str]i32, keys: [str]) -> bool {
+    for k in keys {
+        if !m.contains_key(k) {
+            return false
+        }
+    }
+    return true
+}
+
+fn set_from_array_i32(values: [i32]) -> set[i32] {
+    s: set[i32] = set{}
+    for v in values {
+        s.insert(v)
+    }
+    return s
+}
+
+fn set_size_i32(s: set[i32]) -> u64 { return s.len() }

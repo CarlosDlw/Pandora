@@ -301,6 +301,38 @@ impl<'a> Lowering<'a> {
                 let expr = self.lower_expr(*expr);
                 HirStmt::Expr { expr, span: *span }
             }
+            AstNode::ImportStmt { path, alias, span } => {
+                let alias_sym = self.bind_symbol(*alias, Type::Unknown, true);
+                HirStmt::Import {
+                    path: path.clone(),
+                    alias: alias_sym,
+                    span: *span,
+                }
+            }
+            AstNode::FromImportStmt { path, names, span } => {
+                let syms = names
+                    .iter()
+                    .map(|name| {
+                        let ident = match self.ast.get(*name) {
+                            Some(AstNode::Identifier { name, .. }) => Some(name.as_str()),
+                            _ => None,
+                        };
+                        if let Some(existing_name) = ident {
+                            if let Some(existing) =
+                                self.symbols.resolve_in_scope(self.current_scope, existing_name)
+                            {
+                                return existing;
+                            }
+                        }
+                        self.bind_symbol(*name, Type::Unknown, true)
+                    })
+                    .collect::<Vec<_>>();
+                HirStmt::FromImport {
+                    path: path.clone(),
+                    names: syms,
+                    span: *span,
+                }
+            }
             AstNode::BlockStmt { statements, span } => {
                 let stmts = self.lower_block_stmts(statements);
                 HirStmt::Block { stmts, span: *span }
@@ -416,11 +448,18 @@ impl<'a> Lowering<'a> {
             );
         };
 
-        if self.symbols.resolve_in_scope(self.current_scope, name).is_some() {
-            self.push_error(
-                format!("symbol '{name}' already defined in scope"),
-                self.node_span(id),
-            );
+        if let Some(existing) = self.symbols.resolve_in_scope(self.current_scope, name) {
+            let is_intrinsic = self
+                .symbols
+                .symbol(existing)
+                .map(|s| s.origin == SymbolOrigin::Intrinsic)
+                .unwrap_or(false);
+            if !is_intrinsic {
+                self.push_error(
+                    format!("symbol '{name}' already defined in scope"),
+                    self.node_span(id),
+                );
+            }
         }
 
         self.symbols.define(
@@ -689,6 +728,10 @@ impl<'a> Lowering<'a> {
                     *span,
                 )
             }
+            AstNode::ImportStmt { .. } | AstNode::FromImportStmt { .. } => {
+                self.push_error("import statement is not an expression", self.node_span(id));
+                self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
+            }
             AstNode::TypeName { .. } => {
                 self.push_error("type name is not an expression", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
@@ -950,7 +993,7 @@ fn init_global_scope(
             scope_id,
             builtin.name.to_string(),
             builtin.ty.clone(),
-            SymbolOrigin::Builtin,
+            SymbolOrigin::Intrinsic,
             true,
         );
     }
@@ -1196,7 +1239,7 @@ mod tests {
         assert!(!diagnostics.has_errors());
         let print_id = symbols.resolve(ScopeId(0), "print").expect("builtin print");
         let print_symbol = symbols.symbol(print_id).expect("symbol exists");
-        assert_eq!(print_symbol.origin, SymbolOrigin::Builtin);
+        assert_eq!(print_symbol.origin, SymbolOrigin::Intrinsic);
     }
 
     #[test]

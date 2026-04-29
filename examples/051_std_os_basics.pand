@@ -1,0 +1,12 @@
+from "std/os" import platform, arch, pid, getenv, setenv, unsetenv, args, exec, signal_term
+
+set_err := setenv("PANDORA_STD_OS_TEST", "ok")
+val, get_err := getenv("PANDORA_STD_OS_TEST")
+unset_err := unsetenv("PANDORA_STD_OS_TEST")
+
+code, out, err_out, exec_err := exec("echo pandora_os")
+
+print(len(platform()).gt((0).to_u32()), len(arch()).gt((0).to_u32()), pid().gt((0).to_u32()))
+print(set_err == null, get_err == null, val == "ok", unset_err == null)
+print(len(args()).gt((0).to_u32()), signal_term() == 15)
+print(code == 0, out.contains("pandora_os"), len(err_out).ge((0).to_u32()), exec_err == null)

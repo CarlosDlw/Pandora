@@ -96,6 +96,7 @@ impl Pipeline {
         db: &mut Database,
         frontend: &mut impl PandoraFrontend,
     ) -> Result<(), FoundationError> {
+        db.set_stdlib_loaded(true);
         let file_ids: Vec<FileId> = db.vfs().iter().map(|(file_id, _)| file_id).collect();
         for file_id in file_ids {
             let file = db.vfs().get_file_required(file_id)?;

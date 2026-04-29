@@ -53,6 +53,7 @@ pub struct Database {
     semantic_cache: SemanticCache,
     diagnostics_by_file: HashMap<FileId, Diagnostics>,
     builtins: Option<Arc<dyn std::any::Any + Send + Sync>>,
+    stdlib_loaded: bool,
 }
 
 impl Database {
@@ -106,6 +107,14 @@ impl Database {
 
     pub fn builtins_any(&self) -> Option<&Arc<dyn std::any::Any + Send + Sync>> {
         self.builtins.as_ref()
+    }
+
+    pub fn set_stdlib_loaded(&mut self, loaded: bool) {
+        self.stdlib_loaded = loaded;
+    }
+
+    pub fn stdlib_loaded(&self) -> bool {
+        self.stdlib_loaded
     }
 }
 

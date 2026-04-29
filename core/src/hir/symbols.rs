@@ -17,7 +17,7 @@ pub struct Scope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolOrigin {
     User,
-    Builtin,
+    Intrinsic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

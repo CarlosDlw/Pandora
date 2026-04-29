@@ -203,6 +203,16 @@ pub enum HirStmt {
         values: Vec<HirId>,
         span: Span,
     },
+    Import {
+        path: String,
+        alias: SymbolId,
+        span: Span,
+    },
+    FromImport {
+        path: String,
+        names: Vec<SymbolId>,
+        span: Span,
+    },
     Invalid {
         span: Span,
     },

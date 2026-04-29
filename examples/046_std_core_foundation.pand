@@ -1,0 +1,10 @@
+from "std/core" import helper, sum_i32, str_repeat, str_pad_left, str_pad_right, count_true, assert_eq_i32
+
+print(helper())
+print(sum_i32([1, 2, 3, 4]))
+print(str_repeat("pa", 3))
+print(str_pad_left("7", 4, "0"))
+print(str_pad_right("7", 4, "."))
+print(count_true([true, false, true, true]))
+assert_eq_i32(10, sum_i32([5, 5]), "sum mismatch")
+print("std/core ok")

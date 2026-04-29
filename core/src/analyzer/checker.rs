@@ -581,6 +581,7 @@ impl<'a> Checker<'a> {
                 }
                 expected_return
             }
+            HirStmt::Import { .. } | HirStmt::FromImport { .. } => AnalyzerType::Unknown,
             HirStmt::Invalid { span } => {
                 self.push_error("invalid statement", *span);
                 AnalyzerType::Unknown
@@ -1567,7 +1568,7 @@ impl<'a> Checker<'a> {
             return None;
         };
         let sym = self.symbols.symbol(*symbol_id)?;
-        (sym.origin == crate::hir::SymbolOrigin::Builtin).then(|| sym.name.clone())
+        (sym.origin == crate::hir::SymbolOrigin::Intrinsic).then(|| sym.name.clone())
     }
 
     fn find_builtin_symbol_by_name(&self, name: &str) -> Option<SymbolId> {
@@ -1576,7 +1577,7 @@ impl<'a> Checker<'a> {
             let Some(sym) = self.symbols.symbol(id) else {
                 break;
             };
-            if sym.origin == crate::hir::SymbolOrigin::Builtin && sym.name == name {
+            if sym.origin == crate::hir::SymbolOrigin::Intrinsic && sym.name == name {
                 return Some(id);
             }
         }
@@ -1589,6 +1590,21 @@ impl<'a> Checker<'a> {
         args: &[HirId],
         span: Span,
     ) -> AnalyzerType {
+        if name.starts_with("io_")
+            || name.starts_with("fs_")
+            || name.starts_with("math_")
+            || name.starts_with("time_")
+            || name.starts_with("os_")
+        {
+            self.push_error(
+                format!("internal intrinsic '{name}' is not part of the public stdlib API"),
+                span,
+            );
+            for arg in args {
+                let _ = self.check_expr(*arg, span);
+            }
+            return AnalyzerType::Unknown;
+        }
         match name {
             "error" => {
                 if args.len() != 1 && args.len() != 2 {

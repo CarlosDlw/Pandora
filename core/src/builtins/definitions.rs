@@ -50,7 +50,1234 @@ pub fn default_registry() -> BuiltinRegistry {
             params: vec![Type::Any],
             ret: Box::new(Type::Str),
         },
-    }];
+    },
+    BuiltinFunction {
+        name: "helper",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "assert",
+        ty: Type::Function {
+            params: vec![Type::Bool, Type::Str],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "assert_eq_i32",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+            ],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "assert_eq_str",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str, Type::Str],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "sum_i32",
+        ty: Type::Function {
+            params: vec![Type::Array(Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }))],
+            ret: Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "str_repeat",
+        ty: Type::Function {
+            params: vec![
+                Type::Str,
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+            ],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "str_pad_left",
+        ty: Type::Function {
+            params: vec![
+                Type::Str,
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+            ],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "str_pad_right",
+        ty: Type::Function {
+            params: vec![
+                Type::Str,
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+            ],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "count_true",
+        ty: Type::Function {
+            params: vec![Type::Array(Box::new(Type::Bool))],
+            ret: Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "io_read_text",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "read_text",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "io_write_text",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "write_text",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "io_append_text",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "append_text",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "io_exists",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "exists",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "io_remove_file",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "remove_file",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "io_read_stdin_line",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "stdin_read_line",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "io_stdout_write",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "stdout_write",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "stdout_writeln",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "io_stderr_write",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "stderr_write",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "stderr_writeln",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Unit),
+        },
+    },
+    BuiltinFunction {
+        name: "buffer_new",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "buffer_write",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "buffer_writeln",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "buffer_clear",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_exists",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_is_file",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "is_file",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_is_dir",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "is_dir",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_create_dir",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "create_dir",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_create_dir_all",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "create_dir_all",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_read_dir",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Array(Box::new(Type::Str)), Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "read_dir",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Array(Box::new(Type::Str)), Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_remove_file",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_remove_dir",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "remove_dir",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_remove_dir_all",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "remove_dir_all",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_rename",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "rename",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_copy",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Int { signed: false, bits: 64 }, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "copy",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Int { signed: false, bits: 64 }, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_cwd",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "cwd",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_set_cwd",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "set_cwd",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_path_join",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "path_join",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_path_parent",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "path_parent",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_path_filename",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "path_filename",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_path_extension",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "path_extension",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_metadata_len",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Int { signed: false, bits: 64 }, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "metadata_len",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Int { signed: false, bits: 64 }, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_metadata_readonly",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Bool, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "metadata_readonly",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Bool, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "fs_set_readonly",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Bool],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "set_readonly",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Bool],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "math_pi",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "pi",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_e",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "e",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_tau",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "tau",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_abs",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "abs",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_sqrt",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "sqrt",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_pow",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }, Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "pow",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }, Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_exp",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "exp",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_log",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "log",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_log10",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "log10",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_floor",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "floor",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_ceil",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "ceil",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_round",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "round",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_trunc",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "trunc",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_fract",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "fract",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_sin",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "sin",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_cos",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "cos",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_tan",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "tan",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_asin",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "asin",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_acos",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "acos",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_atan",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "atan",
+        ty: Type::Function {
+            params: vec![Type::Float { bits: 64 }],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_rand_f64",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "rand_f64",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Float { bits: 64 }),
+        },
+    },
+    BuiltinFunction {
+        name: "math_rand_i32",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "rand_i32",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "time_now_unix_secs",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "now_unix_secs",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "time_now_unix_millis",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "now_unix_millis",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "time_sleep_ms",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "sleep_ms",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "time_tick_ms",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "tick_ms",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "time_elapsed_ms",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "elapsed_ms",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "time_now_iso_utc",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "now_iso_utc",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "time_from_unix_secs_iso_utc",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "from_unix_secs_iso_utc",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "os_platform",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "platform",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "os_arch",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "arch",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "os_pid",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "pid",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "os_getenv",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "getenv",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "os_setenv",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "setenv",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "os_unsetenv",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "unsetenv",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "os_args",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Array(Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "args",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Array(Box::new(Type::Str))),
+        },
+    },
+    BuiltinFunction {
+        name: "os_exec",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "exec",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "os_signal_term",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "signal_term",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "os_signal_kill",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "signal_kill",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "os_signal_int",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "signal_int",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: true,
+                bits: 32,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "os_send_signal",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+            ],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "send_signal",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+            ],
+            ret: Box::new(Type::Err),
+        },
+    },
+    ];
 
     let mut methods = Vec::new();
     register_integer_methods(&mut methods, ReceiverMatcher::IntSignedAny, true);

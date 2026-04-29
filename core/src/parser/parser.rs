@@ -91,6 +91,12 @@ impl Parser {
         if self.current().is_some_and(|token| token.kind == TokenKind::If) {
             return self.parse_if_stmt();
         }
+        if self.current().is_some_and(|token| token.kind == TokenKind::Import) {
+            return self.parse_import_stmt();
+        }
+        if self.current().is_some_and(|token| token.kind == TokenKind::From) {
+            return self.parse_from_import_stmt();
+        }
         if self.current().is_some_and(|token| token.kind == TokenKind::Else) {
             let span = self.current_span_or_eof();
             self.push_error("unexpected 'else' without matching 'if'", span);
@@ -180,6 +186,58 @@ impl Parser {
             condition,
             step,
             body,
+            span,
+        })
+    }
+
+    fn parse_import_stmt(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        let path_tok = match self.current() {
+            Some(t) if t.kind == TokenKind::String => t.clone(),
+            _ => {
+                self.push_error("expected string path after import", self.current_span_or_eof());
+                return self.invalid_node(start);
+            }
+        };
+        self.bump();
+        if !self.consume_if(TokenKind::As) {
+            self.push_error("import requires alias: use `import \"...\" as name`", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let alias = self.parse_required_identifier("expected alias identifier after 'as'");
+        let span = merge_span(start, self.node_span(alias));
+        self.insert_node(AstNode::ImportStmt {
+            path: path_tok.lexeme,
+            alias,
+            span,
+        })
+    }
+
+    fn parse_from_import_stmt(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        let path_tok = match self.current() {
+            Some(t) if t.kind == TokenKind::String => t.clone(),
+            _ => {
+                self.push_error("expected string path after from", self.current_span_or_eof());
+                return self.invalid_node(start);
+            }
+        };
+        self.bump();
+        if !self.consume_if(TokenKind::Import) {
+            self.push_error("expected `import` after module path", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let mut names = Vec::new();
+        names.push(self.parse_required_identifier("expected imported symbol name"));
+        while self.consume_if(TokenKind::Comma) {
+            names.push(self.parse_required_identifier("expected imported symbol name"));
+        }
+        let span = merge_span(start, self.previous_span_or(start));
+        self.insert_node(AstNode::FromImportStmt {
+            path: path_tok.lexeme,
+            names,
             span,
         })
     }

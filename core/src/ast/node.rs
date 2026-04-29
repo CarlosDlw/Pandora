@@ -280,6 +280,16 @@ pub enum AstNode {
         expr: ArenaId,
         span: Span,
     },
+    ImportStmt {
+        path: String,
+        alias: ArenaId,
+        span: Span,
+    },
+    FromImportStmt {
+        path: String,
+        names: Vec<ArenaId>,
+        span: Span,
+    },
 }
 
 impl AstNode {
@@ -328,7 +338,9 @@ impl AstNode {
             | Self::ContinueStmt { span, .. }
             | Self::ReturnStmt { span, .. }
             | Self::BlockStmt { span, .. }
-            | Self::ExprStmt { span, .. } => *span,
+            | Self::ExprStmt { span, .. }
+            | Self::ImportStmt { span, .. }
+            | Self::FromImportStmt { span, .. } => *span,
         }
     }
 }

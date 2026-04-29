@@ -1,0 +1,2 @@
+import "std/core" as core
+print("import alias ok")

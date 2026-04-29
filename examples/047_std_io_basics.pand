@@ -1,0 +1,15 @@
+from "std/io" import write_text, append_text, read_text, exists, remove_file, stdout_writeln, buffer_new, buffer_write, buffer_writeln
+
+path: str = "/tmp/pandora_std_io_demo.txt"
+
+e1 := write_text(path, "hello")
+e2 := append_text(path, " world")
+content, rerr := read_text(path)
+
+buf := buffer_new()
+buf = buffer_write(buf, "line-1")
+buf = buffer_writeln(buf, " line-2")
+
+stdout_writeln("io exists: " + exists(path).to_str())
+print(e1, e2, content, rerr, buf)
+print(remove_file(path))

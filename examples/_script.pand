@@ -42,3 +42,6 @@ print(addm.arity(), addm(2, 4))
 mm: map[str]i32 = {"x": 1, "y": 2}
 ss: set[i32] = set{1, 2, 3}
 print(mm.get("x"), mm.keys(), ss.contains(2), ss.union(set{3, 4}))
+
+import "std/core" as core
+from "std/core" import print

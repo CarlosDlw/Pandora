@@ -10,6 +10,7 @@ use crate::{
     lexer::lex,
     lowering::lower_with_registry,
     parser::parse,
+    stdlib::embedded_core_std_pbc,
     vm::{compile_program, execute},
 };
 
@@ -19,6 +20,7 @@ pub fn compile_file(file_id: FileId, source: &str) -> Diagnostics {
 }
 
 pub fn compile_file_with_registry(file_id: FileId, source: &str, registry: &BuiltinRegistry) -> Diagnostics {
+    let _core_std = embedded_core_std_pbc();
     let lex_output = lex(file_id, source);
     let mut diagnostics = lex_output.diagnostics;
 

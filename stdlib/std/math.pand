@@ -1,0 +1,28 @@
+# std/math
+# Mathematical functions, trigonometry, exponential and random.
+
+fn pi() -> f64 { return math_pi() }
+fn e() -> f64 { return math_e() }
+fn tau() -> f64 { return math_tau() }
+
+fn abs(x: f64) -> f64 { return math_abs(x) }
+fn sqrt(x: f64) -> f64 { return math_sqrt(x) }
+fn pow(base: f64, exp: f64) -> f64 { return math_pow(base, exp) }
+fn exp(x: f64) -> f64 { return math_exp(x) }
+fn log(x: f64) -> f64 { return math_log(x) }
+fn log10(x: f64) -> f64 { return math_log10(x) }
+fn floor(x: f64) -> f64 { return math_floor(x) }
+fn ceil(x: f64) -> f64 { return math_ceil(x) }
+fn round(x: f64) -> f64 { return math_round(x) }
+fn trunc(x: f64) -> f64 { return math_trunc(x) }
+fn fract(x: f64) -> f64 { return math_fract(x) }
+
+fn sin(x: f64) -> f64 { return math_sin(x) }
+fn cos(x: f64) -> f64 { return math_cos(x) }
+fn tan(x: f64) -> f64 { return math_tan(x) }
+fn asin(x: f64) -> f64 { return math_asin(x) }
+fn acos(x: f64) -> f64 { return math_acos(x) }
+fn atan(x: f64) -> f64 { return math_atan(x) }
+
+fn rand_f64() -> f64 { return math_rand_f64() }
+fn rand_i32(min: i32, max: i32) -> (i32, err) { return math_rand_i32(min, max) }

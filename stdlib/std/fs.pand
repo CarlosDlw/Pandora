@@ -1,0 +1,30 @@
+# std/fs
+# Filesystem manipulation: paths, metadata, permissions.
+
+fn exists(path: str) -> bool { return fs_exists(path) }
+fn is_file(path: str) -> bool { return fs_is_file(path) }
+fn is_dir(path: str) -> bool { return fs_is_dir(path) }
+
+fn create_dir(path: str) -> err { return fs_create_dir(path) }
+fn create_dir_all(path: str) -> err { return fs_create_dir_all(path) }
+
+fn read_dir(path: str) -> ([str], err) { return fs_read_dir(path) }
+
+fn remove_file(path: str) -> err { return fs_remove_file(path) }
+fn remove_dir(path: str) -> err { return fs_remove_dir(path) }
+fn remove_dir_all(path: str) -> err { return fs_remove_dir_all(path) }
+
+fn rename(from: str, to: str) -> err { return fs_rename(from, to) }
+fn copy(from: str, to: str) -> (u64, err) { return fs_copy(from, to) }
+
+fn cwd() -> (str, err) { return fs_cwd() }
+fn set_cwd(path: str) -> err { return fs_set_cwd(path) }
+
+fn path_join(a: str, b: str) -> str { return fs_path_join(a, b) }
+fn path_parent(path: str) -> (str, err) { return fs_path_parent(path) }
+fn path_filename(path: str) -> (str, err) { return fs_path_filename(path) }
+fn path_extension(path: str) -> (str, err) { return fs_path_extension(path) }
+
+fn metadata_len(path: str) -> (u64, err) { return fs_metadata_len(path) }
+fn metadata_readonly(path: str) -> (bool, err) { return fs_metadata_readonly(path) }
+fn set_readonly(path: str, readonly: bool) -> err { return fs_set_readonly(path, readonly) }

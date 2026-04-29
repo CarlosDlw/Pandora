@@ -1,0 +1,19 @@
+from "std/fs" import create_dir_all, exists, is_dir, path_join, copy, metadata_len, path_filename, path_extension, remove_file, remove_dir_all
+from "std/io" import write_text, read_text
+
+base: str = "/tmp/pandora_std_fs_demo"
+f1: str = path_join(base, "a.txt")
+f2: str = path_join(base, "b.txt")
+
+print(create_dir_all(base), exists(base), is_dir(base))
+print(write_text(f1, "fs works"))
+
+copied, cerr := copy(f1, f2)
+len2, lerr := metadata_len(f2)
+content, rerr := read_text(f2)
+name, nerr := path_filename(f2)
+ext, eerr := path_extension(f2)
+
+print(copied, cerr, len2, lerr, content, rerr)
+print(name, nerr, ext, eerr)
+print(remove_file(f1), remove_file(f2), remove_dir_all(base))

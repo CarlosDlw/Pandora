@@ -760,3 +760,126 @@ fn runs_example_043_set_methods() {
                 .and(contains("true false")),
         );
 }
+
+#[test]
+fn runs_example_044_import_alias_basic() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/044_import_alias_basic.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("import alias ok"));
+}
+
+#[test]
+fn runs_example_045_from_import_basic() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/045_from_import_basic.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("from import ok"));
+}
+
+#[test]
+fn runs_example_046_std_core_foundation() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/046_std_core_foundation.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("std/core ready")
+                .and(contains("10"))
+                .and(contains("papapa"))
+                .and(contains("0007"))
+                .and(contains("7..."))
+                .and(contains("3"))
+                .and(contains("std/core ok")),
+        );
+}
+
+#[test]
+fn runs_example_047_std_io_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/047_std_io_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("io exists: true")
+                .and(contains("null null hello world null line-1 line-2"))
+                .and(contains("null")),
+        );
+}
+
+#[test]
+fn runs_example_048_std_fs_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/048_std_fs_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("null true true")
+                .and(contains("null"))
+                .and(contains("8 null 8 null fs works null"))
+                .and(contains("b.txt null txt null"))
+                .and(contains("null null null")),
+        );
+}
+
+#[test]
+fn runs_example_049_std_math_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/049_std_math_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("3.141592653589793")
+                .and(contains("2.718281828459045"))
+                .and(contains("6.283185307179586"))
+                .and(contains("4.5 3 32"))
+                .and(contains("4 5 5 4 0.5999999999999996"))
+                .and(contains("0 1 0 0 0 0.7853981633974483"))
+                .and(contains("true true true"))
+                .and(contains("true true")),
+        );
+}
+
+#[test]
+fn runs_example_050_std_time_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/050_std_time_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true true true")
+                .and(contains("true true true true")),
+        );
+}
+
+#[test]
+fn runs_example_051_std_os_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/051_std_os_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true")
+                .and(contains("true true true true"))
+                .and(contains("true true"))
+                .and(contains("true true true true")),
+        );
+}

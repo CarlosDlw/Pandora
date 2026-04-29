@@ -1,7 +1,10 @@
-//! Linear VM execution: builtins use [`SymbolOrigin::Builtin`];
+//! Linear VM execution: intrinsics use [`SymbolOrigin::Intrinsic`];
 //! user-defined callees are rejected until closures/functions exist.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use foundation::{
     diagnostics::{Diagnostic, Diagnostics, Severity},
@@ -39,8 +42,14 @@ pub struct Vm<'a> {
     env: HashMap<SymbolId, Value>,
     scope_frames: Vec<Vec<SymbolId>>,
     symbols: &'a SymbolTable,
+    intrinsic_ids: HashMap<SymbolId, IntrinsicId>,
     call_stack: Vec<CallFrame>,
     try_stack: Vec<TryContext>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IntrinsicId {
+    Known,
 }
 
 impl<'a> Vm<'a> {
@@ -51,8 +60,18 @@ impl<'a> Vm<'a> {
             let Some(symbol) = symbols.symbol(id) else {
                 break;
             };
-            if symbol.origin == SymbolOrigin::Builtin {
+            if symbol.origin == SymbolOrigin::Intrinsic {
                 env.entry(id).or_insert(Value::Builtin(id));
+            }
+        }
+        let mut intrinsic_ids = HashMap::new();
+        for idx in 0..u32::MAX {
+            let id = SymbolId(idx);
+            let Some(symbol) = symbols.symbol(id) else {
+                break;
+            };
+            if symbol.origin == SymbolOrigin::Intrinsic {
+                intrinsic_ids.insert(id, IntrinsicId::Known);
             }
         }
         Self {
@@ -62,6 +81,7 @@ impl<'a> Vm<'a> {
             env,
             scope_frames: vec![Vec::new()],
             symbols,
+            intrinsic_ids,
             call_stack: Vec::new(),
             try_stack: Vec::new(),
         }
@@ -384,7 +404,7 @@ impl<'a> Vm<'a> {
                 let sym_info = self.symbols.symbol(*sym).ok_or_else(|| {
                     Diagnostic::new("unknown symbol id in assignment", span, Severity::Error)
                 })?;
-                if sym_info.origin == SymbolOrigin::Builtin {
+                if sym_info.origin == SymbolOrigin::Intrinsic {
                     return Err(Diagnostic::new(
                         "cannot assign to a builtin",
                         span,
@@ -450,6 +470,40 @@ impl<'a> Vm<'a> {
                             |a, b| a.checked_add(b),
                             |a, b| Some(a + b),
                         )?;
+                    }
+                }
+            }
+            Op::AddInt => self.apply_bin_checked(
+                span,
+                |a, b| a.checked_add(b),
+                |a, b| a.checked_add(b),
+                |_, _| None,
+            )?,
+            Op::AddFloat => {
+                let rhs = self.pop_one(span)?;
+                let lhs = self.pop_one(span)?;
+                match (lhs, rhs) {
+                    (Value::Float(a), Value::Float(b)) => self.stack.push(Value::Float(a + b)),
+                    (l, r) => {
+                        return Err(Diagnostic::new(
+                            format!("invalid operands for AddFloat: {:?} and {:?}", l, r),
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                }
+            }
+            Op::StrConcat => {
+                let rhs = self.pop_one(span)?;
+                let lhs = self.pop_one(span)?;
+                match (lhs, rhs) {
+                    (Value::Str(a), Value::Str(b)) => self.stack.push(Value::Str(format!("{a}{b}"))),
+                    (l, r) => {
+                        return Err(Diagnostic::new(
+                            format!("invalid operands for StrConcat: {:?} and {:?}", l, r),
+                            span,
+                            Severity::Error,
+                        ))
                     }
                 }
             }
@@ -524,7 +578,7 @@ impl<'a> Vm<'a> {
                     Diagnostic::new("unknown symbol id in call", span, Severity::Error)
                 })?;
 
-                if symbol.origin != SymbolOrigin::Builtin {
+                if symbol.origin != SymbolOrigin::Intrinsic {
                     return Err(Diagnostic::new(
                         "calls to user-defined functions are not implemented yet",
                         span,
@@ -532,7 +586,7 @@ impl<'a> Vm<'a> {
                     ));
                 }
 
-                let ret = dispatch_builtin(self, symbol.name.as_str(), &args, span)?;
+                let ret = self.dispatch_intrinsic(*sym, &args, span)?;
                 self.stack.push(ret);
             }
             Op::CallValue(argc) => {
@@ -545,10 +599,10 @@ impl<'a> Vm<'a> {
                 let callee = self.pop_one(span)?;
                 match callee {
                     Value::Builtin(sym) => {
-                        let symbol = self.symbols.symbol(sym).ok_or_else(|| {
+                        let _symbol = self.symbols.symbol(sym).ok_or_else(|| {
                             Diagnostic::new("unknown builtin symbol", span, Severity::Error)
                         })?;
-                        let ret = dispatch_builtin(self, symbol.name.as_str(), &args, span)?;
+                        let ret = self.dispatch_intrinsic(sym, &args, span)?;
                         self.stack.push(ret);
                     }
                     Value::Function {
@@ -564,7 +618,7 @@ impl<'a> Vm<'a> {
                                 .symbols
                                 .symbol(*sym)
                                 .map(|s| {
-                                    s.origin == SymbolOrigin::Builtin
+                                    s.origin == SymbolOrigin::Intrinsic
                                         || matches!(s.ty, crate::analyzer::Type::Function { .. })
                                 })
                                 .unwrap_or(false);
@@ -1055,6 +1109,26 @@ impl<'a> Vm<'a> {
         })
     }
 
+    fn dispatch_intrinsic(
+        &mut self,
+        symbol_id: SymbolId,
+        args: &[Value],
+        span: Span,
+    ) -> Result<Value, Diagnostic> {
+        let Some(_intrinsic) = self.intrinsic_ids.get(&symbol_id).copied() else {
+            return Err(Diagnostic::new(
+                "symbol is not registered as intrinsic",
+                span,
+                Severity::Error,
+            ));
+        };
+        let symbol = self
+            .symbols
+            .symbol(symbol_id)
+            .ok_or_else(|| Diagnostic::new("unknown intrinsic symbol", span, Severity::Error))?;
+        dispatch_builtin(self, symbol.name.as_str(), args, span)
+    }
+
 }
 
 fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
@@ -1191,6 +1265,1281 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ));
             };
             Ok(Value::Str(canonical_type_name(arg)))
+        }
+        "helper" => Ok(Value::Str("std/core ready".to_string())),
+        "assert" => {
+            if args.is_empty() || args.len() > 2 {
+                return Err(Diagnostic::new(
+                    format!("assert expects 1 or 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let cond = match &args[0] {
+                Value::Bool(v) => *v,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("assert condition must be bool, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            if cond {
+                Ok(Value::Unit)
+            } else {
+                let message = match args.get(1) {
+                    Some(Value::Str(s)) => s.clone(),
+                    Some(other) => {
+                        return Err(Diagnostic::new(
+                            format!("assert message must be str, got {}", builtin_type_name(other)),
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                    None => "assertion failed".to_string(),
+                };
+                Err(Diagnostic::new(format!("panic: {message} (code=1)"), span, Severity::Error))
+            }
+        }
+        "assert_eq_i32" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(Diagnostic::new(
+                    format!("assert_eq_i32 expects 2 or 3 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let a = as_i128(&args[0]).ok_or_else(|| {
+                Diagnostic::new("assert_eq_i32 first arg must be i32-compatible", span, Severity::Error)
+            })?;
+            let b = as_i128(&args[1]).ok_or_else(|| {
+                Diagnostic::new("assert_eq_i32 second arg must be i32-compatible", span, Severity::Error)
+            })?;
+            if a == b {
+                Ok(Value::Unit)
+            } else {
+                let message = match args.get(2) {
+                    Some(Value::Str(s)) => s.clone(),
+                    Some(other) => {
+                        return Err(Diagnostic::new(
+                            format!("assert_eq_i32 message must be str, got {}", builtin_type_name(other)),
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                    None => "i32 values differ".to_string(),
+                };
+                Err(Diagnostic::new(format!("panic: {message} (code=1)"), span, Severity::Error))
+            }
+        }
+        "assert_eq_str" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(Diagnostic::new(
+                    format!("assert_eq_str expects 2 or 3 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let a = match &args[0] {
+                Value::Str(v) => v,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("assert_eq_str first arg must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let b = match &args[1] {
+                Value::Str(v) => v,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("assert_eq_str second arg must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            if a == b {
+                Ok(Value::Unit)
+            } else {
+                let message = match args.get(2) {
+                    Some(Value::Str(s)) => s.clone(),
+                    Some(other) => {
+                        return Err(Diagnostic::new(
+                            format!("assert_eq_str message must be str, got {}", builtin_type_name(other)),
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                    None => "str values differ".to_string(),
+                };
+                Err(Diagnostic::new(format!("panic: {message} (code=1)"), span, Severity::Error))
+            }
+        }
+        "sum_i32" => {
+            let [arg] = args else {
+                return Err(Diagnostic::new(
+                    format!("sum_i32 expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let arr = match arg {
+                Value::Array(items) => items,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("sum_i32 expects array, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let mut acc: i128 = 0;
+            for v in arr {
+                let i = as_i128(v).ok_or_else(|| {
+                    Diagnostic::new("sum_i32 array must contain integers", span, Severity::Error)
+                })?;
+                acc += i;
+            }
+            Ok(Value::Int128(acc))
+        }
+        "str_repeat" => {
+            let [s, times] = args else {
+                return Err(Diagnostic::new(
+                    format!("str_repeat expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let s = match s {
+                Value::Str(v) => v,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("str_repeat first arg must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let n = as_i128(times)
+                .ok_or_else(|| Diagnostic::new("str_repeat second arg must be i32-compatible", span, Severity::Error))?;
+            if n <= 0 {
+                return Ok(Value::Str(String::new()));
+            }
+            Ok(Value::Str(s.repeat(n as usize)))
+        }
+        "str_pad_left" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(Diagnostic::new(
+                    format!("str_pad_left expects 2 or 3 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let s = match &args[0] {
+                Value::Str(v) => v,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("str_pad_left first arg must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let total = as_i128(&args[1]).ok_or_else(|| {
+                Diagnostic::new("str_pad_left second arg must be i32-compatible", span, Severity::Error)
+            })?;
+            let pad = match args.get(2) {
+                Some(Value::Str(v)) => v.as_str(),
+                Some(other) => {
+                    return Err(Diagnostic::new(
+                        format!("str_pad_left pad must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+                None => " ",
+            };
+            Ok(Value::Str(str_pad_impl(s, total, pad, true)))
+        }
+        "str_pad_right" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(Diagnostic::new(
+                    format!("str_pad_right expects 2 or 3 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let s = match &args[0] {
+                Value::Str(v) => v,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("str_pad_right first arg must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let total = as_i128(&args[1]).ok_or_else(|| {
+                Diagnostic::new("str_pad_right second arg must be i32-compatible", span, Severity::Error)
+            })?;
+            let pad = match args.get(2) {
+                Some(Value::Str(v)) => v.as_str(),
+                Some(other) => {
+                    return Err(Diagnostic::new(
+                        format!("str_pad_right pad must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+                None => " ",
+            };
+            Ok(Value::Str(str_pad_impl(s, total, pad, false)))
+        }
+        "count_true" => {
+            let [arg] = args else {
+                return Err(Diagnostic::new(
+                    format!("count_true expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let arr = match arg {
+                Value::Array(items) => items,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("count_true expects array, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let mut count: i128 = 0;
+            for v in arr {
+                match v {
+                    Value::Bool(true) => count += 1,
+                    Value::Bool(false) => {}
+                    _ => {
+                        return Err(Diagnostic::new(
+                            "count_true array must contain bool values",
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                }
+            }
+            Ok(Value::Int128(count))
+        }
+        "io_read_text" | "read_text" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("io_read_text expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = match path {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_read_text path must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            match std::fs::read_to_string(path) {
+                Ok(content) => Ok(Value::Tuple(vec![Value::Str(content), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("io_read_text", e)])),
+            }
+        }
+        "io_write_text" | "write_text" => {
+            let [path, content] = args else {
+                return Err(Diagnostic::new(
+                    format!("io_write_text expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = match path {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_write_text path must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let content = match content {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_write_text content must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            match std::fs::write(path, content) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("io_write_text", e)),
+            }
+        }
+        "io_append_text" | "append_text" => {
+            let [path, content] = args else {
+                return Err(Diagnostic::new(
+                    format!("io_append_text expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = match path {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_append_text path must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let content = match content {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_append_text content must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let res = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, content.as_bytes()));
+            match res {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("io_append_text", e)),
+            }
+        }
+        "io_exists" | "exists" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("io_exists expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = match path {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_exists path must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            Ok(Value::Bool(std::path::Path::new(path).exists()))
+        }
+        "io_remove_file" | "remove_file" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("io_remove_file expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = match path {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_remove_file path must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            match std::fs::remove_file(path) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("io_remove_file", e)),
+            }
+        }
+        "io_read_stdin_line" | "stdin_read_line" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("io_read_stdin_line expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let mut line = String::new();
+            match std::io::stdin().read_line(&mut line) {
+                Ok(_) => {
+                    while line.ends_with('\n') || line.ends_with('\r') {
+                        line.pop();
+                    }
+                    Ok(Value::Tuple(vec![Value::Str(line), Value::Null]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("io_read_stdin_line", e)])),
+            }
+        }
+        "io_stdout_write" | "stdout_write" => {
+            let [text] = args else {
+                return Err(Diagnostic::new(
+                    format!("io_stdout_write expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let text = match text {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_stdout_write text must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            print!("{text}");
+            Ok(Value::Unit)
+        }
+        "io_stderr_write" | "stderr_write" => {
+            let [text] = args else {
+                return Err(Diagnostic::new(
+                    format!("io_stderr_write expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let text = match text {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("io_stderr_write text must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            eprint!("{text}");
+            Ok(Value::Unit)
+        }
+        "stdout_writeln" => {
+            let [text] = args else {
+                return Err(Diagnostic::new(
+                    format!("stdout_writeln expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let text = match text {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("stdout_writeln text must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            print!("{text}\n");
+            Ok(Value::Unit)
+        }
+        "stderr_writeln" => {
+            let [text] = args else {
+                return Err(Diagnostic::new(
+                    format!("stderr_writeln expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let text = match text {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("stderr_writeln text must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            eprint!("{text}\n");
+            Ok(Value::Unit)
+        }
+        "buffer_new" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("buffer_new expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Str(String::new()))
+        }
+        "buffer_write" => {
+            let [buffer, chunk] = args else {
+                return Err(Diagnostic::new(
+                    format!("buffer_write expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let buffer = match buffer {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("buffer_write buffer must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let chunk = match chunk {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("buffer_write chunk must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            Ok(Value::Str(format!("{buffer}{chunk}")))
+        }
+        "buffer_writeln" => {
+            let [buffer, line] = args else {
+                return Err(Diagnostic::new(
+                    format!("buffer_writeln expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let buffer = match buffer {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("buffer_writeln buffer must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let line = match line {
+                Value::Str(s) => s,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("buffer_writeln line must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            Ok(Value::Str(format!("{buffer}{line}\n")))
+        }
+        "buffer_clear" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("buffer_clear expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Str(String::new()))
+        }
+        "fs_exists" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_exists expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_exists path", span)?;
+            Ok(Value::Bool(std::path::Path::new(path).exists()))
+        }
+        "fs_is_file" | "is_file" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_is_file expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_is_file path", span)?;
+            Ok(Value::Bool(std::path::Path::new(path).is_file()))
+        }
+        "fs_is_dir" | "is_dir" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_is_dir expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_is_dir path", span)?;
+            Ok(Value::Bool(std::path::Path::new(path).is_dir()))
+        }
+        "fs_create_dir" | "create_dir" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_create_dir expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_create_dir path", span)?;
+            match std::fs::create_dir(path) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("fs_create_dir", e)),
+            }
+        }
+        "fs_create_dir_all" | "create_dir_all" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_create_dir_all expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_create_dir_all path", span)?;
+            match std::fs::create_dir_all(path) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("fs_create_dir_all", e)),
+            }
+        }
+        "fs_read_dir" | "read_dir" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_read_dir expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_read_dir path", span)?;
+            match std::fs::read_dir(path) {
+                Ok(entries) => {
+                    let mut out = Vec::new();
+                    for entry in entries {
+                        match entry {
+                            Ok(e) => out.push(Value::Str(e.path().to_string_lossy().to_string())),
+                            Err(e) => {
+                                return Ok(Value::Tuple(vec![Value::Array(Vec::new()), io_err("fs_read_dir", e)]));
+                            }
+                        }
+                    }
+                    Ok(Value::Tuple(vec![Value::Array(out), Value::Null]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![Value::Array(Vec::new()), io_err("fs_read_dir", e)])),
+            }
+        }
+        "fs_remove_file" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_remove_file expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_remove_file path", span)?;
+            match std::fs::remove_file(path) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("fs_remove_file", e)),
+            }
+        }
+        "fs_remove_dir" | "remove_dir" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_remove_dir expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_remove_dir path", span)?;
+            match std::fs::remove_dir(path) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("fs_remove_dir", e)),
+            }
+        }
+        "fs_remove_dir_all" | "remove_dir_all" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_remove_dir_all expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_remove_dir_all path", span)?;
+            match std::fs::remove_dir_all(path) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("fs_remove_dir_all", e)),
+            }
+        }
+        "fs_rename" | "rename" => {
+            let [from, to] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_rename expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let from = expect_str_arg(from, "fs_rename from", span)?;
+            let to = expect_str_arg(to, "fs_rename to", span)?;
+            match std::fs::rename(from, to) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("fs_rename", e)),
+            }
+        }
+        "fs_copy" | "copy" => {
+            let [from, to] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_copy expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let from = expect_str_arg(from, "fs_copy from", span)?;
+            let to = expect_str_arg(to, "fs_copy to", span)?;
+            match std::fs::copy(from, to) {
+                Ok(n) => Ok(Value::Tuple(vec![Value::UInt128(n as u128), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("fs_copy", e)])),
+            }
+        }
+        "fs_cwd" | "cwd" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_cwd expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            match std::env::current_dir() {
+                Ok(p) => Ok(Value::Tuple(vec![Value::Str(p.to_string_lossy().to_string()), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("fs_cwd", e)])),
+            }
+        }
+        "fs_set_cwd" | "set_cwd" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_set_cwd expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_set_cwd path", span)?;
+            match std::env::set_current_dir(path) {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("fs_set_cwd", e)),
+            }
+        }
+        "fs_path_join" | "path_join" => {
+            let [a, b] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_path_join expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let a = expect_str_arg(a, "fs_path_join left", span)?;
+            let b = expect_str_arg(b, "fs_path_join right", span)?;
+            Ok(Value::Str(std::path::Path::new(a).join(b).to_string_lossy().to_string()))
+        }
+        "fs_path_parent" | "path_parent" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_path_parent expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_path_parent path", span)?;
+            let p = std::path::Path::new(path);
+            match p.parent() {
+                Some(parent) => Ok(Value::Tuple(vec![Value::Str(parent.to_string_lossy().to_string()), Value::Null])),
+                None => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: "path has no parent".to_string(),
+                        code: 1,
+                        origin: "fs_path_parent".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "fs_path_filename" | "path_filename" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_path_filename expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_path_filename path", span)?;
+            let p = std::path::Path::new(path);
+            match p.file_name().and_then(|s| s.to_str()) {
+                Some(name) => Ok(Value::Tuple(vec![Value::Str(name.to_string()), Value::Null])),
+                None => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: "path has no filename".to_string(),
+                        code: 1,
+                        origin: "fs_path_filename".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "fs_path_extension" | "path_extension" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_path_extension expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_path_extension path", span)?;
+            let p = std::path::Path::new(path);
+            match p.extension().and_then(|s| s.to_str()) {
+                Some(ext) => Ok(Value::Tuple(vec![Value::Str(ext.to_string()), Value::Null])),
+                None => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: "path has no extension".to_string(),
+                        code: 1,
+                        origin: "fs_path_extension".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "fs_metadata_len" | "metadata_len" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_metadata_len expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_metadata_len path", span)?;
+            match std::fs::metadata(path) {
+                Ok(meta) => Ok(Value::Tuple(vec![Value::UInt128(meta.len() as u128), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("fs_metadata_len", e)])),
+            }
+        }
+        "fs_metadata_readonly" | "metadata_readonly" => {
+            let [path] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_metadata_readonly expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_metadata_readonly path", span)?;
+            match std::fs::metadata(path) {
+                Ok(meta) => Ok(Value::Tuple(vec![Value::Bool(meta.permissions().readonly()), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Bool(false), io_err("fs_metadata_readonly", e)])),
+            }
+        }
+        "fs_set_readonly" | "set_readonly" => {
+            let [path, readonly] = args else {
+                return Err(Diagnostic::new(
+                    format!("fs_set_readonly expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let path = expect_str_arg(path, "fs_set_readonly path", span)?;
+            let readonly = match readonly {
+                Value::Bool(v) => *v,
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("fs_set_readonly readonly must be bool, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            match std::fs::metadata(path) {
+                Ok(meta) => {
+                    let mut perms = meta.permissions();
+                    perms.set_readonly(readonly);
+                    match std::fs::set_permissions(path, perms) {
+                        Ok(_) => Ok(Value::Null),
+                        Err(e) => Ok(io_err("fs_set_readonly", e)),
+                    }
+                }
+                Err(e) => Ok(io_err("fs_set_readonly", e)),
+            }
+        }
+        "math_pi" | "pi" => {
+            let [] = args else {
+                return Err(Diagnostic::new(format!("math_pi expects 0 arguments, got {}", args.len()), span, Severity::Error));
+            };
+            Ok(Value::Float(std::f64::consts::PI))
+        }
+        "math_e" | "e" => {
+            let [] = args else {
+                return Err(Diagnostic::new(format!("math_e expects 0 arguments, got {}", args.len()), span, Severity::Error));
+            };
+            Ok(Value::Float(std::f64::consts::E))
+        }
+        "math_tau" | "tau" => {
+            let [] = args else {
+                return Err(Diagnostic::new(format!("math_tau expects 0 arguments, got {}", args.len()), span, Severity::Error));
+            };
+            Ok(Value::Float(std::f64::consts::TAU))
+        }
+        "math_abs" | "abs" | "math_sqrt" | "sqrt" | "math_exp" | "exp" | "math_log" | "log"
+        | "math_log10" | "log10" | "math_floor" | "floor" | "math_ceil" | "ceil" | "math_round" | "round"
+        | "math_trunc" | "trunc" | "math_fract" | "fract" | "math_sin" | "sin" | "math_cos" | "cos"
+        | "math_tan" | "tan" | "math_asin" | "asin" | "math_acos" | "acos" | "math_atan" | "atan" => {
+            let [x] = args else {
+                return Err(Diagnostic::new(format!("{name} expects exactly 1 argument, got {}", args.len()), span, Severity::Error));
+            };
+            let x = expect_f64_arg(x, name, span)?;
+            let out = match name {
+                "math_abs" | "abs" => x.abs(),
+                "math_sqrt" | "sqrt" => x.sqrt(),
+                "math_exp" | "exp" => x.exp(),
+                "math_log" | "log" => x.ln(),
+                "math_log10" | "log10" => x.log10(),
+                "math_floor" | "floor" => x.floor(),
+                "math_ceil" | "ceil" => x.ceil(),
+                "math_round" | "round" => x.round(),
+                "math_trunc" | "trunc" => x.trunc(),
+                "math_fract" | "fract" => x.fract(),
+                "math_sin" | "sin" => x.sin(),
+                "math_cos" | "cos" => x.cos(),
+                "math_tan" | "tan" => x.tan(),
+                "math_asin" | "asin" => x.asin(),
+                "math_acos" | "acos" => x.acos(),
+                "math_atan" | "atan" => x.atan(),
+                _ => x,
+            };
+            Ok(Value::Float(out))
+        }
+        "math_pow" | "pow" => {
+            let [base, exp] = args else {
+                return Err(Diagnostic::new(format!("math_pow expects exactly 2 arguments, got {}", args.len()), span, Severity::Error));
+            };
+            let base = expect_f64_arg(base, "math_pow base", span)?;
+            let exp = expect_f64_arg(exp, "math_pow exp", span)?;
+            Ok(Value::Float(base.powf(exp)))
+        }
+        "math_rand_f64" | "rand_f64" => {
+            let [] = args else {
+                return Err(Diagnostic::new(format!("math_rand_f64 expects 0 arguments, got {}", args.len()), span, Severity::Error));
+            };
+            let n = math_next_u64();
+            Ok(Value::Float((n as f64) / (u64::MAX as f64)))
+        }
+        "math_rand_i32" | "rand_i32" => {
+            let [min, max] = args else {
+                return Err(Diagnostic::new(format!("math_rand_i32 expects exactly 2 arguments, got {}", args.len()), span, Severity::Error));
+            };
+            let min = expect_i32_like(min, "math_rand_i32 min", span)?;
+            let max = expect_i32_like(max, "math_rand_i32 max", span)?;
+            if min > max {
+                return Ok(Value::Tuple(vec![
+                    Value::Int128(0),
+                    Value::Err {
+                        message: "min must be <= max".to_string(),
+                        code: 1,
+                        origin: "math_rand_i32".to_string(),
+                        cause: None,
+                    },
+                ]));
+            }
+            let width = (max as i64 - min as i64 + 1) as u64;
+            let n = math_next_u64() % width;
+            let v = min as i64 + n as i64;
+            Ok(Value::Tuple(vec![Value::Int128(v as i128), Value::Null]))
+        }
+        "time_now_unix_secs" | "now_unix_secs" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(d) => Ok(Value::UInt128(d.as_secs() as u128)),
+                Err(_) => Ok(Value::UInt128(0)),
+            }
+        }
+        "time_now_unix_millis" | "now_unix_millis" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(d) => Ok(Value::UInt128(d.as_millis() as u128)),
+                Err(_) => Ok(Value::UInt128(0)),
+            }
+        }
+        "time_sleep_ms" | "sleep_ms" => {
+            let [ms] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let ms = expect_u64_arg(ms, "sleep_ms ms", span)?;
+            std::thread::sleep(Duration::from_millis(ms));
+            Ok(Value::Null)
+        }
+        "time_tick_ms" | "tick_ms" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let start = time_tick_start();
+            Ok(Value::UInt128(start.elapsed().as_millis() as u128))
+        }
+        "time_elapsed_ms" | "elapsed_ms" => {
+            let [start_ms] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let start_ms = expect_u64_arg(start_ms, "elapsed_ms start", span)?;
+            let now_ms = match time_tick_start().elapsed().as_millis().try_into() {
+                Ok(v) => v,
+                Err(_) => u64::MAX,
+            };
+            let elapsed = now_ms.saturating_sub(start_ms);
+            Ok(Value::UInt128(elapsed as u128))
+        }
+        "time_now_iso_utc" | "now_iso_utc" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(d) => Ok(Value::Tuple(vec![Value::Str(format_unix_secs_iso_utc(d.as_secs())), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("time_now_iso_utc", std::io::Error::other(e.to_string()))])),
+            }
+        }
+        "time_from_unix_secs_iso_utc" | "from_unix_secs_iso_utc" => {
+            let [secs] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let secs = expect_u64_arg(secs, "from_unix_secs_iso_utc secs", span)?;
+            Ok(Value::Tuple(vec![Value::Str(format_unix_secs_iso_utc(secs)), Value::Null]))
+        }
+        "os_platform" | "platform" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Str(std::env::consts::OS.to_string()))
+        }
+        "os_arch" | "arch" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Str(std::env::consts::ARCH.to_string()))
+        }
+        "os_pid" | "pid" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::UInt128(std::process::id() as u128))
+        }
+        "os_getenv" | "getenv" => {
+            let [key] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let key = expect_str_arg(key, "getenv key", span)?;
+            match std::env::var(key) {
+                Ok(v) => Ok(Value::Tuple(vec![Value::Str(v), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "getenv".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "os_setenv" | "setenv" => {
+            let [key, value] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let key = expect_str_arg(key, "setenv key", span)?;
+            let value = expect_str_arg(value, "setenv value", span)?;
+            // SAFETY: process-level env mutation is intended std/os behavior for Pandora.
+            unsafe { std::env::set_var(key, value) };
+            Ok(Value::Null)
+        }
+        "os_unsetenv" | "unsetenv" => {
+            let [key] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let key = expect_str_arg(key, "unsetenv key", span)?;
+            // SAFETY: process-level env mutation is intended std/os behavior for Pandora.
+            unsafe { std::env::remove_var(key) };
+            Ok(Value::Null)
+        }
+        "os_args" | "args" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Array(
+                std::env::args().map(Value::Str).collect::<Vec<_>>(),
+            ))
+        }
+        "os_exec" | "exec" => {
+            let [command] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let command = expect_str_arg(command, "exec command", span)?;
+            #[cfg(target_os = "windows")]
+            let output = std::process::Command::new("cmd").args(["/C", command]).output();
+            #[cfg(not(target_os = "windows"))]
+            let output = std::process::Command::new("sh").args(["-c", command]).output();
+            match output {
+                Ok(out) => {
+                    let code = out.status.code().unwrap_or(-1);
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    Ok(Value::Tuple(vec![
+                        Value::Int128(code as i128),
+                        Value::Str(stdout),
+                        Value::Str(stderr),
+                        Value::Null,
+                    ]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Int128(-1),
+                    Value::Str(String::new()),
+                    Value::Str(String::new()),
+                    io_err("exec", e),
+                ])),
+            }
+        }
+        "os_signal_term" | "signal_term" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Int128(15))
+        }
+        "os_signal_kill" | "signal_kill" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Int128(9))
+        }
+        "os_signal_int" | "signal_int" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Ok(Value::Int128(2))
+        }
+        "os_send_signal" | "send_signal" => {
+            let [pid, signal] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let pid = expect_u64_arg(pid, "send_signal pid", span)?;
+            let signal = expect_i32_like(signal, "send_signal signal", span)?;
+            #[cfg(not(target_os = "windows"))]
+            {
+                let status = std::process::Command::new("kill")
+                    .args(["-s", &signal.to_string(), &pid.to_string()])
+                    .status();
+                return match status {
+                    Ok(s) if s.success() => Ok(Value::Null),
+                    Ok(_) => Ok(Value::Err {
+                        message: "kill command failed".to_string(),
+                        code: 1,
+                        origin: "send_signal".to_string(),
+                        cause: None,
+                    }),
+                    Err(e) => Ok(io_err("send_signal", e)),
+                };
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let _ = (pid, signal);
+                Ok(Value::Err {
+                    message: "send_signal is unsupported on windows backend".to_string(),
+                    code: 1,
+                    origin: "send_signal".to_string(),
+                    cause: None,
+                })
+            }
         }
         name if name.starts_with("__meth_is_") || name.starts_with("__meth_iu_") => {
             dispatch_integer_method(name, args, span)
@@ -2166,6 +3515,144 @@ fn coerce_i32_code(value: &Value, span: Span, fn_name: &str) -> Result<i32, Diag
     }
 }
 
+fn io_err(origin: &str, err: std::io::Error) -> Value {
+    Value::Err {
+        message: err.to_string(),
+        code: 1,
+        origin: origin.to_string(),
+        cause: None,
+    }
+}
+
+fn expect_str_arg<'a>(value: &'a Value, label: &str, span: Span) -> Result<&'a str, Diagnostic> {
+    match value {
+        Value::Str(s) => Ok(s.as_str()),
+        other => Err(Diagnostic::new(
+            format!("{label} must be str, got {}", builtin_type_name(other)),
+            span,
+            Severity::Error,
+        )),
+    }
+}
+
+fn expect_f64_arg(value: &Value, label: &str, span: Span) -> Result<f64, Diagnostic> {
+    match value {
+        Value::Float(v) => Ok(*v),
+        other => Err(Diagnostic::new(
+            format!("{label} must be f64, got {}", builtin_type_name(other)),
+            span,
+            Severity::Error,
+        )),
+    }
+}
+
+fn expect_i32_like(value: &Value, label: &str, span: Span) -> Result<i32, Diagnostic> {
+    match value {
+        Value::Int128(v) => i32::try_from(*v).map_err(|_| {
+            Diagnostic::new(format!("{label} is out of i32 range"), span, Severity::Error)
+        }),
+        Value::UInt128(v) => i32::try_from(*v).map_err(|_| {
+            Diagnostic::new(format!("{label} is out of i32 range"), span, Severity::Error)
+        }),
+        other => Err(Diagnostic::new(
+            format!("{label} must be i32-compatible, got {}", builtin_type_name(other)),
+            span,
+            Severity::Error,
+        )),
+    }
+}
+
+fn expect_u64_arg(value: &Value, label: &str, span: Span) -> Result<u64, Diagnostic> {
+    match value {
+        Value::UInt128(v) => u64::try_from(*v).map_err(|_| {
+            Diagnostic::new(format!("{label} is out of u64 range"), span, Severity::Error)
+        }),
+        Value::Int128(v) if *v >= 0 => u64::try_from(*v).map_err(|_| {
+            Diagnostic::new(format!("{label} is out of u64 range"), span, Severity::Error)
+        }),
+        other => Err(Diagnostic::new(
+            format!("{label} must be u64-compatible, got {}", builtin_type_name(other)),
+            span,
+            Severity::Error,
+        )),
+    }
+}
+
+fn time_tick_start() -> &'static Instant {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now)
+}
+
+fn format_unix_secs_iso_utc(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let sod = (secs % 86_400) as u32;
+    let (year, month, day) = civil_from_days(days);
+    let hour = sod / 3600;
+    let min = (sod % 3600) / 60;
+    let sec = sod % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
+}
+
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut y = (yoe as i32) + (era as i32) * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (mp + if mp < 10 { 3 } else { -9 }) as u32;
+    if m <= 2 {
+        y += 1;
+    }
+    (y, m, d)
+}
+
+fn math_next_u64() -> u64 {
+    static RNG_STATE: AtomicU64 = AtomicU64::new(0);
+    let mut s = RNG_STATE.load(Ordering::Relaxed);
+    if s == 0 {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9E3779B97F4A7C15);
+        s = seed ^ 0xD1B54A32D192ED03;
+    }
+    s = s
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    RNG_STATE.store(s, Ordering::Relaxed);
+    s
+}
+
+fn as_i128(value: &Value) -> Option<i128> {
+    match value {
+        Value::Int128(v) => Some(*v),
+        Value::UInt128(v) => i128::try_from(*v).ok(),
+        _ => None,
+    }
+}
+
+fn str_pad_impl(s: &str, total: i128, pad: &str, left: bool) -> String {
+    let current = s.chars().count() as i128;
+    if total <= current {
+        return s.to_string();
+    }
+    let needed = (total - current) as usize;
+    let pad_unit = if pad.is_empty() { " " } else { pad };
+    let mut fill = String::new();
+    while fill.chars().count() < needed {
+        fill.push_str(pad_unit);
+    }
+    let trimmed = fill.chars().take(needed).collect::<String>();
+    if left {
+        format!("{trimmed}{s}")
+    } else {
+        format!("{s}{trimmed}")
+    }
+}
+
 /// Run a full program chunk. Requires `chunk.invariant_holds()` and terminates with [`Op::Return`].
 pub fn execute(chunk: &Chunk, symbols: &SymbolTable) -> Result<(), Diagnostics> {
     debug_assert!(chunk.invariant_holds());
@@ -2461,7 +3948,7 @@ mod tests {
                 params: vec![crate::analyzer::Type::Any],
                 ret: Box::new(crate::analyzer::Type::Err),
             },
-            crate::hir::SymbolOrigin::Builtin,
+            crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
         execute(&b.finish(), &symbols).expect("error builtin should execute");
@@ -2484,7 +3971,7 @@ mod tests {
                 params: vec![crate::analyzer::Type::Any],
                 ret: Box::new(crate::analyzer::Type::Unit),
             },
-            crate::hir::SymbolOrigin::Builtin,
+            crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
         let err = execute(&b.finish(), &symbols).expect_err("panic must abort");
@@ -2516,7 +4003,7 @@ mod tests {
                 params: vec![crate::analyzer::Type::Any],
                 ret: Box::new(crate::analyzer::Type::Unit),
             },
-            crate::hir::SymbolOrigin::Builtin,
+            crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
         execute(&b.finish(), &symbols).expect("panic should be converted inside try");
@@ -2550,7 +4037,7 @@ mod tests {
                 params: vec![crate::analyzer::Type::Any],
                 ret: Box::new(crate::analyzer::Type::Err),
             },
-            crate::hir::SymbolOrigin::Builtin,
+            crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
         symbols.define(
@@ -2560,7 +4047,7 @@ mod tests {
                 params: vec![crate::analyzer::Type::Any],
                 ret: Box::new(crate::analyzer::Type::Err),
             },
-            crate::hir::SymbolOrigin::Builtin,
+            crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
         execute(&b.finish(), &symbols).expect("wrap should produce chained err");
@@ -2642,7 +4129,7 @@ mod tests {
                 params: vec![crate::analyzer::Type::Any],
                 ret: Box::new(crate::analyzer::Type::Str),
             },
-            crate::hir::SymbolOrigin::Builtin,
+            crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
         execute(&b.finish(), &symbols).expect("typeof should execute");

@@ -1,0 +1,2 @@
+from "std/core" import helper
+print("from import ok")

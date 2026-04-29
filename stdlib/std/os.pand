@@ -1,0 +1,19 @@
+# std/os
+# OS interface: process, env, args and signals.
+
+fn platform() -> str { return os_platform() }
+fn arch() -> str { return os_arch() }
+fn pid() -> u64 { return os_pid() }
+
+fn getenv(key: str) -> (str, err) { return os_getenv(key) }
+fn setenv(key: str, value: str) -> err { return os_setenv(key, value) }
+fn unsetenv(key: str) -> err { return os_unsetenv(key) }
+
+fn args() -> [str] { return os_args() }
+
+fn exec(command: str) -> (i32, str, str, err) { return os_exec(command) }
+
+fn signal_term() -> i32 { return os_signal_term() }
+fn signal_kill() -> i32 { return os_signal_kill() }
+fn signal_int() -> i32 { return os_signal_int() }
+fn send_signal(pid: u64, signal: i32) -> err { return os_send_signal(pid, signal) }

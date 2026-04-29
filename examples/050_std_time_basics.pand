@@ -1,0 +1,13 @@
+from "std/time" import now_unix_secs, now_unix_millis, now_iso_utc, from_unix_secs_iso_utc, sleep_ms, tick_ms, elapsed_ms
+
+s1: u64 = now_unix_secs()
+m1: u64 = now_unix_millis()
+t0: u64 = tick_ms()
+sleep_err := sleep_ms(20)
+t1: u64 = tick_ms()
+dt: u64 = elapsed_ms(t0)
+iso_now, iso_err := now_iso_utc()
+iso_from, from_err := from_unix_secs_iso_utc(s1)
+
+print(s1.gt((0).to_u32()), m1.gt((0).to_u32()), t1.ge(t0), dt.ge((20).to_u32()), sleep_err == null)
+print(iso_err == null, from_err == null, len(iso_now).gt((0).to_u32()), len(iso_from).gt((0).to_u32()))

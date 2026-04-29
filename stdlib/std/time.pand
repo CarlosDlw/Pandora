@@ -1,0 +1,13 @@
+# std/time
+# Timestamps, delays and elapsed-time helpers.
+
+fn now_unix_secs() -> u64 { return time_now_unix_secs() }
+fn now_unix_millis() -> u64 { return time_now_unix_millis() }
+
+fn sleep_ms(ms: u64) -> err { return time_sleep_ms(ms) }
+
+fn tick_ms() -> u64 { return time_tick_ms() }
+fn elapsed_ms(start: u64) -> u64 { return time_elapsed_ms(start) }
+
+fn now_iso_utc() -> (str, err) { return time_now_iso_utc() }
+fn from_unix_secs_iso_utc(secs: u64) -> (str, err) { return time_from_unix_secs_iso_utc(secs) }
