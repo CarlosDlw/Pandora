@@ -330,10 +330,23 @@ fn emit_stmt(
                 loop_ctx_mut.continue_sites.push(continue_jump);
             }
         }
-        HirStmt::Return { value, span } => {
-            match value {
-                Some(expr) => emit_expr(hir, model, *expr, b, diagnostics, method_table),
-                None => b.emit(Op::ConstUnit, *span),
+        HirStmt::Return { values, span } => {
+            if values.is_empty() {
+                b.emit(Op::ConstUnit, *span);
+            } else if values.len() == 1 {
+                emit_expr(hir, model, values[0], b, diagnostics, method_table);
+            } else {
+                for expr in values {
+                    emit_expr(hir, model, *expr, b, diagnostics, method_table);
+                }
+                match u8::try_from(values.len()) {
+                    Ok(count) => b.emit(Op::MakeTuple(count), *span),
+                    Err(_) => diagnostics.push(Diagnostic::new(
+                        "too many values in return tuple",
+                        *span,
+                        Severity::Error,
+                    )),
+                }
             }
             b.emit(Op::Return, *span);
         }
@@ -797,5 +810,23 @@ mod tests {
         assert!(!compile_diagnostics.has_errors());
         assert!(chunk.code.iter().any(|op| matches!(op, Op::MakeTuple(_))));
         assert!(chunk.code.iter().any(|op| matches!(op, Op::TupleGet(_))));
+    }
+
+    #[test]
+    fn emits_make_tuple_for_multi_return_function() {
+        let src = "fn pair(a: i32, b: i32) -> (i32, i32) { return a, b }; print(pair(1, 2).0)";
+        let lex_output = lex(FileId::from_u32(36), src);
+        let (ast, parser_diagnostics) = parse(FileId::from_u32(36), src.len() as u32, lex_output.tokens);
+        assert!(!parser_diagnostics.has_errors());
+        let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
+        assert!(!lowering_diagnostics.has_errors());
+        let (model, analysis_diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!analysis_diagnostics.has_errors());
+        let (chunk, compile_diagnostics) = compile_program(&hir, &model);
+        assert!(!compile_diagnostics.has_errors());
+        assert!(chunk
+            .functions
+            .values()
+            .any(|fn_chunk| fn_chunk.chunk.code.iter().any(|op| matches!(op, Op::MakeTuple(2)))));
     }
 }

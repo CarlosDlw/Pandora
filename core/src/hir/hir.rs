@@ -167,7 +167,7 @@ pub enum HirStmt {
         span: Span,
     },
     Return {
-        value: Option<HirId>,
+        values: Vec<HirId>,
         span: Span,
     },
     Invalid {

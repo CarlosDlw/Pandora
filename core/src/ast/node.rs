@@ -221,7 +221,7 @@ pub enum AstNode {
         span: Span,
     },
     ReturnStmt {
-        value: Option<ArenaId>,
+        values: Vec<ArenaId>,
         span: Span,
     },
     BlockStmt {

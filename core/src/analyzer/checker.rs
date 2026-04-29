@@ -363,27 +363,74 @@ impl<'a> Checker<'a> {
                 }
                 AnalyzerType::Unknown
             }
-            HirStmt::Return { value, span } => {
+            HirStmt::Return { values, span } => {
                 let expected_return = self.fn_return_stack.last().cloned();
                 let Some(expected_return) = expected_return else {
                     self.push_error("return used outside of function", *span);
                     return AnalyzerType::Unknown;
                 };
-                match value {
-                    Some(expr) => {
-                        let actual = self.check_expr(*expr, *span);
-                        if !is_assignable(&expected_return, &actual) {
+                if values.is_empty() {
+                    if expected_return != AnalyzerType::Unit {
+                        self.push_error("return without value requires unit return type", *span);
+                    }
+                    return expected_return;
+                }
+
+                if values.len() > 1 {
+                    let AnalyzerType::Tuple(items) = expected_return.clone() else {
+                        self.push_error(
+                            "multiple return values are allowed only for functions returning tuple",
+                            *span,
+                        );
+                        for expr in values {
+                            let _ = self.check_expr(*expr, *span);
+                        }
+                        return expected_return;
+                    };
+                    if items.len() != values.len() {
+                        self.push_error(
+                            format!(
+                                "tuple return arity mismatch: expected {}, got {}",
+                                items.len(),
+                                values.len()
+                            ),
+                            *span,
+                        );
+                    }
+                    for (idx, expr) in values.iter().enumerate() {
+                        let expected_item = items.get(idx).cloned().unwrap_or(AnalyzerType::Unknown);
+                        let actual_item = self.check_expr_expected(*expr, *span, Some(&expected_item));
+                        if !is_assignable(&expected_item, &actual_item) {
                             self.push_error(
-                                format!("return type mismatch: expected {expected_return:?}, got {actual:?}"),
+                                format!(
+                                    "tuple return position {} type mismatch: expected {expected_item:?}, got {actual_item:?}",
+                                    idx
+                                ),
                                 *span,
                             );
                         }
                     }
-                    None => {
-                        if expected_return != AnalyzerType::Unit {
-                            self.push_error("return without value requires unit return type", *span);
-                        }
-                    }
+                    return expected_return;
+                }
+
+                let expr = values[0];
+                if matches!(expected_return, AnalyzerType::Tuple(_))
+                    && !matches!(self.hir.exprs.get(expr), Some(HirExpr::Tuple(_)))
+                {
+                    self.push_error(
+                        "tuple return must use explicit positional values (e.g. return a, b)",
+                        *span,
+                    );
+                    let _ = self.check_expr(expr, *span);
+                    return expected_return;
+                }
+
+                let actual = self.check_expr(expr, *span);
+                if !is_assignable(&expected_return, &actual) {
+                    self.push_error(
+                        format!("return type mismatch: expected {expected_return:?}, got {actual:?}"),
+                        *span,
+                    );
                 }
                 expected_return
             }
@@ -997,9 +1044,22 @@ fn float_fits(value: f64, bits: u16) -> bool {
 }
 
 fn is_assignable(expected: &AnalyzerType, actual: &AnalyzerType) -> bool {
-    expected == actual
+    if expected == actual
         || matches!(expected, AnalyzerType::Unknown | AnalyzerType::Any)
         || matches!(actual, AnalyzerType::Unknown | AnalyzerType::Null)
+    {
+        return true;
+    }
+    match (expected, actual) {
+        (AnalyzerType::Tuple(expected_items), AnalyzerType::Tuple(actual_items)) => {
+            expected_items.len() == actual_items.len()
+                && expected_items
+                    .iter()
+                    .zip(actual_items.iter())
+                    .all(|(e, a)| is_assignable(e, a))
+        }
+        _ => false,
+    }
 }
 
 fn is_truthy_falsy_compatible(ty: &AnalyzerType) -> bool {
@@ -1421,6 +1481,85 @@ mod tests {
         let src = "x: i32 = null; y: bool = null; z: (i32, i32) = null";
         let lex_output = lex(FileId::from_u32(53), src);
         let (ast, _) = parse(FileId::from_u32(53), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_multi_value_return_for_tuple_function() {
+        let src = "fn pair(a: i32, b: i32) -> (i32, i32) { return a, b }";
+        let lex_output = lex(FileId::from_u32(54), src);
+        let (ast, _) = parse(FileId::from_u32(54), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_multi_value_return_for_non_tuple_function() {
+        let src = "fn bad(a: i32, b: i32) -> i32 { return a, b }";
+        let lex_output = lex(FileId::from_u32(55), src);
+        let (ast, _) = parse(FileId::from_u32(55), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("multiple return values are allowed only for functions returning tuple")));
+    }
+
+    #[test]
+    fn rejects_tuple_function_returning_single_tuple_variable() {
+        let src = "fn bad(p: (i32, i32)) -> (i32, i32) { return p }";
+        let lex_output = lex(FileId::from_u32(56), src);
+        let (ast, _) = parse(FileId::from_u32(56), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("tuple return must use explicit positional values")));
+    }
+
+    #[test]
+    fn allows_tuple_function_return_with_parenthesized_tuple_literal() {
+        let src = "fn pair(a: i32, b: i32) -> (i32, i32) { return (a, b) }";
+        let lex_output = lex(FileId::from_u32(57), src);
+        let (ast, _) = parse(FileId::from_u32(57), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn validates_tuple_return_arity_and_position_types() {
+        let src = "fn bad(a: i32) -> (i32, bool) { return a, a }";
+        let lex_output = lex(FileId::from_u32(58), src);
+        let (ast, _) = parse(FileId::from_u32(58), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("tuple return position 1 type mismatch")));
+    }
+
+    #[test]
+    fn allows_null_in_tuple_return_positions() {
+        let src = "fn pair(a: i32) -> (i32, bool) { return a, null }";
+        let lex_output = lex(FileId::from_u32(59), src);
+        let (ast, _) = parse(FileId::from_u32(59), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_destructure_without_parentheses_and_underscore_discard() {
+        let src = "fn pair(a: i32, b: bool) -> (i32, bool) { return a, b }; x, _ := pair(1, true)";
+        let lex_output = lex(FileId::from_u32(60), src);
+        let (ast, _) = parse(FileId::from_u32(60), src.len() as u32, lex_output.tokens);
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());

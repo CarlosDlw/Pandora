@@ -246,3 +246,50 @@ fn check_mode_reports_incomplete_trait_impl() {
         .code(1)
         .stderr(contains("error: trait impl missing required method 'show'"));
 }
+
+#[test]
+fn check_mode_reports_multi_return_on_non_tuple_fn() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"fn bad(a: i32, b: i32) -> i32 { return a, b }\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: multiple return values are allowed only for functions returning tuple"));
+}
+
+#[test]
+fn check_mode_reports_tuple_fn_returning_single_tuple_symbol() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"fn bad(p: (i32, i32)) -> (i32, i32) { return p }\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: tuple return must use explicit positional values"));
+}
+
+#[test]
+fn check_mode_reports_tuple_return_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"fn bad(a: i32) -> (i32, bool) { return a, true, null }\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: tuple return arity mismatch"));
+}

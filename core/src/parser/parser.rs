@@ -233,14 +233,28 @@ impl Parser {
             || self.current().is_some_and(|t| t.kind == TokenKind::Semicolon || t.kind == TokenKind::RightBrace)
         {
             return self.insert_node(AstNode::ReturnStmt {
-                value: None,
+                values: Vec::new(),
                 span: return_span,
             });
         }
-        let value = self.parse_expression();
-        let span = merge_span(return_span, self.node_span(value));
+        let first = self.parse_expression();
+        let mut values = vec![first];
+        while self.consume_if(TokenKind::Comma) {
+            if self.current().is_none()
+                || self.current().is_some_and(|t| t.kind == TokenKind::Semicolon || t.kind == TokenKind::RightBrace)
+            {
+                self.push_error("expected return value after ','", self.current_span_or_eof());
+                break;
+            }
+            values.push(self.parse_expression());
+        }
+        let end_span = values
+            .last()
+            .map(|id| self.node_span(*id))
+            .unwrap_or(return_span);
+        let span = merge_span(return_span, end_span);
         self.insert_node(AstNode::ReturnStmt {
-            value: Some(value),
+            values,
             span,
         })
     }
@@ -810,35 +824,41 @@ impl Parser {
     }
 
     fn is_tuple_destructure_decl_start(&self) -> bool {
-        if self.peek_kind(0) != Some(TokenKind::LeftParen) {
+        let mut idx = 0usize;
+        let mut has_parens = false;
+        if self.peek_kind(idx) == Some(TokenKind::LeftParen) {
+            has_parens = true;
+            idx += 1;
+        }
+        if self.peek_kind(idx) != Some(TokenKind::Identifier) {
             return false;
         }
-        let mut idx = 1usize;
+        idx += 1;
+        if self.peek_kind(idx) != Some(TokenKind::Comma) {
+            return false;
+        }
         loop {
-            match self.peek_kind(idx) {
-                Some(TokenKind::Identifier) => {
-                    idx += 1;
-                }
-                _ => return false,
+            if self.peek_kind(idx) != Some(TokenKind::Comma) {
+                break;
             }
-            match self.peek_kind(idx) {
-                Some(TokenKind::Comma) => idx += 1,
-                Some(TokenKind::RightParen) => {
-                    idx += 1;
-                    break;
-                }
-                _ => return false,
+            idx += 1;
+            if self.peek_kind(idx) != Some(TokenKind::Identifier) {
+                return false;
             }
+            idx += 1;
+        }
+        if has_parens {
+            if self.peek_kind(idx) != Some(TokenKind::RightParen) {
+                return false;
+            }
+            idx += 1;
         }
         matches!(self.peek_kind(idx), Some(TokenKind::InferAssign | TokenKind::Colon))
     }
 
     fn parse_destructure_name_list(&mut self) -> Vec<ArenaId> {
         let mut names = Vec::new();
-        if !self.consume_if(TokenKind::LeftParen) {
-            self.push_error("expected '(' in tuple destructuring declaration", self.current_span_or_eof());
-            return names;
-        }
+        let has_parens = self.consume_if(TokenKind::LeftParen);
         loop {
             let token = match self.current() {
                 Some(token) if token.kind == TokenKind::Identifier => token.clone(),
@@ -852,10 +872,12 @@ impl Parser {
                 name: token.lexeme,
                 span: token.span,
             }));
-            if self.consume_if(TokenKind::Comma) {
-                continue;
+            if !self.consume_if(TokenKind::Comma) {
+                break;
             }
-            break;
+            if has_parens && self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+                break;
+            }
         }
         if names.len() < 2 {
             self.push_error(
@@ -863,7 +885,7 @@ impl Parser {
                 self.current_span_or_eof(),
             );
         }
-        if !self.consume_if(TokenKind::RightParen) {
+        if has_parens && !self.consume_if(TokenKind::RightParen) {
             self.push_error("expected ')' in tuple destructuring declaration", self.current_span_or_eof());
         }
         names
@@ -1358,7 +1380,25 @@ mod tests {
         };
         assert!(statements.iter().any(|id| matches!(
             ast.get(*id),
-            Some(AstNode::ReturnStmt { value: None, .. })
+            Some(AstNode::ReturnStmt { values, .. }) if values.is_empty()
+        )));
+    }
+
+    #[test]
+    fn parses_multi_return_values() {
+        let source = "fn pair(a: i32, b: i32) -> (i32, i32) { return a, b }";
+        let lex_out = lex(FileId::from_u32(58), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(58), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let Some(AstNode::FnDecl { body, .. }) = ast.get(ast.roots[0]) else {
+            panic!("expected fn");
+        };
+        let Some(AstNode::BlockStmt { statements, .. }) = ast.get(*body) else {
+            panic!("expected block");
+        };
+        assert!(statements.iter().any(|id| matches!(
+            ast.get(*id),
+            Some(AstNode::ReturnStmt { values, .. }) if values.len() == 2
         )));
     }
 
@@ -1448,7 +1488,7 @@ mod tests {
 
     #[test]
     fn parses_tuple_destructuring_declarations() {
-        let source = "(a, b) := pair; (c, d): (i32, i32) = pair";
+        let source = "(a, b) := pair; c, d: (i32, i32) = pair";
         let lex_out = lex(FileId::from_u32(54), source);
         let (ast, diagnostics) = parse(FileId::from_u32(54), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());

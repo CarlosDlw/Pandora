@@ -29,6 +29,7 @@ struct Lowering<'a> {
     diagnostics: Diagnostics,
     current_scope: ScopeId,
     predeclared_fns: HashMap<ArenaId, SymbolId>,
+    discard_counter: u32,
 }
 
 impl<'a> Lowering<'a> {
@@ -47,6 +48,7 @@ impl<'a> Lowering<'a> {
             diagnostics: Diagnostics::new(),
             current_scope: root_scope,
             predeclared_fns: HashMap::new(),
+            discard_counter: 0,
         }
     }
 
@@ -215,7 +217,7 @@ impl<'a> Lowering<'a> {
                 let value = self.lower_expr(*value);
                 let names = names
                     .iter()
-                    .map(|name| self.bind_symbol(*name, Type::Unknown, false))
+                    .map(|name| self.bind_destructure_symbol(*name))
                     .collect::<Vec<_>>();
                 let ty = ty.and_then(|ty_id| match self.ast.get(ty_id) {
                     Some(AstNode::TypeName { name, .. }) => map_type_name(name),
@@ -318,9 +320,9 @@ impl<'a> Lowering<'a> {
             }
             AstNode::BreakStmt { span } => HirStmt::Break { span: *span },
             AstNode::ContinueStmt { span } => HirStmt::Continue { span: *span },
-            AstNode::ReturnStmt { value, span } => {
-                let value = value.map(|id| self.lower_expr(id));
-                HirStmt::Return { value, span: *span }
+            AstNode::ReturnStmt { values, span } => {
+                let values = values.iter().map(|id| self.lower_expr(*id)).collect();
+                HirStmt::Return { values, span: *span }
             }
             AstNode::Invalid { span } => HirStmt::Invalid { span: *span },
             other => {
@@ -376,6 +378,19 @@ impl<'a> Lowering<'a> {
                     .define(self.current_scope, "<undefined_assign>".to_string(), Type::Unknown, SymbolOrigin::User, false)
             }
         }
+    }
+
+    fn bind_destructure_symbol(&mut self, id: ArenaId) -> SymbolId {
+        if let Some(AstNode::Identifier { name, .. }) = self.ast.get(id) {
+            if name == "_" {
+                let synth = format!("__discard_{}", self.discard_counter);
+                self.discard_counter = self.discard_counter.saturating_add(1);
+                return self
+                    .symbols
+                    .define(self.current_scope, synth, Type::Unknown, SymbolOrigin::User, false);
+            }
+        }
+        self.bind_symbol(id, Type::Unknown, false)
     }
 
     fn lower_expr(&mut self, id: ArenaId) -> ArenaId {

@@ -342,3 +342,19 @@ fn runs_example_017_structs_with_existing_features() {
         .success()
         .stdout(contains("10 3 null"));
 }
+
+#[test]
+fn runs_example_018_tuple_return_values() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/018_tuple_return_values.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("7 null")
+                .and(contains("null"))
+                .and(contains("null true")),
+        );
+}
