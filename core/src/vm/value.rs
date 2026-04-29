@@ -24,6 +24,7 @@ pub enum Value {
         self_symbol: Option<SymbolId>,
     },
     Tuple(Vec<Value>),
+    Array(Vec<Value>),
     Err {
         message: String,
         code: i32,
@@ -52,6 +53,10 @@ impl Value {
             Value::Tuple(items) => {
                 let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
                 format!("({})", rendered.join(", "))
+            }
+            Value::Array(items) => {
+                let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
+                format!("[{}]", rendered.join(", "))
             }
             Value::Err {
                 message,

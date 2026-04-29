@@ -445,3 +445,50 @@ fn runs_example_024_error_context_chain() {
                 .and(contains("division by zero")),
         );
 }
+
+#[test]
+fn runs_example_025_arrays_basic_get_set() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/025_arrays_basic_get_set.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("[1, 2, 3]")
+                .and(contains("1 2 3"))
+                .and(contains("[1, 42, 3]"))
+                .and(contains("3")),
+        );
+}
+
+#[test]
+fn runs_example_026_arrays_nested_len() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/026_arrays_nested_len.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("[[1, 2], [3, 4], [5, 6]]")
+                .and(contains("[1, 2]"))
+                .and(contains("6"))
+                .and(contains("3"))
+                .and(contains("2")),
+        );
+}
+
+#[test]
+fn runtime_reports_array_bounds_error() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"arr: [i32] = [1, 2]\nprint(arr[5])\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .assert()
+        .code(1)
+        .stderr(contains("index out of bounds: index=5, len=2"));
+}

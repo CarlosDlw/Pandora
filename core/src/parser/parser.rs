@@ -434,6 +434,9 @@ impl Parser {
         if self.current().is_some_and(|t| t.kind == TokenKind::LeftParen) {
             return self.parse_tuple_type_ref();
         }
+        if self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket) {
+            return self.parse_array_type_ref();
+        }
         let token = match self.current() {
             Some(token) if token.kind == TokenKind::TypeName => token.clone(),
             Some(token) if token.kind == TokenKind::Identifier => token.clone(),
@@ -504,6 +507,19 @@ impl Parser {
             self.push_error("expected ')' to close tuple type", self.current_span_or_eof());
         }
         let name = format!("({})", item_types.join(", "));
+        let span = merge_span(start, self.previous_span_or(start));
+        self.insert_node(AstNode::TypeName { name, span })
+    }
+
+    fn parse_array_type_ref(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        let item = self.parse_type_ref();
+        if !self.consume_if(TokenKind::RightBracket) {
+            self.push_error("expected ']' to close array type", self.current_span_or_eof());
+        }
+        let item_name = self.type_name_from_node(item);
+        let name = format!("[{}]", item_name);
         let span = merge_span(start, self.previous_span_or(start));
         self.insert_node(AstNode::TypeName { name, span })
     }
@@ -733,36 +749,59 @@ impl Parser {
     }
 
     fn parse_assign_stmt(&mut self) -> ArenaId {
-        let name_token = match self.current() {
-            Some(token) if token.kind == TokenKind::Identifier => token.clone(),
-            _ => {
-                let span = self.current_span_or_eof();
-                self.push_error("expected identifier in assignment", span);
-                self.synchronize();
-                return self.invalid_node(span);
-            }
-        };
-        self.bump();
-
-        let target = self.insert_node(AstNode::Identifier {
-            name: name_token.lexeme,
-            span: name_token.span,
-        });
+        let target_start = self.current_span_or_eof();
+        let target = self.parse_assignment_target();
 
         if !self.consume_if(TokenKind::Assign) {
             let span = self.current_span_or_eof();
             self.push_error("expected '=' in assignment", span);
             self.synchronize();
-            return self.invalid_node(name_token.span);
+            return self.invalid_node(target_start);
         }
 
         let value = self.parse_expression();
-        let span = merge_span(name_token.span, self.node_span(value));
+        let span = merge_span(self.node_span(target), self.node_span(value));
         self.insert_node(AstNode::AssignStmt {
             target,
             value,
             span,
         })
+    }
+
+    fn parse_assignment_target(&mut self) -> ArenaId {
+        let ident = match self.current() {
+            Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+            _ => {
+                let span = self.current_span_or_eof();
+                self.push_error("expected identifier in assignment", span);
+                return self.invalid_node(span);
+            }
+        };
+        self.bump();
+        let mut target = self.insert_node(AstNode::Identifier {
+            name: ident.lexeme,
+            span: ident.span,
+        });
+        while self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket) {
+            let open = self.current_span_or_eof();
+            self.bump();
+            if self.current().is_some_and(|t| t.kind == TokenKind::RightBracket) {
+                self.push_error("expected index expression inside brackets", open);
+                return self.invalid_node(open);
+            }
+            let index = self.parse_expression();
+            if !self.consume_if(TokenKind::RightBracket) {
+                self.push_error("expected ']' after index expression", self.current_span_or_eof());
+                return self.invalid_node(open);
+            }
+            let span = merge_span(self.node_span(target), self.node_span(index));
+            target = self.insert_node(AstNode::ArrayAccessExpr {
+                base: target,
+                index,
+                span,
+            });
+        }
+        target
     }
 
     fn parse_compound_assign_stmt(&mut self) -> ArenaId {
@@ -892,10 +931,29 @@ impl Parser {
     }
 
     fn is_assignment_start(&self) -> bool {
-        matches!(
-            (self.peek_kind(0), self.peek_kind(1)),
-            (Some(TokenKind::Identifier), Some(TokenKind::Assign))
-        )
+        if self.peek_kind(0) != Some(TokenKind::Identifier) {
+            return false;
+        }
+        let mut idx = 1usize;
+        loop {
+            if self.peek_kind(idx) == Some(TokenKind::Assign) {
+                return true;
+            }
+            if self.peek_kind(idx) != Some(TokenKind::LeftBracket) {
+                return false;
+            }
+            idx += 1;
+            let mut depth = 1usize;
+            while depth > 0 {
+                match self.peek_kind(idx) {
+                    Some(TokenKind::LeftBracket) => depth += 1,
+                    Some(TokenKind::RightBracket) => depth = depth.saturating_sub(1),
+                    Some(_) => {}
+                    None => return false,
+                }
+                idx += 1;
+            }
+        }
     }
 
     fn is_compound_assign_start(&self) -> bool {
@@ -1483,7 +1541,33 @@ mod tests {
         let AstNode::LetDecl { value: y_value, .. } = ast.get(ast.roots[2]).expect("let y") else {
             panic!("expected let y");
         };
-        assert!(matches!(ast.get(*y_value), Some(AstNode::TupleAccess { index: 1, .. })));
+        assert!(matches!(
+            ast.get(*y_value),
+            Some(AstNode::ArrayAccessExpr { .. })
+        ));
+    }
+
+    #[test]
+    fn parses_array_type_literal_and_index_assignment() {
+        let source = "arr: [i32] = [1, 2, 3]; arr[1] = 9; x := arr[1]";
+        let lex_out = lex(FileId::from_u32(531), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(531), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(
+            ast.get(ast.roots[0]),
+            Some(AstNode::LetDecl { ty: Some(_), value, .. })
+                if matches!(ast.get(*value), Some(AstNode::ArrayLiteral { items, .. }) if items.len() == 3)
+        ));
+        assert!(matches!(
+            ast.get(ast.roots[1]),
+            Some(AstNode::AssignStmt { target, .. })
+                if matches!(ast.get(*target), Some(AstNode::ArrayAccessExpr { .. }))
+        ));
+        assert!(matches!(
+            ast.get(ast.roots[2]),
+            Some(AstNode::LetDecl { value, .. })
+                if matches!(ast.get(*value), Some(AstNode::ArrayAccessExpr { .. }))
+        ));
     }
 
     #[test]

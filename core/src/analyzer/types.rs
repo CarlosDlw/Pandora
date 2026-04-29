@@ -17,6 +17,7 @@ pub enum Type {
         ret: Box<Type>,
     },
     Tuple(Vec<Type>),
+    Array(Box<Type>),
     Struct(SymbolId),
     Trait(SymbolId),
     SelfType,

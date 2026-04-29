@@ -1,0 +1,6 @@
+grid: [[i32]] = [[1, 2], [3, 4], [5, 6]]
+print(grid)
+print(grid[0])
+print(grid[2][1])
+print(len(grid))
+print(len(grid[0]))

@@ -261,6 +261,19 @@ fn check_mode_reports_multi_return_on_non_tuple_fn() {
 }
 
 #[test]
+fn check_mode_reports_invalid_array_index_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"arr: [i32] = [1,2,3]\nprint(arr[true])\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: array index must be integer"));
+}
+
+#[test]
 fn check_mode_reports_tuple_fn_returning_single_tuple_symbol() {
     let mut file = NamedTempFile::new().expect("temp file");
     std::io::Write::write_all(

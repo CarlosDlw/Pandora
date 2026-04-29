@@ -1,0 +1,7 @@
+arr: [i32] = [1, 2, 3]
+print(arr)
+print(arr[0], arr[1], arr[2])
+
+arr[1] = 42
+print(arr)
+print(len(arr))

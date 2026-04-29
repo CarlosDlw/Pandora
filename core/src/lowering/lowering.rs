@@ -232,11 +232,29 @@ impl<'a> Lowering<'a> {
             }
             AstNode::AssignStmt { target, value, span } => {
                 let value = self.lower_expr(*value);
-                let symbol = self.resolve_assignment_target(*target);
-                HirStmt::Assign {
-                    symbol,
-                    value,
-                    span: *span,
+                match self.ast.get(*target) {
+                    Some(AstNode::Identifier { .. }) => {
+                        let symbol = self.resolve_assignment_target(*target);
+                        HirStmt::Assign {
+                            symbol,
+                            value,
+                            span: *span,
+                        }
+                    }
+                    Some(AstNode::ArrayAccessExpr { base, index, .. }) => {
+                        let symbol = self.resolve_assignment_target(*base);
+                        let index = self.lower_expr(*index);
+                        HirStmt::ArrayAssign {
+                            symbol,
+                            index,
+                            value,
+                            span: *span,
+                        }
+                    }
+                    _ => {
+                        self.push_error("invalid assignment target", *span);
+                        HirStmt::Invalid { span: *span }
+                    }
                 }
             }
             AstNode::CompoundAssignStmt {
@@ -531,6 +549,15 @@ impl<'a> Lowering<'a> {
                     },
                     self.node_span(id),
                 )
+            }
+            AstNode::ArrayLiteral { items, .. } => {
+                let items = items.iter().map(|item| self.lower_expr(*item)).collect::<Vec<_>>();
+                self.insert_hir_expr(HirExpr::Array(items), self.node_span(id))
+            }
+            AstNode::ArrayAccessExpr { base, index, .. } => {
+                let array = self.lower_expr(*base);
+                let index = self.lower_expr(*index);
+                self.insert_hir_expr(HirExpr::ArrayAccess { array, index }, self.node_span(id))
             }
             AstNode::IncDecExpr {
                 target,
@@ -864,6 +891,9 @@ fn unquote_string_literal(raw: &str) -> String {
 }
 
 fn map_type_name(name: &str) -> Option<Type> {
+    if let Some(array_ty) = parse_array_type_name(name) {
+        return Some(array_ty);
+    }
     if let Some(tuple_ty) = parse_tuple_type_name(name) {
         return Some(tuple_ty);
     }
@@ -894,6 +924,18 @@ fn map_type_name(name: &str) -> Option<Type> {
         "Self" => Some(Type::SelfType),
         _ => None,
     }
+}
+
+fn parse_array_type_name(name: &str) -> Option<Type> {
+    if !(name.starts_with('[') && name.ends_with(']')) {
+        return None;
+    }
+    let inner = name[1..name.len() - 1].trim();
+    if inner.is_empty() {
+        return None;
+    }
+    let item = map_type_name(inner)?;
+    Some(Type::Array(Box::new(item)))
 }
 
 fn parse_tuple_type_name(name: &str) -> Option<Type> {

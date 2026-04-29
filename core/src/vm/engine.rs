@@ -137,6 +137,15 @@ impl<'a> Vm<'a> {
                 items.reverse();
                 self.stack.push(Value::Tuple(items));
             }
+            Op::MakeArray(count) => {
+                let count = *count as usize;
+                let mut items = Vec::with_capacity(count);
+                for _ in 0..count {
+                    items.push(self.pop_one(span)?);
+                }
+                items.reverse();
+                self.stack.push(Value::Array(items));
+            }
             Op::TupleGet(index) => {
                 let tuple = self.pop_one(span)?;
                 match tuple {
@@ -152,6 +161,42 @@ impl<'a> Vm<'a> {
                             span,
                             Severity::Error,
                         ));
+                    }
+                }
+            }
+            Op::ArrayGet => {
+                let index_value = self.pop_one(span)?;
+                let array_value = self.pop_one(span)?;
+                let index = to_usize_index(&index_value, span)?;
+                match array_value {
+                    Value::Array(items) => {
+                        let len = items.len();
+                        let value = items.get(index).cloned().ok_or_else(|| {
+                            Diagnostic::new(
+                                format!("index out of bounds: index={}, len={}", index, len),
+                                span,
+                                Severity::Error,
+                            )
+                        })?;
+                        self.stack.push(value);
+                    }
+                    Value::Tuple(items) => {
+                        let len = items.len();
+                        let value = items.get(index).cloned().ok_or_else(|| {
+                            Diagnostic::new(
+                                format!("tuple index out of bounds: index={}, len={}", index, len),
+                                span,
+                                Severity::Error,
+                            )
+                        })?;
+                        self.stack.push(value);
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("index access on non-array value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ))
                     }
                 }
             }
@@ -262,6 +307,33 @@ impl<'a> Vm<'a> {
                 }
                 let v = self.pop_one(span)?;
                 self.env.insert(*sym, v);
+            }
+            Op::ArrayAssign(sym) => {
+                let value = self.pop_one(span)?;
+                let index_value = self.pop_one(span)?;
+                let index = to_usize_index(&index_value, span)?;
+                let Some(slot) = self.env.get_mut(sym) else {
+                    return Err(Diagnostic::new("array assignment target not found", span, Severity::Error));
+                };
+                match slot {
+                    Value::Array(items) => {
+                        if index >= items.len() {
+                            return Err(Diagnostic::new(
+                                format!("index out of bounds: index={}, len={}", index, items.len()),
+                                span,
+                                Severity::Error,
+                            ));
+                        }
+                        items[index] = value;
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("index assignment on non-array value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                }
             }
 
             Op::Neg => self.apply_neg(span)?,
@@ -918,8 +990,14 @@ fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Dia
                     })?;
                     Ok(Value::Int128(n128))
                 }
+                Value::Array(items) => {
+                    let n128 = i128::try_from(items.len()).map_err(|_| {
+                        Diagnostic::new("array length exceeds i128 range", span, Severity::Error)
+                    })?;
+                    Ok(Value::Int128(n128))
+                }
                 other => Err(Diagnostic::new(
-                    format!("len expects str, got {}", builtin_type_name(other)),
+                    format!("len expects str or array, got {}", builtin_type_name(other)),
                     span,
                     Severity::Error,
                 )),
@@ -1053,6 +1131,7 @@ fn builtin_type_name(v: &Value) -> &'static str {
         Value::Builtin(_) => "function",
         Value::Function { .. } => "function",
         Value::Tuple(_) => "tuple",
+        Value::Array(_) => "array",
         Value::Err { .. } => "err",
         Value::StructInstance { .. } => "struct",
     }
@@ -1070,8 +1149,33 @@ fn is_truthy(v: &Value) -> bool {
         Value::Null => false,
         Value::Builtin(_) | Value::Function { .. } => true,
         Value::Tuple(items) => !items.is_empty(),
+        Value::Array(items) => !items.is_empty(),
         Value::Err { .. } => true,
         Value::StructInstance { .. } => true,
+    }
+}
+
+fn to_usize_index(value: &Value, span: Span) -> Result<usize, Diagnostic> {
+    match value {
+        Value::Int128(i) => usize::try_from(*i).map_err(|_| {
+            Diagnostic::new(
+                format!("array index must be non-negative usize-compatible int, got {}", i),
+                span,
+                Severity::Error,
+            )
+        }),
+        Value::UInt128(u) => usize::try_from(*u).map_err(|_| {
+            Diagnostic::new(
+                format!("array index too large for usize: {}", u),
+                span,
+                Severity::Error,
+            )
+        }),
+        other => Err(Diagnostic::new(
+            format!("array index must be integer, got {}", builtin_type_name(other)),
+            span,
+            Severity::Error,
+        )),
     }
 }
 
@@ -1597,5 +1701,47 @@ mod tests {
             true,
         );
         execute(&b.finish(), &symbols).expect("wrap should produce chained err");
+    }
+
+    #[test]
+    fn executes_array_get_and_set() {
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        let arr = symbols.define(
+            root,
+            "arr".to_string(),
+            crate::analyzer::Type::Array(Box::new(crate::analyzer::Type::Int { signed: true, bits: 32 })),
+            crate::hir::SymbolOrigin::User,
+            false,
+        );
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::ConstI128(2), s);
+        b.emit(Op::MakeArray(2), s);
+        b.emit(Op::Bind(arr), s);
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::ConstI128(9), s);
+        b.emit(Op::ArrayAssign(arr), s);
+        b.emit(Op::Load(arr), s);
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::ArrayGet, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        execute(&b.finish(), &symbols).expect("array get/set should execute");
+    }
+
+    #[test]
+    fn array_get_out_of_bounds_is_error() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::MakeArray(1), s);
+        b.emit(Op::ConstI128(3), s);
+        b.emit(Op::ArrayGet, s);
+        b.emit(Op::Return, s);
+        let symbols = SymbolTable::new();
+        let err = execute(&b.finish(), &symbols).expect_err("array get oob");
+        assert!(err.iter().any(|d| d.message.contains("index out of bounds")));
     }
 }

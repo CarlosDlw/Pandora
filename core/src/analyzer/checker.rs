@@ -274,6 +274,47 @@ impl<'a> Checker<'a> {
                 }
                 expected.0
             }
+            HirStmt::ArrayAssign {
+                symbol,
+                index,
+                value,
+                span,
+            } => {
+                let expected = self
+                    .symbols
+                    .symbol(*symbol)
+                    .map(|s| (s.ty.clone(), s.is_const))
+                    .unwrap_or((AnalyzerType::Unknown, false));
+                if expected.1 {
+                    self.push_error("cannot assign to constant", *span);
+                }
+                let elem_ty = match expected.0.clone() {
+                    AnalyzerType::Array(item) => *item,
+                    AnalyzerType::Unknown => AnalyzerType::Unknown,
+                    other => {
+                        self.push_error(
+                            format!("index assignment requires array target, got {other:?}"),
+                            *span,
+                        );
+                        AnalyzerType::Unknown
+                    }
+                };
+                let index_ty = self.check_expr(*index, *span);
+                if !matches!(index_ty, AnalyzerType::Int { .. } | AnalyzerType::Unknown) {
+                    self.push_error(
+                        format!("array index must be integer, got {index_ty:?}"),
+                        *span,
+                    );
+                }
+                let actual = self.check_expr_expected(*value, *span, Some(&elem_ty));
+                if !is_assignable(&elem_ty, &actual) {
+                    self.push_error(
+                        format!("cannot assign value of type {actual:?} to array element {elem_ty:?}"),
+                        *span,
+                    );
+                }
+                expected.0
+            }
             HirStmt::Block { stmts, .. } => {
                 for stmt in stmts {
                     let _ = self.check_stmt(stmt);
@@ -689,6 +730,77 @@ impl<'a> Checker<'a> {
                     other => {
                         self.push_error(
                             format!("tuple access requires tuple value, got {other:?}"),
+                            span,
+                        );
+                        AnalyzerType::Unknown
+                    }
+                }
+            }
+            Some(HirExpr::Array(items)) => {
+                let expected_item = match expected {
+                    Some(AnalyzerType::Array(item)) => Some((**item).clone()),
+                    _ => None,
+                };
+                if items.is_empty() {
+                    if let Some(item) = expected_item {
+                        AnalyzerType::Array(Box::new(item))
+                    } else {
+                        self.push_error("empty array literal requires explicit array type context", span);
+                        AnalyzerType::Unknown
+                    }
+                } else {
+                    let mut inferred = expected_item.unwrap_or_else(|| self.check_expr(items[0], span));
+                    for item in items {
+                        let actual = self.check_expr_expected(*item, span, Some(&inferred));
+                        if !is_assignable(&inferred, &actual) {
+                            if matches!(inferred, AnalyzerType::Unknown) {
+                                inferred = actual;
+                            } else {
+                                self.push_error(
+                                    format!(
+                                        "array literal item type mismatch: expected {inferred:?}, got {actual:?}"
+                                    ),
+                                    span,
+                                );
+                            }
+                        }
+                    }
+                    AnalyzerType::Array(Box::new(inferred))
+                }
+            }
+            Some(HirExpr::ArrayAccess { array, index }) => {
+                let array_ty = self.check_expr(*array, span);
+                let index_ty = self.check_expr(*index, span);
+                if !matches!(index_ty, AnalyzerType::Int { .. } | AnalyzerType::Unknown) {
+                    self.push_error(
+                        format!("array index must be integer, got {index_ty:?}"),
+                        span,
+                    );
+                }
+                match array_ty {
+                    AnalyzerType::Array(item) => *item,
+                    AnalyzerType::Tuple(items) => {
+                        if let Some(HirExpr::Int(raw)) = self.hir.exprs.get(*index) {
+                            let Ok(idx) = raw.parse::<usize>() else {
+                                self.push_error("tuple index must be integer literal", span);
+                                return AnalyzerType::Unknown;
+                            };
+                            items.get(idx).cloned().unwrap_or_else(|| {
+                                self.push_error(
+                                    format!("tuple index {} out of range (len={})", idx, items.len()),
+                                    span,
+                                );
+                                AnalyzerType::Unknown
+                            })
+                        } else {
+                            self.push_error("tuple index must be integer literal", span);
+                            AnalyzerType::Unknown
+                        }
+                    }
+                    AnalyzerType::Unknown => AnalyzerType::Unknown,
+                    other => {
+                        self.push_error(
+                            format!("index access requires array/tuple value, got {other:?}"),
                             span,
                         );
                         AnalyzerType::Unknown
@@ -1168,6 +1280,26 @@ impl<'a> Checker<'a> {
                 }
                 AnalyzerType::Err
             }
+            "len" => {
+                if args.len() != 1 {
+                    self.push_error(
+                        format!("len expects exactly 1 argument, got {}", args.len()),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                }
+                let arg_ty = self.check_expr(args[0], span);
+                match arg_ty {
+                    AnalyzerType::Str | AnalyzerType::Array(_) | AnalyzerType::Unknown => AnalyzerType::Int {
+                        signed: false,
+                        bits: 64,
+                    },
+                    other => {
+                        self.push_error(format!("len expects str or array, got {other:?}"), span);
+                        AnalyzerType::Unknown
+                    }
+                }
+            }
             _ => {
                 // fall through to generic behavior for other builtins
                 let callee_ty = self.resolve_named_type(name);
@@ -1303,6 +1435,9 @@ fn is_assignable(expected: &AnalyzerType, actual: &AnalyzerType) -> bool {
                     .zip(actual_items.iter())
                     .all(|(e, a)| is_assignable(e, a))
         }
+        (AnalyzerType::Array(expected_item), AnalyzerType::Array(actual_item)) => {
+            is_assignable(expected_item, actual_item)
+        }
         _ => false,
     }
 }
@@ -1388,6 +1523,7 @@ fn resolve_self_type(ty: AnalyzerType, concrete: AnalyzerType) -> AnalyzerType {
                 .map(|i| resolve_self_type(i, concrete.clone()))
                 .collect(),
         ),
+        AnalyzerType::Array(item) => AnalyzerType::Array(Box::new(resolve_self_type(*item, concrete))),
         other => other,
     }
 }
@@ -1496,6 +1632,27 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn supports_array_types_indexing_and_len() {
+        let src = "arr: [i32] = [1, 2, 3]; x: i32 = arr[1]; arr[0] = 9; y := len(arr)";
+        let lex_output = lex(FileId::from_u32(620), src);
+        let (ast, _) = parse(FileId::from_u32(620), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_invalid_array_index_type() {
+        let src = "arr: [i32] = [1, 2, 3]; x := arr[true]";
+        let lex_output = lex(FileId::from_u32(621), src);
+        let (ast, _) = parse(FileId::from_u32(621), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("array index must be integer")));
     }
 
     #[test]

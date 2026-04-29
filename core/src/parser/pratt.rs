@@ -47,7 +47,7 @@ impl Parser {
             if self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket)
                 && Precedence::Highest >= min_prec
             {
-                left = self.parse_tuple_access_bracket_suffix(left);
+                left = self.parse_array_access_bracket_suffix(left);
                 continue;
             }
 
@@ -266,6 +266,7 @@ impl Parser {
                     first
                 }
             }
+            TokenKind::LeftBracket => self.parse_array_literal(),
             _ => {
                 self.bump();
                 self.push_error("expected expression", token.span);
@@ -420,28 +421,47 @@ impl Parser {
         }
     }
 
-    fn parse_tuple_access_bracket_suffix(&mut self, tuple: ArenaId) -> ArenaId {
+    fn parse_array_access_bracket_suffix(&mut self, base: ArenaId) -> ArenaId {
         let open_span = self.current_span_or_eof();
         self.bump();
-        let Some(token) = self.current().cloned() else {
-            self.push_error("expected tuple index inside brackets", open_span);
+        if self.current().is_some_and(|t| t.kind == TokenKind::RightBracket) {
+            self.push_error("expected index expression inside brackets", open_span);
             return self.invalid_node(open_span);
-        };
-        if token.kind != TokenKind::Integer {
-            self.push_error("tuple index must be an integer literal", token.span);
-            return self.invalid_node(token.span);
         }
-        self.bump();
-        let Ok(index) = token.lexeme.parse::<usize>() else {
-            self.push_error("invalid tuple index literal", token.span);
-            return self.invalid_node(token.span);
-        };
+        let index = self.parse_expression();
         if !self.consume_if(TokenKind::RightBracket) {
-            self.push_error("expected ']' after tuple index", self.current_span_or_eof());
+            self.push_error("expected ']' after index expression", self.current_span_or_eof());
             return self.invalid_node(open_span);
         }
-        let span = merge_pair(self.node_span(tuple), token.span);
-        self.insert_node(AstNode::TupleAccess { tuple, index, span })
+        let span = merge_pair(self.node_span(base), self.node_span(index));
+        self.insert_node(AstNode::ArrayAccessExpr { base, index, span })
+    }
+
+    fn parse_array_literal(&mut self) -> ArenaId {
+        let open_span = self.current_span_or_eof();
+        self.bump();
+        let mut items = Vec::new();
+        if self.consume_if(TokenKind::RightBracket) {
+            return self.insert_node(AstNode::ArrayLiteral {
+                items,
+                span: merge_pair(open_span, open_span),
+            });
+        }
+        loop {
+            items.push(self.parse_expression());
+            if self.consume_if(TokenKind::Comma) {
+                if self.current().is_some_and(|t| t.kind == TokenKind::RightBracket) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        if !self.consume_if(TokenKind::RightBracket) {
+            self.push_error("expected ']' after array literal", self.current_span_or_eof());
+        }
+        let span = merge_pair(open_span, self.previous_span_or(open_span));
+        self.insert_node(AstNode::ArrayLiteral { items, span })
     }
 
     fn parse_struct_literal_suffix(&mut self, type_ident: ArenaId) -> ArenaId {

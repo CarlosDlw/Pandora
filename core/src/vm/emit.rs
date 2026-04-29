@@ -60,6 +60,7 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         | HirStmt::ImplBlock { span, .. }
         | HirStmt::TupleDestructure { span, .. }
         | HirStmt::Assign { span, .. }
+        | HirStmt::ArrayAssign { span, .. }
         | HirStmt::Expr { span, .. }
         | HirStmt::Block { span, .. }
         | HirStmt::If { span, .. }
@@ -143,6 +144,16 @@ fn emit_stmt(
         } => {
             emit_expr(hir, model, *value, b, diagnostics, method_table);
             b.emit(Op::Assign(*symbol), *span);
+        }
+        HirStmt::ArrayAssign {
+            symbol,
+            index,
+            value,
+            span,
+        } => {
+            emit_expr(hir, model, *index, b, diagnostics, method_table);
+            emit_expr(hir, model, *value, b, diagnostics, method_table);
+            b.emit(Op::ArrayAssign(*symbol), *span);
         }
         HirStmt::Expr { expr, span } => {
             emit_expr(hir, model, *expr, b, diagnostics, method_table);
@@ -579,9 +590,23 @@ fn emit_expr(
                 Err(_) => diagnostics.push(Diagnostic::new("tuple literal too large", span, Severity::Error)),
             }
         }
+        HirExpr::Array(items) => {
+            for item in items {
+                emit_expr(hir, model, *item, b, diagnostics, method_table);
+            }
+            match u8::try_from(items.len()) {
+                Ok(count) => b.emit(Op::MakeArray(count), span),
+                Err(_) => diagnostics.push(Diagnostic::new("array literal too large", span, Severity::Error)),
+            }
+        }
         HirExpr::TupleAccess { tuple, index } => {
             emit_expr(hir, model, *tuple, b, diagnostics, method_table);
             b.emit(Op::TupleGet(*index), span);
+        }
+        HirExpr::ArrayAccess { array, index } => {
+            emit_expr(hir, model, *array, b, diagnostics, method_table);
+            emit_expr(hir, model, *index, b, diagnostics, method_table);
+            b.emit(Op::ArrayGet, span);
         }
         HirExpr::IncDec {
             symbol,

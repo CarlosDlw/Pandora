@@ -85,6 +85,8 @@ pub enum HirExpr {
     },
     Tuple(Vec<HirId>),
     TupleAccess { tuple: HirId, index: usize },
+    Array(Vec<HirId>),
+    ArrayAccess { array: HirId, index: HirId },
     Propagate { expr: HirId },
     TryCatch {
         try_expr: HirId,
@@ -138,6 +140,12 @@ pub enum HirStmt {
     },
     Assign {
         symbol: SymbolId,
+        value: HirId,
+        span: Span,
+    },
+    ArrayAssign {
+        symbol: SymbolId,
+        index: HirId,
         value: HirId,
         span: Span,
     },
