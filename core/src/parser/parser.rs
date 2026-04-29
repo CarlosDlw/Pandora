@@ -61,6 +61,12 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> ArenaId {
+        if self.current().is_some_and(|token| token.kind == TokenKind::Fn) {
+            return self.parse_fn_decl();
+        }
+        if self.current().is_some_and(|token| token.kind == TokenKind::Return) {
+            return self.parse_return_stmt();
+        }
         if self.current().is_some_and(|token| token.kind == TokenKind::While) {
             return self.parse_while_stmt();
         }
@@ -87,6 +93,9 @@ impl Parser {
         }
         if self.is_declaration_start() {
             return self.parse_let_decl();
+        }
+        if self.is_tuple_destructure_decl_start() {
+            return self.parse_tuple_destructure_decl();
         }
         if self.is_compound_assign_start() {
             return self.parse_compound_assign_stmt();
@@ -208,6 +217,25 @@ impl Parser {
         self.insert_node(AstNode::BreakStmt { span })
     }
 
+    fn parse_return_stmt(&mut self) -> ArenaId {
+        let return_span = self.current_span_or_eof();
+        self.bump();
+        if self.current().is_none()
+            || self.current().is_some_and(|t| t.kind == TokenKind::Semicolon || t.kind == TokenKind::RightBrace)
+        {
+            return self.insert_node(AstNode::ReturnStmt {
+                value: None,
+                span: return_span,
+            });
+        }
+        let value = self.parse_expression();
+        let span = merge_span(return_span, self.node_span(value));
+        self.insert_node(AstNode::ReturnStmt {
+            value: Some(value),
+            span,
+        })
+    }
+
     fn parse_continue_stmt(&mut self) -> ArenaId {
         let span = self.current_span_or_eof();
         self.bump();
@@ -302,11 +330,11 @@ impl Parser {
             Some(TokenKind::DoubleColon) => {
                 is_const = true;
                 self.bump();
-                ty = Some(self.parse_type_name());
+                ty = Some(self.parse_type_ref());
             }
             Some(TokenKind::Colon) => {
                 self.bump();
-                ty = Some(self.parse_type_name());
+                ty = Some(self.parse_type_ref());
             }
             Some(TokenKind::InferAssign) => {
                 self.bump();
@@ -338,10 +366,50 @@ impl Parser {
         })
     }
 
+    fn parse_tuple_destructure_decl(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        let names = self.parse_destructure_name_list();
+        let mut ty = None;
+        let used_infer = if self.consume_if(TokenKind::InferAssign) {
+            true
+        } else if self.consume_if(TokenKind::Colon) {
+            ty = Some(self.parse_type_ref());
+            false
+        } else {
+            self.push_error("expected ':=' or ':' after tuple destructuring pattern", self.current_span_or_eof());
+            return self.invalid_node(start);
+        };
+
+        if !used_infer && !self.consume_if(TokenKind::Assign) {
+            self.push_error("expected '=' in tuple destructuring declaration", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+
+        let value = self.parse_expression();
+        let span = merge_span(start, self.node_span(value));
+        self.insert_node(AstNode::TupleDestructureDecl {
+            names,
+            ty,
+            value,
+            span,
+        })
+    }
+
     fn parse_type_name(&mut self) -> ArenaId {
+        self.parse_type_ref()
+    }
+
+    fn parse_type_ref(&mut self) -> ArenaId {
+        if self.current().is_some_and(|t| t.kind == TokenKind::Fn) {
+            return self.parse_fn_type_ref();
+        }
+        if self.current().is_some_and(|t| t.kind == TokenKind::LeftParen) {
+            return self.parse_tuple_type_ref();
+        }
         let token = match self.current() {
             Some(token) if token.kind == TokenKind::TypeName => token.clone(),
             Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+            Some(token) if token.kind == TokenKind::Null => token.clone(),
             _ => {
                 let span = self.current_span_or_eof();
                 self.push_error("expected type name", span);
@@ -352,6 +420,140 @@ impl Parser {
         self.insert_node(AstNode::TypeName {
             name: token.lexeme,
             span: token.span,
+        })
+    }
+
+    fn parse_fn_type_ref(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        if !self.consume_if(TokenKind::LeftParen) {
+            let span = self.current_span_or_eof();
+            self.push_error("expected '(' after 'fn' in function type", span);
+            return self.invalid_node(span);
+        }
+        let mut param_types = Vec::new();
+        if !self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+            loop {
+                let ty_id = self.parse_type_ref();
+                let ty_name = self.type_name_from_node(ty_id);
+                param_types.push(ty_name);
+                if self.consume_if(TokenKind::Comma) {
+                    continue;
+                }
+                break;
+            }
+        }
+        if !self.consume_if(TokenKind::RightParen) {
+            self.push_error("expected ')' in function type", self.current_span_or_eof());
+        }
+        if !self.consume_if(TokenKind::Arrow) {
+            self.push_error("expected '->' in function type", self.current_span_or_eof());
+        }
+        let ret_ty_id = self.parse_type_ref();
+        let ret_name = self.type_name_from_node(ret_ty_id);
+        let name = format!("fn({}) -> {}", param_types.join(", "), ret_name);
+        let span = merge_span(start, self.node_span(ret_ty_id));
+        self.insert_node(AstNode::TypeName { name, span })
+    }
+
+    fn parse_tuple_type_ref(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        let mut item_types = Vec::new();
+        let first = self.parse_type_ref();
+        item_types.push(self.type_name_from_node(first));
+        if !self.consume_if(TokenKind::Comma) {
+            self.push_error("tuple type must contain at least two elements", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let second = self.parse_type_ref();
+        item_types.push(self.type_name_from_node(second));
+        while self.consume_if(TokenKind::Comma) {
+            let next = self.parse_type_ref();
+            item_types.push(self.type_name_from_node(next));
+        }
+        if !self.consume_if(TokenKind::RightParen) {
+            self.push_error("expected ')' to close tuple type", self.current_span_or_eof());
+        }
+        let name = format!("({})", item_types.join(", "));
+        let span = merge_span(start, self.previous_span_or(start));
+        self.insert_node(AstNode::TypeName { name, span })
+    }
+
+    fn type_name_from_node(&self, id: ArenaId) -> String {
+        match self.arena.get(id) {
+            Some(AstNode::TypeName { name, .. }) => name.clone(),
+            _ => "<invalid>".to_string(),
+        }
+    }
+
+    fn parse_fn_decl(&mut self) -> ArenaId {
+        let fn_span = self.current_span_or_eof();
+        self.bump();
+        let name_token = match self.current() {
+            Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+            _ => {
+                let span = self.current_span_or_eof();
+                self.push_error("expected function name after 'fn'", span);
+                return self.invalid_node(span);
+            }
+        };
+        self.bump();
+        let name = self.insert_node(AstNode::Identifier {
+            name: name_token.lexeme,
+            span: name_token.span,
+        });
+
+        if !self.consume_if(TokenKind::LeftParen) {
+            let span = self.current_span_or_eof();
+            self.push_error("expected '(' after function name", span);
+            return self.invalid_node(span);
+        }
+        let mut params = Vec::new();
+        if !self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+            loop {
+                let param_name_token = match self.current() {
+                    Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+                    _ => {
+                        let span = self.current_span_or_eof();
+                        self.push_error("expected parameter name", span);
+                        return self.invalid_node(span);
+                    }
+                };
+                self.bump();
+                let param_name = self.insert_node(AstNode::Identifier {
+                    name: param_name_token.lexeme,
+                    span: param_name_token.span,
+                });
+                if !self.consume_if(TokenKind::Colon) {
+                    self.push_error("expected ':' after parameter name", self.current_span_or_eof());
+                    return self.invalid_node(param_name_token.span);
+                }
+                let param_ty = self.parse_type_ref();
+                params.push((param_name, param_ty));
+                if self.consume_if(TokenKind::Comma) {
+                    continue;
+                }
+                break;
+            }
+        }
+        if !self.consume_if(TokenKind::RightParen) {
+            self.push_error("expected ')' after function parameters", self.current_span_or_eof());
+            return self.invalid_node(name_token.span);
+        }
+        if !self.consume_if(TokenKind::Arrow) {
+            self.push_error("expected '->' after function parameters", self.current_span_or_eof());
+            return self.invalid_node(name_token.span);
+        }
+        let return_ty = self.parse_type_ref();
+        let body = self.parse_if_branch_block("expected '{' after function signature");
+        let span = merge_span(fn_span, self.node_span(body));
+        self.insert_node(AstNode::FnDecl {
+            name,
+            params,
+            return_ty,
+            body,
+            span,
         })
     }
 
@@ -444,6 +646,66 @@ impl Parser {
                 Some(TokenKind::Colon | TokenKind::DoubleColon | TokenKind::InferAssign)
             )
         )
+    }
+
+    fn is_tuple_destructure_decl_start(&self) -> bool {
+        if self.peek_kind(0) != Some(TokenKind::LeftParen) {
+            return false;
+        }
+        let mut idx = 1usize;
+        loop {
+            match self.peek_kind(idx) {
+                Some(TokenKind::Identifier) => {
+                    idx += 1;
+                }
+                _ => return false,
+            }
+            match self.peek_kind(idx) {
+                Some(TokenKind::Comma) => idx += 1,
+                Some(TokenKind::RightParen) => {
+                    idx += 1;
+                    break;
+                }
+                _ => return false,
+            }
+        }
+        matches!(self.peek_kind(idx), Some(TokenKind::InferAssign | TokenKind::Colon))
+    }
+
+    fn parse_destructure_name_list(&mut self) -> Vec<ArenaId> {
+        let mut names = Vec::new();
+        if !self.consume_if(TokenKind::LeftParen) {
+            self.push_error("expected '(' in tuple destructuring declaration", self.current_span_or_eof());
+            return names;
+        }
+        loop {
+            let token = match self.current() {
+                Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+                _ => {
+                    self.push_error("expected identifier in tuple destructuring pattern", self.current_span_or_eof());
+                    break;
+                }
+            };
+            self.bump();
+            names.push(self.insert_node(AstNode::Identifier {
+                name: token.lexeme,
+                span: token.span,
+            }));
+            if self.consume_if(TokenKind::Comma) {
+                continue;
+            }
+            break;
+        }
+        if names.len() < 2 {
+            self.push_error(
+                "tuple destructuring requires at least two names",
+                self.current_span_or_eof(),
+            );
+        }
+        if !self.consume_if(TokenKind::RightParen) {
+            self.push_error("expected ')' in tuple destructuring declaration", self.current_span_or_eof());
+        }
+        names
     }
 
     fn is_assignment_start(&self) -> bool {
@@ -884,6 +1146,62 @@ mod tests {
     }
 
     #[test]
+    fn parses_function_declaration_and_return() {
+        let source = "fn add(a: i32, b: i32) -> i32 { return a + b }";
+        let lex_out = lex(FileId::from_u32(47), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(47), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(ast.get(ast.roots[0]), Some(AstNode::FnDecl { .. })));
+    }
+
+    #[test]
+    fn parses_function_type_annotation() {
+        let source = "f: fn(i32, i32) -> i32 = add";
+        let lex_out = lex(FileId::from_u32(48), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(48), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let Some(AstNode::LetDecl { ty: Some(ty_id), .. }) = ast.get(ast.roots[0]) else {
+            panic!("expected typed let");
+        };
+        assert!(matches!(ast.get(*ty_id), Some(AstNode::TypeName { name, .. }) if name.starts_with("fn(")));
+    }
+
+    #[test]
+    fn parses_nested_function_declaration() {
+        let source = "fn outer(a: i32) -> fn(i32) -> i32 { fn inner(x: i32) -> i32 { return a + x }; return inner }";
+        let lex_out = lex(FileId::from_u32(51), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(51), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let Some(AstNode::FnDecl { body, .. }) = ast.get(ast.roots[0]) else {
+            panic!("expected outer fn");
+        };
+        let Some(AstNode::BlockStmt { statements, .. }) = ast.get(*body) else {
+            panic!("expected block");
+        };
+        assert!(statements
+            .iter()
+            .any(|id| matches!(ast.get(*id), Some(AstNode::FnDecl { .. }))));
+    }
+
+    #[test]
+    fn parses_bare_return_statement() {
+        let source = "fn noop() -> unit { return }";
+        let lex_out = lex(FileId::from_u32(52), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(52), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let Some(AstNode::FnDecl { body, .. }) = ast.get(ast.roots[0]) else {
+            panic!("expected fn decl");
+        };
+        let Some(AstNode::BlockStmt { statements, .. }) = ast.get(*body) else {
+            panic!("expected block");
+        };
+        assert!(statements.iter().any(|id| matches!(
+            ast.get(*id),
+            Some(AstNode::ReturnStmt { value: None, .. })
+        )));
+    }
+
+    #[test]
     fn parses_prefix_and_postfix_incdec() {
         let source = "x: i32 = 1; y := ++x; z := x--";
         let lex_out = lex(FileId::from_u32(46), source);
@@ -945,5 +1263,53 @@ mod tests {
         let lex_out = lex(FileId::from_u32(42), source);
         let (_ast, diagnostics) = parse(FileId::from_u32(42), source.len() as u32, lex_out.tokens);
         assert!(diagnostics.has_errors());
+    }
+
+    #[test]
+    fn parses_tuple_literal_and_access_forms() {
+        let source = r#"t := (1, "a"); x := t.0; y := t[1]"#;
+        let lex_out = lex(FileId::from_u32(53), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(53), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let AstNode::LetDecl { value: tuple_value, .. } = ast.get(ast.roots[0]).expect("let t") else {
+            panic!("expected tuple let");
+        };
+        assert!(matches!(ast.get(*tuple_value), Some(AstNode::TupleLiteral { items, .. }) if items.len() == 2));
+        let AstNode::LetDecl { value: x_value, .. } = ast.get(ast.roots[1]).expect("let x") else {
+            panic!("expected let x");
+        };
+        assert!(matches!(ast.get(*x_value), Some(AstNode::TupleAccess { index: 0, .. })));
+        let AstNode::LetDecl { value: y_value, .. } = ast.get(ast.roots[2]).expect("let y") else {
+            panic!("expected let y");
+        };
+        assert!(matches!(ast.get(*y_value), Some(AstNode::TupleAccess { index: 1, .. })));
+    }
+
+    #[test]
+    fn parses_tuple_destructuring_declarations() {
+        let source = "(a, b) := pair; (c, d): (i32, i32) = pair";
+        let lex_out = lex(FileId::from_u32(54), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(54), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(
+            ast.get(ast.roots[0]),
+            Some(AstNode::TupleDestructureDecl { names, ty: None, .. }) if names.len() == 2
+        ));
+        assert!(matches!(
+            ast.get(ast.roots[1]),
+            Some(AstNode::TupleDestructureDecl { names, ty: Some(_), .. }) if names.len() == 2
+        ));
+    }
+
+    #[test]
+    fn parses_null_literal() {
+        let source = "x: i32 = null";
+        let lex_out = lex(FileId::from_u32(55), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(55), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let Some(AstNode::LetDecl { value, .. }) = ast.get(ast.roots[0]) else {
+            panic!("expected let");
+        };
+        assert!(matches!(ast.get(*value), Some(AstNode::NullLiteral { .. })));
     }
 }

@@ -31,12 +31,15 @@ impl Parser {
                 | TokenKind::Else
                 | TokenKind::While
                 | TokenKind::For
+                | TokenKind::Fn
+                | TokenKind::Return
                 | TokenKind::Break
                 | TokenKind::Continue
                 | TokenKind::Integer
                 | TokenKind::Float
                 | TokenKind::String
                 | TokenKind::Bool
+                | TokenKind::Null
                 | TokenKind::Minus
                 | TokenKind::PlusPlus
                 | TokenKind::MinusMinus

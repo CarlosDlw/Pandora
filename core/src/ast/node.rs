@@ -90,6 +90,9 @@ pub enum AstNode {
         value: bool,
         span: Span,
     },
+    NullLiteral {
+        span: Span,
+    },
     UnaryExpr {
         op: UnaryOp,
         operand: ArenaId,
@@ -106,6 +109,15 @@ pub enum AstNode {
         args: Vec<ArenaId>,
         span: Span,
     },
+    TupleLiteral {
+        items: Vec<ArenaId>,
+        span: Span,
+    },
+    TupleAccess {
+        tuple: ArenaId,
+        index: usize,
+        span: Span,
+    },
     IncDecExpr {
         target: ArenaId,
         op: IncDecOp,
@@ -117,6 +129,19 @@ pub enum AstNode {
         ty: Option<ArenaId>,
         value: ArenaId,
         is_const: bool,
+        span: Span,
+    },
+    TupleDestructureDecl {
+        names: Vec<ArenaId>,
+        ty: Option<ArenaId>,
+        value: ArenaId,
+        span: Span,
+    },
+    FnDecl {
+        name: ArenaId,
+        params: Vec<(ArenaId, ArenaId)>,
+        return_ty: ArenaId,
+        body: ArenaId,
         span: Span,
     },
     AssignStmt {
@@ -154,6 +179,10 @@ pub enum AstNode {
     ContinueStmt {
         span: Span,
     },
+    ReturnStmt {
+        value: Option<ArenaId>,
+        span: Span,
+    },
     BlockStmt {
         statements: Vec<ArenaId>,
         span: Span,
@@ -175,11 +204,16 @@ impl AstNode {
             | Self::StringLiteral { span, .. }
             | Self::CharLiteral { span, .. }
             | Self::BoolLiteral { span, .. }
+            | Self::NullLiteral { span, .. }
             | Self::UnaryExpr { span, .. }
             | Self::BinaryExpr { span, .. }
             | Self::CallExpr { span, .. }
+            | Self::TupleLiteral { span, .. }
+            | Self::TupleAccess { span, .. }
             | Self::IncDecExpr { span, .. }
             | Self::LetDecl { span, .. }
+            | Self::TupleDestructureDecl { span, .. }
+            | Self::FnDecl { span, .. }
             | Self::AssignStmt { span, .. }
             | Self::CompoundAssignStmt { span, .. }
             | Self::IfStmt { span, .. }
@@ -187,6 +221,7 @@ impl AstNode {
             | Self::ForStmt { span, .. }
             | Self::BreakStmt { span, .. }
             | Self::ContinueStmt { span, .. }
+            | Self::ReturnStmt { span, .. }
             | Self::BlockStmt { span, .. }
             | Self::ExprStmt { span, .. } => *span,
         }

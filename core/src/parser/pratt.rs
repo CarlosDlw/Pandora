@@ -38,6 +38,18 @@ impl Parser {
                 left = self.parse_call_suffix(left);
                 continue;
             }
+            if self.current().is_some_and(|t| t.kind == TokenKind::Dot)
+                && Precedence::Highest >= min_prec
+            {
+                left = self.parse_tuple_access_dot_suffix(left);
+                continue;
+            }
+            if self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket)
+                && Precedence::Highest >= min_prec
+            {
+                left = self.parse_tuple_access_bracket_suffix(left);
+                continue;
+            }
 
             if self.current().is_some_and(|t| t.kind == TokenKind::PlusPlus || t.kind == TokenKind::MinusMinus)
                 && Precedence::Highest >= min_prec
@@ -153,6 +165,10 @@ impl Parser {
                     span: token.span,
                 })
             }
+            TokenKind::Null => {
+                self.bump();
+                self.insert_node(AstNode::NullLiteral { span: token.span })
+            }
             TokenKind::Minus => {
                 let op_span = token.span;
                 self.bump();
@@ -206,12 +222,25 @@ impl Parser {
             TokenKind::LeftParen => {
                 let open_span = token.span;
                 self.bump();
-                let expr = self.parse_expression();
-                if !self.consume_if(TokenKind::RightParen) {
-                    let err_span = merge_pair(open_span, self.node_span(expr));
-                    self.push_error("expected ')'", err_span);
+                let first = self.parse_expression();
+                if self.consume_if(TokenKind::Comma) {
+                    let mut items = vec![first, self.parse_expression()];
+                    while self.consume_if(TokenKind::Comma) {
+                        items.push(self.parse_expression());
+                    }
+                    if !self.consume_if(TokenKind::RightParen) {
+                        let err_span = merge_pair(open_span, self.node_span(*items.last().expect("non-empty")));
+                        self.push_error("expected ')' after tuple literal", err_span);
+                    }
+                    let span = merge_pair(open_span, self.previous_span_or(open_span));
+                    self.insert_node(AstNode::TupleLiteral { items, span })
+                } else {
+                    if !self.consume_if(TokenKind::RightParen) {
+                        let err_span = merge_pair(open_span, self.node_span(first));
+                        self.push_error("expected ')'", err_span);
+                    }
+                    first
                 }
-                expr
             }
             _ => {
                 self.bump();
@@ -279,6 +308,50 @@ impl Parser {
             .unwrap_or(open);
         let span = merge_pair(self.node_span(callee), end);
         self.insert_node(AstNode::CallExpr { callee, args, span })
+    }
+
+    fn parse_tuple_access_dot_suffix(&mut self, tuple: ArenaId) -> ArenaId {
+        let dot_span = self.current_span_or_eof();
+        self.bump();
+        let Some(token) = self.current().cloned() else {
+            self.push_error("expected tuple index after '.'", dot_span);
+            return self.invalid_node(dot_span);
+        };
+        if token.kind != TokenKind::Integer {
+            self.push_error("tuple index after '.' must be an integer literal", token.span);
+            return self.invalid_node(token.span);
+        }
+        self.bump();
+        let Ok(index) = token.lexeme.parse::<usize>() else {
+            self.push_error("invalid tuple index literal", token.span);
+            return self.invalid_node(token.span);
+        };
+        let span = merge_pair(self.node_span(tuple), token.span);
+        self.insert_node(AstNode::TupleAccess { tuple, index, span })
+    }
+
+    fn parse_tuple_access_bracket_suffix(&mut self, tuple: ArenaId) -> ArenaId {
+        let open_span = self.current_span_or_eof();
+        self.bump();
+        let Some(token) = self.current().cloned() else {
+            self.push_error("expected tuple index inside brackets", open_span);
+            return self.invalid_node(open_span);
+        };
+        if token.kind != TokenKind::Integer {
+            self.push_error("tuple index must be an integer literal", token.span);
+            return self.invalid_node(token.span);
+        }
+        self.bump();
+        let Ok(index) = token.lexeme.parse::<usize>() else {
+            self.push_error("invalid tuple index literal", token.span);
+            return self.invalid_node(token.span);
+        };
+        if !self.consume_if(TokenKind::RightBracket) {
+            self.push_error("expected ']' after tuple index", self.current_span_or_eof());
+            return self.invalid_node(open_span);
+        }
+        let span = merge_pair(self.node_span(tuple), token.span);
+        self.insert_node(AstNode::TupleAccess { tuple, index, span })
     }
 }
 

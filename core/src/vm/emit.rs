@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     bytecode::Op,
-    chunk::{Chunk, ChunkBuilder},
+    chunk::{Chunk, ChunkBuilder, FunctionChunk},
 };
 
 pub fn compile_program(hir: &Hir, model: &SemanticModel) -> (Chunk, Diagnostics) {
@@ -50,6 +50,8 @@ pub fn compile_program(hir: &Hir, model: &SemanticModel) -> (Chunk, Diagnostics)
 fn stmt_primary_span(stmt: &HirStmt) -> Span {
     match stmt {
         HirStmt::Let { span, .. }
+        | HirStmt::FnDecl { span, .. }
+        | HirStmt::TupleDestructure { span, .. }
         | HirStmt::Assign { span, .. }
         | HirStmt::Expr { span, .. }
         | HirStmt::Block { span, .. }
@@ -58,6 +60,7 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         | HirStmt::For { span, .. }
         | HirStmt::Break { span, .. }
         | HirStmt::Continue { span, .. }
+        | HirStmt::Return { span, .. }
         | HirStmt::Invalid { span } => *span,
     }
 }
@@ -84,6 +87,32 @@ fn emit_stmt(
         } => {
             emit_expr(hir, model, *value, b, diagnostics);
             b.emit(Op::Bind(*symbol), *span);
+        }
+        HirStmt::FnDecl {
+            symbol,
+            params,
+            body,
+            span,
+            ..
+        } => {
+            let function_chunk = compile_function_chunk(hir, model, params.clone(), body, diagnostics);
+            b.define_function(*symbol, function_chunk);
+            b.emit(Op::MakeClosure(*symbol), *span);
+            b.emit(Op::Bind(*symbol), *span);
+        }
+        HirStmt::TupleDestructure {
+            names,
+            value,
+            span,
+            ..
+        } => {
+            emit_expr(hir, model, *value, b, diagnostics);
+            for (idx, sym) in names.iter().enumerate() {
+                b.emit(Op::Dup, *span);
+                b.emit(Op::TupleGet(idx), *span);
+                b.emit(Op::Bind(*sym), *span);
+            }
+            b.emit(Op::Pop, *span);
         }
         HirStmt::Assign {
             symbol, value, span, ..
@@ -277,6 +306,13 @@ fn emit_stmt(
                 loop_ctx_mut.continue_sites.push(continue_jump);
             }
         }
+        HirStmt::Return { value, span } => {
+            match value {
+                Some(expr) => emit_expr(hir, model, *expr, b, diagnostics),
+                None => b.emit(Op::ConstUnit, *span),
+            }
+            b.emit(Op::Return, *span);
+        }
         HirStmt::Invalid { span } => {
             diagnostics.push(Diagnostic::new("invalid statement skipped in bytecode", *span, Severity::Error));
         }
@@ -348,6 +384,7 @@ fn emit_expr(
             }
         },
         HirExpr::Bool(v) => b.emit(Op::ConstBool(*v), span),
+        HirExpr::Null => b.emit(Op::ConstNull, span),
         HirExpr::Str(s) => b.emit(Op::ConstStr(s.clone()), span),
         HirExpr::Char(c) => b.emit(Op::ConstChar(*c), span),
         HirExpr::Var(sym) => b.emit(Op::Load(*sym), span),
@@ -403,11 +440,12 @@ fn emit_expr(
             }
         }
         HirExpr::Call { callee, args } => {
+            emit_expr(hir, model, *callee, b, diagnostics);
             for a in args {
                 emit_expr(hir, model, *a, b, diagnostics);
             }
             match u8::try_from(args.len()) {
-                Ok(argc) => b.emit(Op::Call(*callee, argc), span),
+                Ok(argc) => b.emit(Op::CallValue(argc), span),
                 Err(_) => {
                     diagnostics.push(Diagnostic::new(
                         "too many arguments for call (u8 overflow)",
@@ -416,6 +454,19 @@ fn emit_expr(
                     ));
                 }
             }
+        }
+        HirExpr::Tuple(items) => {
+            for item in items {
+                emit_expr(hir, model, *item, b, diagnostics);
+            }
+            match u8::try_from(items.len()) {
+                Ok(count) => b.emit(Op::MakeTuple(count), span),
+                Err(_) => diagnostics.push(Diagnostic::new("tuple literal too large", span, Severity::Error)),
+            }
+        }
+        HirExpr::TupleAccess { tuple, index } => {
+            emit_expr(hir, model, *tuple, b, diagnostics);
+            b.emit(Op::TupleGet(*index), span);
         }
         HirExpr::IncDec {
             symbol,
@@ -449,6 +500,38 @@ fn emit_expr(
         HirExpr::Invalid => {
             diagnostics.push(Diagnostic::new("invalid expression in bytecode", span, Severity::Error));
         }
+    }
+}
+
+fn compile_function_chunk(
+    hir: &Hir,
+    model: &SemanticModel,
+    params: Vec<crate::hir::SymbolId>,
+    body: &[HirStmt],
+    diagnostics: &mut Diagnostics,
+) -> FunctionChunk {
+    let mut b = ChunkBuilder::new();
+    let mut loop_stack = Vec::new();
+    let mut scope_depth = 0usize;
+    for stmt in body {
+        emit_stmt(
+            hir,
+            model,
+            stmt,
+            &mut b,
+            diagnostics,
+            &mut loop_stack,
+            &mut scope_depth,
+        );
+    }
+    b.emit(
+        Op::ConstUnit,
+        Span::new_unchecked(hir.file_id, 0, 0),
+    );
+    b.emit(Op::Return, Span::new_unchecked(hir.file_id, 0, 0));
+    FunctionChunk {
+        params,
+        chunk: b.finish(),
     }
 }
 
@@ -543,5 +626,37 @@ mod tests {
         assert!(!compile_diagnostics.has_errors());
         assert!(chunk.code.iter().any(|op| matches!(op, Op::JumpIfFalse(_))));
         assert!(chunk.code.iter().any(|op| matches!(op, Op::Jump(_))));
+    }
+
+    #[test]
+    fn emits_function_closure_and_callvalue() {
+        let src = "fn add(a: i32, b: i32) -> i32 { return a + b }; f: fn(i32, i32) -> i32 = add; print(f(1, 2))";
+        let lex_output = lex(FileId::from_u32(34), src);
+        let (ast, parser_diagnostics) = parse(FileId::from_u32(34), src.len() as u32, lex_output.tokens);
+        assert!(!parser_diagnostics.has_errors());
+        let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
+        assert!(!lowering_diagnostics.has_errors());
+        let (model, analysis_diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!analysis_diagnostics.has_errors());
+        let (chunk, compile_diagnostics) = compile_program(&hir, &model);
+        assert!(!compile_diagnostics.has_errors());
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::MakeClosure(_))));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::CallValue(_))));
+    }
+
+    #[test]
+    fn emits_tuple_ops() {
+        let src = r#"t: (i32, str) = (1, "a"); x := t.0"#;
+        let lex_output = lex(FileId::from_u32(35), src);
+        let (ast, parser_diagnostics) = parse(FileId::from_u32(35), src.len() as u32, lex_output.tokens);
+        assert!(!parser_diagnostics.has_errors());
+        let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
+        assert!(!lowering_diagnostics.has_errors());
+        let (model, analysis_diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!analysis_diagnostics.has_errors());
+        let (chunk, compile_diagnostics) = compile_program(&hir, &model);
+        assert!(!compile_diagnostics.has_errors());
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::MakeTuple(_))));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::TupleGet(_))));
     }
 }

@@ -53,6 +53,7 @@ pub enum HirExpr {
     Int(String),
     Float(String),
     Bool(bool),
+    Null,
     Str(String),
     Char(char),
     Var(SymbolId),
@@ -63,7 +64,9 @@ pub enum HirExpr {
         op: IncDecOp,
         position: IncDecPosition,
     },
-    Call { callee: SymbolId, args: Vec<HirId> },
+    Call { callee: HirId, args: Vec<HirId> },
+    Tuple(Vec<HirId>),
+    TupleAccess { tuple: HirId, index: usize },
     Invalid,
 }
 
@@ -73,6 +76,19 @@ pub enum HirStmt {
         symbol: SymbolId,
         value: HirId,
         is_const: bool,
+        span: Span,
+    },
+    TupleDestructure {
+        names: Vec<SymbolId>,
+        ty: Option<crate::analyzer::Type>,
+        value: HirId,
+        span: Span,
+    },
+    FnDecl {
+        symbol: SymbolId,
+        params: Vec<SymbolId>,
+        return_ty: crate::analyzer::Type,
+        body: Vec<HirStmt>,
         span: Span,
     },
     Assign {
@@ -110,6 +126,10 @@ pub enum HirStmt {
         span: Span,
     },
     Continue {
+        span: Span,
+    },
+    Return {
+        value: Option<HirId>,
         span: Span,
     },
     Invalid {

@@ -1,0 +1,4 @@
+pair: (i32, i32) = (4, 9);
+(a, b) := pair;
+(c, d): (i32, i32) = pair;
+print(a, b, c, d)

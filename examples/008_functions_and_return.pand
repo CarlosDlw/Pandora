@@ -1,0 +1,21 @@
+fn add(a: i32, b: i32) -> i32 {
+    return a + b
+}
+
+fn make_adder(base: i32) -> fn(i32) -> i32 {
+    fn inner(x: i32) -> i32 {
+        return base + x
+    }
+    return inner
+}
+
+fn log_value(v: i32) -> unit {
+    print("log:", v)
+    return
+}
+
+adder: fn(i32) -> i32 = make_adder(5)
+sum := add(2, 3)
+print("sum:", sum)
+print("adder:", adder(10))
+log_value(7)

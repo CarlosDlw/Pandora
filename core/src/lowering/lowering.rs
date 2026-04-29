@@ -28,6 +28,7 @@ struct Lowering<'a> {
     symbols: SymbolTable,
     diagnostics: Diagnostics,
     current_scope: ScopeId,
+    predeclared_fns: HashMap<ArenaId, SymbolId>,
 }
 
 impl<'a> Lowering<'a> {
@@ -45,13 +46,39 @@ impl<'a> Lowering<'a> {
             symbols,
             diagnostics: Diagnostics::new(),
             current_scope: root_scope,
+            predeclared_fns: HashMap::new(),
         }
     }
 
     fn lower_program(&mut self) {
+        self.predeclare_top_level_functions();
         for root in &self.ast.roots {
             let stmt = self.lower_stmt(*root);
             self.hir.stmts.push(stmt);
+        }
+    }
+
+    fn predeclare_top_level_functions(&mut self) {
+        for root in &self.ast.roots {
+            let Some(AstNode::FnDecl {
+                name,
+                params,
+                return_ty,
+                ..
+            }) = self.ast.get(*root)
+            else {
+                continue;
+            };
+            let ret_ty = self.resolve_decl_type(Some(*return_ty));
+            let fn_ty = Type::Function {
+                params: params
+                    .iter()
+                    .map(|(_, ty)| self.resolve_decl_type(Some(*ty)))
+                    .collect(),
+                ret: Box::new(ret_ty),
+            };
+            let symbol = self.bind_symbol(*name, fn_ty, true);
+            self.predeclared_fns.insert(*root, symbol);
         }
     }
 
@@ -78,6 +105,38 @@ impl<'a> Lowering<'a> {
                     symbol,
                     value,
                     is_const: *is_const,
+                    span: *span,
+                }
+            }
+            AstNode::FnDecl {
+                name,
+                params,
+                return_ty,
+                body,
+                span,
+            } => {
+                let symbol = self.predeclared_fns.get(&id).copied();
+                self.lower_fn_decl(*name, params, *return_ty, *body, *span, symbol)
+            }
+            AstNode::TupleDestructureDecl {
+                names,
+                ty,
+                value,
+                span,
+            } => {
+                let value = self.lower_expr(*value);
+                let names = names
+                    .iter()
+                    .map(|name| self.bind_symbol(*name, Type::Unknown, false))
+                    .collect::<Vec<_>>();
+                let ty = ty.and_then(|ty_id| match self.ast.get(ty_id) {
+                    Some(AstNode::TypeName { name, .. }) => map_type_name(name),
+                    _ => None,
+                });
+                HirStmt::TupleDestructure {
+                    names,
+                    ty,
+                    value,
                     span: *span,
                 }
             }
@@ -171,6 +230,10 @@ impl<'a> Lowering<'a> {
             }
             AstNode::BreakStmt { span } => HirStmt::Break { span: *span },
             AstNode::ContinueStmt { span } => HirStmt::Continue { span: *span },
+            AstNode::ReturnStmt { value, span } => {
+                let value = value.map(|id| self.lower_expr(id));
+                HirStmt::Return { value, span: *span }
+            }
             AstNode::Invalid { span } => HirStmt::Invalid { span: *span },
             other => {
                 let expr = self.lower_expr(id);
@@ -252,6 +315,7 @@ impl<'a> Lowering<'a> {
             AstNode::BoolLiteral { value, .. } => {
                 self.insert_hir_expr(HirExpr::Bool(*value), self.node_span(id))
             }
+            AstNode::NullLiteral { .. } => self.insert_hir_expr(HirExpr::Null, self.node_span(id)),
             AstNode::UnaryExpr { op, operand, .. } => {
                 let operand = self.lower_expr(*operand);
                 let op = match op {
@@ -282,26 +346,30 @@ impl<'a> Lowering<'a> {
                     self.node_span(id),
                 )
             }
-            AstNode::CallExpr { callee, args, span } => {
+            AstNode::CallExpr { callee, args, span: _ } => {
                 let lowered_args = args.iter().map(|arg| self.lower_expr(*arg)).collect::<Vec<_>>();
                 let callee_expr = self.lower_expr(*callee);
-                let callee_symbol = match self.hir.exprs.get(callee_expr) {
-                    Some(HirExpr::Var(symbol_id)) => Some(*symbol_id),
-                    _ => None,
-                };
-                match callee_symbol {
-                    Some(symbol_id) => self.insert_hir_expr(
-                        HirExpr::Call {
-                            callee: symbol_id,
-                            args: lowered_args,
-                        },
-                        self.node_span(id),
-                    ),
-                    None => {
-                        self.push_error("call target must be an identifier", *span);
-                        self.insert_hir_expr(HirExpr::Invalid, *span)
-                    }
-                }
+                self.insert_hir_expr(
+                    HirExpr::Call {
+                        callee: callee_expr,
+                        args: lowered_args,
+                    },
+                    self.node_span(id),
+                )
+            }
+            AstNode::TupleLiteral { items, .. } => {
+                let items = items.iter().map(|item| self.lower_expr(*item)).collect::<Vec<_>>();
+                self.insert_hir_expr(HirExpr::Tuple(items), self.node_span(id))
+            }
+            AstNode::TupleAccess { tuple, index, .. } => {
+                let tuple = self.lower_expr(*tuple);
+                self.insert_hir_expr(
+                    HirExpr::TupleAccess {
+                        tuple,
+                        index: *index,
+                    },
+                    self.node_span(id),
+                )
             }
             AstNode::IncDecExpr {
                 target,
@@ -324,6 +392,8 @@ impl<'a> Lowering<'a> {
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
             AstNode::LetDecl { .. }
+            | AstNode::TupleDestructureDecl { .. }
+            | AstNode::FnDecl { .. }
             | AstNode::AssignStmt { .. }
             | AstNode::CompoundAssignStmt { .. }
             | AstNode::IfStmt { .. }
@@ -331,12 +401,54 @@ impl<'a> Lowering<'a> {
             | AstNode::ForStmt { .. }
             | AstNode::BreakStmt { .. }
             | AstNode::ContinueStmt { .. }
+            | AstNode::ReturnStmt { .. }
             | AstNode::ExprStmt { .. }
             | AstNode::BlockStmt { .. } => {
                 self.push_error("statement used where expression expected", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
             AstNode::Invalid { .. } => self.insert_hir_expr(HirExpr::Invalid, self.node_span(id)),
+        }
+    }
+
+    fn lower_fn_decl(
+        &mut self,
+        name_id: ArenaId,
+        params: &[(ArenaId, ArenaId)],
+        return_ty_id: ArenaId,
+        body_id: ArenaId,
+        span: Span,
+        predeclared_symbol: Option<SymbolId>,
+    ) -> HirStmt {
+        let ret_ty = self.resolve_decl_type(Some(return_ty_id));
+        let fn_ty = Type::Function {
+            params: params
+                .iter()
+                .map(|(_, ty)| self.resolve_decl_type(Some(*ty)))
+                .collect(),
+            ret: Box::new(ret_ty.clone()),
+        };
+        let symbol = predeclared_symbol.unwrap_or_else(|| self.bind_symbol(name_id, fn_ty, true));
+
+        let parent_scope = self.current_scope;
+        let fn_scope = self.symbols.create_scope(Some(parent_scope));
+        self.current_scope = fn_scope;
+
+        let mut param_symbols = Vec::with_capacity(params.len());
+        for (param_name, param_ty_id) in params {
+            let param_ty = self.resolve_decl_type(Some(*param_ty_id));
+            let param_symbol = self.bind_symbol(*param_name, param_ty, false);
+            param_symbols.push(param_symbol);
+        }
+
+        let body = self.lower_if_branch(body_id);
+        self.current_scope = parent_scope;
+        HirStmt::FnDecl {
+            symbol,
+            params: param_symbols,
+            return_ty: ret_ty,
+            body,
+            span,
         }
     }
 
@@ -505,6 +617,12 @@ fn unquote_string_literal(raw: &str) -> String {
 }
 
 fn map_type_name(name: &str) -> Option<Type> {
+    if let Some(tuple_ty) = parse_tuple_type_name(name) {
+        return Some(tuple_ty);
+    }
+    if let Some(fn_ty) = parse_function_type_name(name) {
+        return Some(fn_ty);
+    }
     match name {
         "i1" => Some(Type::Int { signed: true, bits: 1 }),
         "i8" => Some(Type::Int { signed: true, bits: 8 }),
@@ -523,8 +641,67 @@ fn map_type_name(name: &str) -> Option<Type> {
         "str" => Some(Type::Str),
         "bool" => Some(Type::Bool),
         "char" => Some(Type::Char),
+        "unit" | "void" => Some(Type::Unit),
+        "null" => Some(Type::Null),
         _ => None,
     }
+}
+
+fn parse_tuple_type_name(name: &str) -> Option<Type> {
+    if !(name.starts_with('(') && name.ends_with(')')) {
+        return None;
+    }
+    let inner = &name[1..name.len() - 1];
+    if inner.trim().is_empty() {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    for (idx, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(inner[start..idx].trim().to_string());
+                start = idx + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(inner[start..].trim().to_string());
+    if parts.len() < 2 {
+        return None;
+    }
+    let mut tys = Vec::with_capacity(parts.len());
+    for part in parts {
+        tys.push(map_type_name(&part)?);
+    }
+    Some(Type::Tuple(tys))
+}
+
+fn parse_function_type_name(name: &str) -> Option<Type> {
+    let fn_prefix = "fn(";
+    if !name.starts_with(fn_prefix) {
+        return None;
+    }
+    let close_paren = name.find(')')?;
+    let params_src = &name[fn_prefix.len()..close_paren];
+    let arrow_src = name.get(close_paren + 1..)?.trim_start();
+    let return_src = arrow_src.strip_prefix("->")?.trim();
+
+    let mut params = Vec::new();
+    if !params_src.trim().is_empty() {
+        for piece in params_src.split(',') {
+            let ty = map_type_name(piece.trim())?;
+            params.push(ty);
+        }
+    }
+    let ret = map_type_name(return_src)?;
+    Some(Type::Function {
+        params,
+        ret: Box::new(ret),
+    })
 }
 
 #[cfg(test)]
@@ -745,5 +922,15 @@ mod tests {
             panic!("expected second let");
         };
         assert!(matches!(hir.exprs.get(*value), Some(HirExpr::IncDec { .. })));
+    }
+
+    #[test]
+    fn lowers_function_decl_and_return() {
+        let src = "fn add(a: i32, b: i32) -> i32 { return a + b }";
+        let lex_output = lex(FileId::from_u32(15), src);
+        let (ast, _) = parse(FileId::from_u32(15), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(hir.stmts.first(), Some(HirStmt::FnDecl { .. })));
     }
 }

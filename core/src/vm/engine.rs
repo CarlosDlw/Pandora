@@ -16,24 +16,44 @@ use super::{
     value::Value,
 };
 
+#[derive(Debug, Clone)]
+struct CallFrame {
+    chunk: Chunk,
+    ip: usize,
+    env: HashMap<SymbolId, Value>,
+    scope_frames: Vec<Vec<SymbolId>>,
+}
+
 pub struct Vm<'a> {
-    chunk: &'a Chunk,
+    chunk: Chunk,
     ip: usize,
     stack: Vec<Value>,
     env: HashMap<SymbolId, Value>,
     scope_frames: Vec<Vec<SymbolId>>,
     symbols: &'a SymbolTable,
+    call_stack: Vec<CallFrame>,
 }
 
 impl<'a> Vm<'a> {
     pub fn new(chunk: &'a Chunk, symbols: &'a SymbolTable, initial_env: HashMap<SymbolId, Value>) -> Self {
+        let mut env = initial_env;
+        for idx in 0..u32::MAX {
+            let id = SymbolId(idx);
+            let Some(symbol) = symbols.symbol(id) else {
+                break;
+            };
+            if symbol.origin == SymbolOrigin::Builtin {
+                env.entry(id).or_insert(Value::Builtin(id));
+            }
+        }
         Self {
-            chunk,
+            chunk: chunk.clone(),
             ip: 0,
             stack: Vec::new(),
-            env: initial_env,
+            env,
             scope_frames: vec![Vec::new()],
             symbols,
+            call_stack: Vec::new(),
         }
     }
 
@@ -41,7 +61,17 @@ impl<'a> Vm<'a> {
     pub fn run(&mut self) -> Result<(), Diagnostics> {
         let mut diagnostics = Diagnostics::new();
 
-        while self.ip < self.chunk.code.len() {
+        loop {
+            if self.ip >= self.chunk.code.len() {
+                match self.return_from_call_frame() {
+                    Ok(true) => continue,
+                    Ok(false) => break,
+                    Err(d) => {
+                        diagnostics.push(d);
+                        return Err(diagnostics);
+                    }
+                }
+            }
             let op = self.chunk.code[self.ip].clone();
             let span = self.chunk.spans[self.ip];
             self.ip += 1;
@@ -51,9 +81,6 @@ impl<'a> Vm<'a> {
                 return Err(diagnostics);
             }
 
-            if matches!(op, Op::Return) {
-                break;
-            }
         }
 
         if !self.stack.is_empty() {
@@ -86,6 +113,35 @@ impl<'a> Vm<'a> {
             Op::ConstStr(s) => self.stack.push(Value::Str(s.clone())),
             Op::ConstFloat(f) => self.stack.push(Value::Float(*f)),
             Op::ConstChar(c) => self.stack.push(Value::Char(*c)),
+            Op::ConstUnit => self.stack.push(Value::Unit),
+            Op::ConstNull => self.stack.push(Value::Null),
+            Op::MakeTuple(count) => {
+                let count = *count as usize;
+                let mut items = Vec::with_capacity(count);
+                for _ in 0..count {
+                    items.push(self.pop_one(span)?);
+                }
+                items.reverse();
+                self.stack.push(Value::Tuple(items));
+            }
+            Op::TupleGet(index) => {
+                let tuple = self.pop_one(span)?;
+                match tuple {
+                    Value::Tuple(items) => {
+                        let value = items.get(*index).cloned().ok_or_else(|| {
+                            Diagnostic::new("tuple index out of range", span, Severity::Error)
+                        })?;
+                        self.stack.push(value);
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("tuple access on non-tuple value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                }
+            }
 
             Op::Load(sym) => {
                 let v = self
@@ -108,6 +164,16 @@ impl<'a> Vm<'a> {
                 if let Some(frame) = self.scope_frames.last_mut() {
                     frame.push(*sym);
                 }
+            }
+            Op::MakeClosure(sym) => {
+                let function = self.chunk.functions.get(sym).cloned().ok_or_else(|| {
+                    Diagnostic::new("function body not found", span, Severity::Error)
+                })?;
+                self.stack.push(Value::Function {
+                    function: Box::new(function),
+                    captured: self.env.clone(),
+                    self_symbol: Some(*sym),
+                });
             }
 
             Op::Assign(sym) => {
@@ -171,8 +237,8 @@ impl<'a> Vm<'a> {
             Op::Div => self.apply_div(span)?,
             Op::Mod => self.apply_mod(span)?,
             Op::Pow => self.apply_pow(span)?,
-            Op::Eq => self.apply_cmp(span, |ord| ord == std::cmp::Ordering::Equal)?,
-            Op::Ne => self.apply_cmp(span, |ord| ord != std::cmp::Ordering::Equal)?,
+            Op::Eq => self.apply_eq(span)?,
+            Op::Ne => self.apply_ne(span)?,
             Op::Lt => self.apply_cmp(span, |ord| ord == std::cmp::Ordering::Less)?,
             Op::Le => self.apply_cmp(span, |ord| ord != std::cmp::Ordering::Greater)?,
             Op::Gt => self.apply_cmp(span, |ord| ord == std::cmp::Ordering::Greater)?,
@@ -223,9 +289,98 @@ impl<'a> Vm<'a> {
                 let ret = dispatch_builtin(symbol.name.as_str(), &args, span)?;
                 self.stack.push(ret);
             }
+            Op::CallValue(argc) => {
+                let argc = *argc as usize;
+                let mut args = Vec::with_capacity(argc);
+                for _ in 0..argc {
+                    args.push(self.pop_one(span)?);
+                }
+                args.reverse();
+                let callee = self.pop_one(span)?;
+                match callee {
+                    Value::Builtin(sym) => {
+                        let symbol = self.symbols.symbol(sym).ok_or_else(|| {
+                            Diagnostic::new("unknown builtin symbol", span, Severity::Error)
+                        })?;
+                        let ret = dispatch_builtin(symbol.name.as_str(), &args, span)?;
+                        self.stack.push(ret);
+                    }
+                    Value::Function {
+                        function,
+                        mut captured,
+                        self_symbol,
+                    } => {
+                        for (sym, value) in &self.env {
+                            if captured.contains_key(sym) {
+                                continue;
+                            }
+                            let should_link = self
+                                .symbols
+                                .symbol(*sym)
+                                .map(|s| {
+                                    s.origin == SymbolOrigin::Builtin
+                                        || matches!(s.ty, crate::analyzer::Type::Function { .. })
+                                })
+                                .unwrap_or(false);
+                            if should_link {
+                                captured.insert(*sym, value.clone());
+                            }
+                        }
+                        if let Some(sym) = self_symbol {
+                            captured.insert(
+                                sym,
+                                Value::Function {
+                                    function: function.clone(),
+                                    captured: captured.clone(),
+                                    self_symbol: Some(sym),
+                                },
+                            );
+                        }
+                        let fn_chunk = *function;
+                        if fn_chunk.params.len() != argc {
+                            return Err(Diagnostic::new(
+                                format!(
+                                    "invalid argument count: expected {}, got {}",
+                                    fn_chunk.params.len(),
+                                    argc
+                                ),
+                                span,
+                                Severity::Error,
+                            ));
+                        }
+                        for (param, arg) in fn_chunk.params.iter().zip(args.into_iter()) {
+                            captured.insert(*param, arg);
+                        }
+                        let previous = CallFrame {
+                            chunk: self.chunk.clone(),
+                            ip: self.ip,
+                            env: std::mem::take(&mut self.env),
+                            scope_frames: std::mem::take(&mut self.scope_frames),
+                        };
+                        self.call_stack.push(previous);
+                        self.chunk = fn_chunk.chunk;
+                        self.ip = 0;
+                        self.env = captured;
+                        self.scope_frames = vec![Vec::new()];
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("attempted call on non-function value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                }
+            }
 
             Op::Pop => {
                 let _ = self.pop_one(span)?;
+            }
+            Op::Dup => {
+                let value = self.stack.last().cloned().ok_or_else(|| {
+                    Diagnostic::new("stack underflow (dup)", span, Severity::Error)
+                })?;
+                self.stack.push(value);
             }
 
             Op::EnterScope => {
@@ -246,9 +401,25 @@ impl<'a> Vm<'a> {
                 }
             }
 
-            Op::Return => {}
+            Op::Return => {
+                self.return_from_call_frame()?;
+            }
         }
         Ok(())
+    }
+
+    fn return_from_call_frame(&mut self) -> Result<bool, Diagnostic> {
+        if let Some(frame) = self.call_stack.pop() {
+            let ret = self.stack.pop().unwrap_or(Value::Unit);
+            self.chunk = frame.chunk;
+            self.ip = frame.ip;
+            self.env = frame.env;
+            self.scope_frames = frame.scope_frames;
+            self.stack.push(ret);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn apply_neg(&mut self, span: Span) -> Result<(), Diagnostic> {
@@ -477,6 +648,20 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
+    fn apply_eq(&mut self, span: Span) -> Result<(), Diagnostic> {
+        let rhs = self.pop_one(span)?;
+        let lhs = self.pop_one(span)?;
+        self.stack.push(Value::Bool(lhs == rhs));
+        Ok(())
+    }
+
+    fn apply_ne(&mut self, span: Span) -> Result<(), Diagnostic> {
+        let rhs = self.pop_one(span)?;
+        let lhs = self.pop_one(span)?;
+        self.stack.push(Value::Bool(lhs != rhs));
+        Ok(())
+    }
+
     fn apply_logical(
         &mut self,
         span: Span,
@@ -618,6 +803,10 @@ fn builtin_type_name(v: &Value) -> &'static str {
         Value::Float(_) => "float",
         Value::Char(_) => "char",
         Value::Unit => "unit",
+        Value::Null => "null",
+        Value::Builtin(_) => "function",
+        Value::Function { .. } => "function",
+        Value::Tuple(_) => "tuple",
     }
 }
 
@@ -630,6 +819,9 @@ fn is_truthy(v: &Value) -> bool {
         Value::Str(s) => !s.is_empty(),
         Value::Char(c) => *c != '\0',
         Value::Unit => false,
+        Value::Null => false,
+        Value::Builtin(_) | Value::Function { .. } => true,
+        Value::Tuple(items) => !items.is_empty(),
     }
 }
 
@@ -883,5 +1075,26 @@ mod tests {
         let chunk = b.finish();
         let symbols = SymbolTable::new();
         execute(&chunk, &symbols).expect("concat should execute");
+    }
+
+    #[test]
+    fn executes_tuple_build_access_and_eq() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::ConstI128(2), s);
+        b.emit(Op::MakeTuple(2), s);
+        b.emit(Op::Dup, s);
+        b.emit(Op::TupleGet(1), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::ConstI128(2), s);
+        b.emit(Op::MakeTuple(2), s);
+        b.emit(Op::Eq, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("tuple ops should execute");
     }
 }

@@ -1,0 +1,4 @@
+t: (i32, str) = (10, "ok")
+print(t.0, t[1])
+print(t == (10, "ok"))
+print(t != (9, "ok"))

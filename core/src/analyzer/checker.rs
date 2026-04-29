@@ -22,6 +22,7 @@ pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnost
         diagnostics: Diagnostics::new(),
         model: SemanticModel::default(),
         loop_depth: 0,
+        fn_return_stack: Vec::new(),
     };
     checker.check_program();
     (checker.model, checker.diagnostics)
@@ -33,6 +34,7 @@ struct Checker<'a> {
     diagnostics: Diagnostics,
     model: SemanticModel,
     loop_depth: usize,
+    fn_return_stack: Vec<AnalyzerType>,
 }
 
 impl<'a> Checker<'a> {
@@ -72,6 +74,70 @@ impl<'a> Checker<'a> {
                     );
                 }
                 final_ty
+            }
+            HirStmt::FnDecl {
+                params,
+                return_ty,
+                body,
+                span,
+                ..
+            } => {
+                self.fn_return_stack.push(return_ty.clone());
+                for stmt in body {
+                    let _ = self.check_stmt(stmt);
+                }
+                let _ = self.fn_return_stack.pop();
+                if *return_ty != AnalyzerType::Unit && !all_paths_return(body) {
+                    self.push_error("function with non-unit return must return on all paths", *span);
+                }
+                AnalyzerType::Function {
+                    params: params
+                        .iter()
+                        .map(|id| {
+                            self.symbols
+                                .symbol(*id)
+                                .map(|s| s.ty.clone())
+                                .unwrap_or(AnalyzerType::Unknown)
+                        })
+                        .collect(),
+                    ret: Box::new(return_ty.clone()),
+                }
+            }
+            HirStmt::TupleDestructure { names, ty, value, span } => {
+                let value_ty = self.check_expr(*value, *span);
+                let tuple_items = match value_ty {
+                    AnalyzerType::Tuple(items) => items,
+                    AnalyzerType::Unknown => Vec::new(),
+                    other => {
+                        self.push_error(
+                            format!("tuple destructuring requires tuple value, got {other:?}"),
+                            *span,
+                        );
+                        Vec::new()
+                    }
+                };
+                if !tuple_items.is_empty() && tuple_items.len() != names.len() {
+                    self.push_error(
+                        format!(
+                            "tuple destructuring arity mismatch: pattern has {}, value has {}",
+                            names.len(),
+                            tuple_items.len()
+                        ),
+                        *span,
+                    );
+                }
+                if let Some(annotated) = ty {
+                    if !is_assignable(annotated, &AnalyzerType::Tuple(tuple_items.clone())) {
+                        self.push_error("tuple destructuring type annotation mismatch", *span);
+                    }
+                }
+                for (idx, symbol_id) in names.iter().enumerate() {
+                    let item_ty = tuple_items.get(idx).cloned().unwrap_or(AnalyzerType::Unknown);
+                    if let Some(sym) = self.symbols.symbol_mut(*symbol_id) {
+                        sym.ty = item_ty;
+                    }
+                }
+                AnalyzerType::Unknown
             }
             HirStmt::Expr { expr, span } => self.check_expr(*expr, *span),
             HirStmt::Assign {
@@ -185,6 +251,30 @@ impl<'a> Checker<'a> {
                 }
                 AnalyzerType::Unknown
             }
+            HirStmt::Return { value, span } => {
+                let expected_return = self.fn_return_stack.last().cloned();
+                let Some(expected_return) = expected_return else {
+                    self.push_error("return used outside of function", *span);
+                    return AnalyzerType::Unknown;
+                };
+                match value {
+                    Some(expr) => {
+                        let actual = self.check_expr(*expr, *span);
+                        if !is_assignable(&expected_return, &actual) {
+                            self.push_error(
+                                format!("return type mismatch: expected {expected_return:?}, got {actual:?}"),
+                                *span,
+                            );
+                        }
+                    }
+                    None => {
+                        if expected_return != AnalyzerType::Unit {
+                            self.push_error("return without value requires unit return type", *span);
+                        }
+                    }
+                }
+                expected_return
+            }
             HirStmt::Invalid { span } => {
                 self.push_error("invalid statement", *span);
                 AnalyzerType::Unknown
@@ -210,6 +300,7 @@ impl<'a> Checker<'a> {
             Some(HirExpr::Int(raw)) => self.check_int_literal(raw, expected, span),
             Some(HirExpr::Float(raw)) => self.check_float_literal(raw, expected, span),
             Some(HirExpr::Bool(_)) => AnalyzerType::Bool,
+            Some(HirExpr::Null) => AnalyzerType::Null,
             Some(HirExpr::Str(_)) => AnalyzerType::Str,
             Some(HirExpr::Char(_)) => AnalyzerType::Char,
             Some(HirExpr::Var(symbol_id)) => self
@@ -244,12 +335,38 @@ impl<'a> Checker<'a> {
                 self.check_binary(*op, left_ty, right_ty, span)
             }
             Some(HirExpr::Call { callee, args }) => {
-                let callee_ty = self
-                    .symbols
-                    .symbol(*callee)
-                    .map(|s| s.ty.clone())
-                    .unwrap_or(AnalyzerType::Unknown);
+                let callee_ty = self.check_expr(*callee, span);
                 self.check_call(callee_ty, args, span)
+            }
+            Some(HirExpr::Tuple(items)) => {
+                let item_tys = items
+                    .iter()
+                    .map(|item| self.check_expr(*item, span))
+                    .collect::<Vec<_>>();
+                AnalyzerType::Tuple(item_tys)
+            }
+            Some(HirExpr::TupleAccess { tuple, index }) => {
+                let tuple_ty = self.check_expr(*tuple, span);
+                match tuple_ty {
+                    AnalyzerType::Tuple(items) => match items.get(*index) {
+                        Some(item_ty) => item_ty.clone(),
+                        None => {
+                            self.push_error(
+                                format!("tuple index {} out of range (len={})", index, items.len()),
+                                span,
+                            );
+                            AnalyzerType::Unknown
+                        }
+                    },
+                    AnalyzerType::Unknown => AnalyzerType::Unknown,
+                    other => {
+                        self.push_error(
+                            format!("tuple access requires tuple value, got {other:?}"),
+                            span,
+                        );
+                        AnalyzerType::Unknown
+                    }
+                }
             }
             Some(HirExpr::IncDec {
                 symbol,
@@ -612,7 +729,9 @@ fn float_fits(value: f64, bits: u16) -> bool {
 }
 
 fn is_assignable(expected: &AnalyzerType, actual: &AnalyzerType) -> bool {
-    expected == actual || matches!(expected, AnalyzerType::Unknown | AnalyzerType::Any) || matches!(actual, AnalyzerType::Unknown)
+    expected == actual
+        || matches!(expected, AnalyzerType::Unknown | AnalyzerType::Any)
+        || matches!(actual, AnalyzerType::Unknown | AnalyzerType::Null)
 }
 
 fn is_truthy_falsy_compatible(ty: &AnalyzerType) -> bool {
@@ -628,6 +747,22 @@ fn is_truthy_falsy_compatible(ty: &AnalyzerType) -> bool {
 
 fn is_numeric_type(ty: &AnalyzerType) -> bool {
     matches!(ty, AnalyzerType::Int { .. } | AnalyzerType::Float { .. })
+}
+
+fn all_paths_return(stmts: &[HirStmt]) -> bool {
+    let Some(last) = stmts.last() else {
+        return false;
+    };
+    match last {
+        HirStmt::Return { .. } => true,
+        HirStmt::Block { stmts, .. } => all_paths_return(stmts),
+        HirStmt::If {
+            then_branch,
+            else_branch: Some(else_branch),
+            ..
+        } => all_paths_return(then_branch) && all_paths_return(else_branch),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -909,5 +1044,97 @@ mod tests {
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
         assert!(diagnostics.iter().any(|d| d.message.contains("cannot assign to constant")));
+    }
+
+    #[test]
+    fn rejects_return_outside_function() {
+        let src = "return 1";
+        let lex_output = lex(FileId::from_u32(46), src);
+        let (ast, _) = parse(FileId::from_u32(46), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("return used outside of function")));
+    }
+
+    #[test]
+    fn rejects_non_unit_function_without_explicit_return() {
+        let src = "fn bad(a: i32) -> i32 { a + 1 }";
+        let lex_output = lex(FileId::from_u32(47), src);
+        let (ast, _) = parse(FileId::from_u32(47), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("must return on all paths")));
+    }
+
+    #[test]
+    fn accepts_function_type_annotation() {
+        let src = "fn add(a: i32, b: i32) -> i32 { return a + b }; f: fn(i32, i32) -> i32 = add";
+        let lex_output = lex(FileId::from_u32(48), src);
+        let (ast, _) = parse(FileId::from_u32(48), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_function_as_argument_and_return_value() {
+        let src = "fn inc(x: i32) -> i32 { return x + 1 }; fn apply(f: fn(i32) -> i32, x: i32) -> i32 { return f(x) }; r: i32 = apply(inc, 1)";
+        let lex_output = lex(FileId::from_u32(49), src);
+        let (ast, _) = parse(FileId::from_u32(49), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_unit_function_with_bare_return() {
+        let src = "fn noop() -> unit { return }; noop()";
+        let lex_output = lex(FileId::from_u32(50), src);
+        let (ast, _) = parse(FileId::from_u32(50), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn validates_tuple_destructure_arity() {
+        let src = "t: (i32, i32) = (1, 2); (a, b, c) := t";
+        let lex_output = lex(FileId::from_u32(51), src);
+        let (ast, _) = parse(FileId::from_u32(51), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("tuple destructuring arity mismatch")));
+    }
+
+    #[test]
+    fn validates_tuple_index_range() {
+        let src = "t: (i32, i32) = (1, 2); x := t.2";
+        let lex_output = lex(FileId::from_u32(52), src);
+        let (ast, _) = parse(FileId::from_u32(52), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("tuple index 2 out of range")));
+    }
+
+    #[test]
+    fn allows_null_assignment_to_typed_binding() {
+        let src = "x: i32 = null; y: bool = null; z: (i32, i32) = null";
+        let lex_output = lex(FileId::from_u32(53), src);
+        let (ast, _) = parse(FileId::from_u32(53), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
     }
 }

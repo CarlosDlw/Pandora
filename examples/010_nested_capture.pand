@@ -1,0 +1,9 @@
+fn make_multiplier(base: i32) -> fn(i32) -> i32 {
+    fn inner(x: i32) -> i32 {
+        return base * x
+    }
+    return inner
+}
+
+mul3: fn(i32) -> i32 = make_multiplier(3)
+print("mul3:", mul3(7))

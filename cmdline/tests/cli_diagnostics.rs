@@ -163,3 +163,55 @@ fn check_mode_reports_invalid_for_init() {
         .code(1)
         .stderr(contains("error: for init must use typed declaration"));
 }
+
+#[test]
+fn check_mode_reports_return_outside_function() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"return 1\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: return used outside of function"));
+}
+
+#[test]
+fn check_mode_reports_return_without_value_in_non_unit_fn() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"fn bad() -> i32 { return }\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: return without value requires unit return type"));
+}
+
+#[test]
+fn check_mode_reports_tuple_index_out_of_range() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"t: (i32, i32) = (1, 2)\nprint(t.2)\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: tuple index 2 out of range"));
+}
+
+#[test]
+fn check_mode_reports_tuple_destructure_arity_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"t: (i32, i32) = (1, 2);\n(a, b, c) := t\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: tuple destructuring arity mismatch"));
+}

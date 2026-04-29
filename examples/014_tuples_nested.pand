@@ -1,0 +1,4 @@
+nested: ((i32, i32), (str, str)) = ((1, 2), ("a", "b"))
+print(nested.0[1], nested[1][0])
+print(nested == ((1, 2), ("a", "b")))
+print(nested != ((1, 2), ("a", "c")))

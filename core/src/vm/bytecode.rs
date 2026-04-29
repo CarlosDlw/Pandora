@@ -37,6 +37,8 @@ pub enum Op {
     ConstStr(String),
     ConstFloat(f64),
     ConstChar(char),
+    ConstUnit,
+    ConstNull,
 
     Load(SymbolId),
     /// First store for `let` / `:=` / `: name = ...`.
@@ -73,7 +75,12 @@ pub enum Op {
     Jump(usize),
 
     Call(SymbolId, u8),
+    CallValue(u8),
+    MakeClosure(SymbolId),
+    MakeTuple(u8),
+    TupleGet(usize),
 
+    Dup,
     Pop,
     Return,
 }

@@ -1,0 +1,13 @@
+fn log_twice(v: i32) -> unit {
+    print("first", v)
+    print("second", v)
+    return
+}
+
+fn noop() -> unit {
+    return
+}
+
+log_twice(5)
+noop()
+print("done")

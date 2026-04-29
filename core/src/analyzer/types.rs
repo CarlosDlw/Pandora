@@ -6,10 +6,12 @@ pub enum Type {
     Str,
     Char,
     Unit,
+    Null,
     Unknown,
     Any,
     Function {
         params: Vec<Type>,
         ret: Box<Type>,
     },
+    Tuple(Vec<Type>),
 }

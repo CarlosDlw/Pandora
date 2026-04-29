@@ -1,0 +1,10 @@
+fn inc(x: i32) -> i32 {
+    return x + 1
+}
+
+fn apply(f: fn(i32) -> i32, x: i32) -> i32 {
+    return f(x)
+}
+
+op: fn(i32) -> i32 = inc
+print("apply:", apply(op, 41))

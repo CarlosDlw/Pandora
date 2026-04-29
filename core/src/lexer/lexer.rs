@@ -94,6 +94,9 @@ impl<'a> Lexer<'a> {
                     if self.peek() == Some('-') {
                         self.bump();
                         self.push_token(TokenKind::MinusMinus, start, self.cursor);
+                    } else if self.peek() == Some('>') {
+                        self.bump();
+                        self.push_token(TokenKind::Arrow, start, self.cursor);
                     } else if self.peek() == Some('=') {
                         self.bump();
                         self.push_token(TokenKind::MinusAssign, start, self.cursor);
@@ -224,6 +227,14 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     self.push_token(TokenKind::RightParen, start, self.cursor);
                 }
+                '[' => {
+                    self.bump();
+                    self.push_token(TokenKind::LeftBracket, start, self.cursor);
+                }
+                ']' => {
+                    self.bump();
+                    self.push_token(TokenKind::RightBracket, start, self.cursor);
+                }
                 '{' => {
                     self.bump();
                     self.push_token(TokenKind::LeftBrace, start, self.cursor);
@@ -235,6 +246,10 @@ impl<'a> Lexer<'a> {
                 ',' => {
                     self.bump();
                     self.push_token(TokenKind::Comma, start, self.cursor);
+                }
+                '.' => {
+                    self.bump();
+                    self.push_token(TokenKind::Dot, start, self.cursor);
                 }
                 ';' => {
                     self.bump();
@@ -290,12 +305,15 @@ impl<'a> Lexer<'a> {
         let text = &self.source[start..self.cursor];
         let kind = match text {
             "true" | "false" => TokenKind::Bool,
+            "null" => TokenKind::Null,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
             "while" => TokenKind::While,
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,
             "for" => TokenKind::For,
+            "fn" => TokenKind::Fn,
+            "return" => TokenKind::Return,
             _ if is_known_type(text) => TokenKind::TypeName,
             _ => TokenKind::Identifier,
         };
@@ -582,6 +600,9 @@ fn is_known_type(text: &str) -> bool {
             | "str"
             | "bool"
             | "char"
+            | "unit"
+            | "void"
+            | "null"
     )
 }
 
@@ -650,7 +671,8 @@ print(name, age)
     #[test]
     fn malformed_dot_prefix_reports_error() {
         let output = lex(FileId::from_u32(3), "x := .5");
-        assert!(output.diagnostics.has_errors());
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Dot));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "5"));
     }
 
@@ -756,6 +778,31 @@ print(name, age)
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusMinus));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusAssign));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusAssign));
+    }
+
+    #[test]
+    fn lexes_fn_return_and_arrow_tokens() {
+        let output = lex(FileId::from_u32(19), "fn add(a: i32) -> i32 { return a }");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Fn));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Return));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Arrow));
+    }
+
+    #[test]
+    fn lexes_tuple_access_tokens() {
+        let output = lex(FileId::from_u32(20), "t.0; t[1]");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Dot));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::LeftBracket));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::RightBracket));
+    }
+
+    #[test]
+    fn lexes_null_keyword() {
+        let output = lex(FileId::from_u32(21), "x: i32 = null");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Null));
     }
 
     #[test]

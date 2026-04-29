@@ -35,6 +35,74 @@ fn runs_example_001_simple() {
 }
 
 #[test]
+fn executes_recursive_function_calls() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        br#"fn fibbonacci(n: i32) -> i32 {
+    if n <= 1 {
+        return n
+    }
+    return fibbonacci(n - 1) + fibbonacci(n - 2)
+}
+print(fibbonacci(10))
+"#,
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .assert()
+        .success()
+        .stdout(contains("55"));
+}
+
+#[test]
+fn executes_mutual_recursive_function_calls() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        br#"fn is_even(n: i32) -> bool {
+    if n == 0 {
+        return true
+    }
+    return is_odd(n - 1)
+}
+fn is_odd(n: i32) -> bool {
+    if n == 0 {
+        return false
+    }
+    return is_even(n - 1)
+}
+print(is_even(10), is_odd(7))
+"#,
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .assert()
+        .success()
+        .stdout(contains("true true"));
+}
+
+#[test]
+fn allows_null_literal_assignment_to_typed_values() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"x: i32 = null; y: bool = null; print(x, y)\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .assert()
+        .success()
+        .stdout(contains("null null"));
+}
+
+#[test]
 fn rejects_both_modes_as_usage_error() {
     let file = NamedTempFile::new().expect("temp file");
     Command::cargo_bin("pandora")
@@ -138,5 +206,105 @@ fn runs_example_007_for_and_inc_dec() {
                 .and(contains("loop 0"))
                 .and(contains("loop 1"))
                 .and(contains("loop 2")),
+        );
+}
+
+#[test]
+fn runs_example_008_functions_and_return() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/008_functions_and_return.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("sum: 5")
+                .and(contains("adder: 15"))
+                .and(contains("log: 7")),
+        );
+}
+
+#[test]
+fn runs_example_009_function_values() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/009_function_values.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("apply: 42"));
+}
+
+#[test]
+fn runs_example_010_nested_capture() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/010_nested_capture.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("mul3: 21"));
+}
+
+#[test]
+fn runs_example_011_unit_return() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/011_unit_return.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("first 5")
+                .and(contains("second 5"))
+                .and(contains("done")),
+        );
+}
+
+#[test]
+fn runs_example_012_tuples_basics() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/012_tuples_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("10 ok")
+                .and(contains("true"))
+                .and(contains("true")),
+        );
+}
+
+#[test]
+fn runs_example_013_tuples_destructuring() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/013_tuples_destructuring.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("4 9 4 9"));
+}
+
+#[test]
+fn runs_example_014_tuples_nested() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/014_tuples_nested.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("2 a")
+                .and(contains("true"))
+                .and(contains("true")),
         );
 }

@@ -1,4 +1,9 @@
-//! Runtime values for the stack machine.
+use std::collections::HashMap;
+
+use crate::hir::symbols::SymbolId;
+use crate::vm::chunk::FunctionChunk;
+
+/// Runtime values for the stack machine.
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -11,6 +16,14 @@ pub enum Value {
     Float(f64),
     Char(char),
     Unit,
+    Null,
+    Builtin(SymbolId),
+    Function {
+        function: Box<FunctionChunk>,
+        captured: HashMap<SymbolId, Value>,
+        self_symbol: Option<SymbolId>,
+    },
+    Tuple(Vec<Value>),
 }
 
 impl Value {
@@ -23,6 +36,13 @@ impl Value {
             Value::Float(f) => f.to_string(),
             Value::Char(c) => c.to_string(),
             Value::Unit => String::new(),
+            Value::Null => "null".to_string(),
+            Value::Builtin(_) => "<builtin fn>".to_string(),
+            Value::Function { .. } => "<fn>".to_string(),
+            Value::Tuple(items) => {
+                let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
+                format!("({})", rendered.join(", "))
+            }
         }
     }
 }
