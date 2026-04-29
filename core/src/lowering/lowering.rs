@@ -548,6 +548,35 @@ impl<'a> Lowering<'a> {
                     *span,
                 )
             }
+            AstNode::PropagateExpr { expr, span } => {
+                let expr = self.lower_expr(*expr);
+                self.insert_hir_expr(HirExpr::Propagate { expr }, *span)
+            }
+            AstNode::TryCatchExpr {
+                try_expr,
+                err_name,
+                err_ty,
+                catch_block,
+                span,
+            } => {
+                let try_expr = self.lower_expr(*try_expr);
+                let err_ty = self.resolve_decl_type(Some(*err_ty));
+                let parent_scope = self.current_scope;
+                let catch_scope = self.symbols.create_scope(Some(parent_scope));
+                self.current_scope = catch_scope;
+                let err_symbol = self.bind_symbol(*err_name, err_ty, false);
+                let (catch_stmts, catch_value) = self.lower_catch_block_with_value(*catch_block, *span);
+                self.current_scope = parent_scope;
+                self.insert_hir_expr(
+                    HirExpr::TryCatch {
+                        try_expr,
+                        err_symbol,
+                        catch_stmts,
+                        catch_value,
+                    },
+                    *span,
+                )
+            }
             AstNode::TypeName { .. } => {
                 self.push_error("type name is not an expression", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
@@ -703,6 +732,38 @@ impl<'a> Lowering<'a> {
                 }]
             }
         }
+    }
+
+    fn lower_catch_block_with_value(&mut self, block_id: ArenaId, span: Span) -> (Vec<HirStmt>, ArenaId) {
+        let Some(AstNode::BlockStmt { statements, .. }) = self.ast.get(block_id) else {
+            self.push_error("catch requires a block", self.node_span(block_id));
+            return (Vec::new(), self.insert_hir_expr(HirExpr::Invalid, span));
+        };
+        let mut lowered = Vec::new();
+        let mut value = None;
+        for (idx, stmt_id) in statements.iter().enumerate() {
+            let is_last = idx + 1 == statements.len();
+            match self.ast.get(*stmt_id) {
+                Some(AstNode::ReturnStmt { values, span: ret_span }) if is_last => {
+                    if values.len() != 1 {
+                        self.push_error("catch return must contain exactly one value", *ret_span);
+                        value = Some(self.insert_hir_expr(HirExpr::Invalid, *ret_span));
+                    } else {
+                        value = Some(self.lower_expr(values[0]));
+                    }
+                }
+                Some(AstNode::ReturnStmt { span: ret_span, .. }) => {
+                    self.push_error("catch return must be the last statement in catch block", *ret_span);
+                    lowered.push(HirStmt::Invalid { span: *ret_span });
+                }
+                _ => lowered.push(self.lower_stmt(*stmt_id)),
+            }
+        }
+        let value = value.unwrap_or_else(|| {
+            self.push_error("catch block must end with `return <value>`", span);
+            self.insert_hir_expr(HirExpr::Invalid, span)
+        });
+        (lowered, value)
     }
 }
 
@@ -1120,5 +1181,26 @@ mod tests {
         let (hir, _symbols, diagnostics) = lower(&ast);
         assert!(!diagnostics.has_errors());
         assert!(matches!(hir.stmts.first(), Some(HirStmt::FnDecl { .. })));
+    }
+
+    #[test]
+    fn lowers_propagate_and_try_catch_exprs() {
+        let src = r#"
+            fn div(a: i32, b: i32) -> (i32, err) { return a / b, null }
+            fn f() -> (i32, err) { x := div(4, 2)?; return x, null }
+            y := try div(1, 0) catch(e: err) { print(e.message); return 0 }
+        "#;
+        let lex_output = lex(FileId::from_u32(60), src);
+        let (ast, _) = parse(FileId::from_u32(60), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        let mut has_propagate = false;
+        let mut has_try_catch = false;
+        for idx in 0..hir.exprs.len() {
+            let id = foundation::ids::ArenaId::from_u32(idx as u32);
+            has_propagate |= matches!(hir.exprs.get(id), Some(HirExpr::Propagate { .. }));
+            has_try_catch |= matches!(hir.exprs.get(id), Some(HirExpr::TryCatch { .. }));
+        }
+        assert!(has_propagate && has_try_catch);
     }
 }

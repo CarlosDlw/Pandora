@@ -73,6 +73,9 @@ fn main() -> ExitCode {
         let (ast, parser_diagnostics) =
             parse(FileId::from_u32(0), contents.len() as u32, output.tokens);
         diagnostics.extend(parser_diagnostics);
+        if cli.check && diagnostics.has_errors() {
+            return finish_with_diagnostics(&cli.file, &contents, diagnostics);
+        }
         if cli.ast {
             for root in &ast.roots {
                 if let Some(node) = ast.get(*root) {

@@ -513,6 +513,8 @@ impl<'a> Checker<'a> {
                             signed: true,
                             bits: 32,
                         },
+                        "origin" => AnalyzerType::Str,
+                        "cause" => AnalyzerType::Err,
                         _ => {
                             self.push_error(format!("unknown err field '{field}'"), span);
                             AnalyzerType::Unknown
@@ -691,6 +693,106 @@ impl<'a> Checker<'a> {
                         );
                         AnalyzerType::Unknown
                     }
+                }
+            }
+            Some(HirExpr::Propagate { expr }) => {
+                let inner_ty = self.check_expr(*expr, span);
+                let Some((ok_ty, err_ty)) = extract_fallible_tuple(&inner_ty) else {
+                    self.push_error(
+                        format!("operator '?' expects expression of type (T, err), got {inner_ty:?}"),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                };
+                if !is_error_like(&err_ty, &self.struct_fields) {
+                    self.push_error(
+                        format!("operator '?' expects tuple error position to be err-like, got {err_ty:?}"),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                }
+                let Some(current_ret) = self.fn_return_stack.last() else {
+                    self.push_error("operator '?' can only be used inside function body", span);
+                    return AnalyzerType::Unknown;
+                };
+                let Some((_, current_err_ty)) = extract_fallible_tuple(current_ret) else {
+                    self.push_error(
+                        format!(
+                            "operator '?' requires current function return type to be (T, err), got {current_ret:?}"
+                        ),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                };
+                if !is_error_like(&current_err_ty, &self.struct_fields) {
+                    self.push_error(
+                        format!(
+                            "operator '?' requires current function error type to be err-like, got {current_err_ty:?}"
+                        ),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                }
+                if !is_assignable(&current_err_ty, &err_ty) {
+                    self.push_error(
+                        format!(
+                            "cannot propagate error type {err_ty:?} from '?' into function error type {current_err_ty:?}"
+                        ),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                }
+                ok_ty
+            }
+            Some(HirExpr::TryCatch {
+                try_expr,
+                err_symbol,
+                catch_stmts,
+                catch_value,
+            }) => {
+                let try_ty = self.check_expr(*try_expr, span);
+                let Some((ok_ty, err_ty)) = extract_fallible_tuple(&try_ty) else {
+                    self.push_error(
+                        format!("try expression expects value of type (T, err), got {try_ty:?}"),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                };
+                if !is_error_like(&err_ty, &self.struct_fields) {
+                    self.push_error(
+                        format!("try expression expects tuple error position to be err-like, got {err_ty:?}"),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
+                }
+                let binding_ty = self
+                    .symbols
+                    .symbol(*err_symbol)
+                    .map(|s| s.ty.clone())
+                    .unwrap_or(AnalyzerType::Unknown);
+                if !is_error_like(&binding_ty, &self.struct_fields) && binding_ty != AnalyzerType::Unknown {
+                    self.push_error("catch binding type must be err-like", span);
+                }
+                if !is_assignable(&binding_ty, &err_ty) && binding_ty != AnalyzerType::Unknown {
+                    self.push_error(
+                        format!("catch binding type {binding_ty:?} does not match {err_ty:?}"),
+                        span,
+                    );
+                }
+                for stmt in catch_stmts {
+                    let _ = self.check_stmt(stmt);
+                }
+                let catch_ty = self.check_expr_expected(*catch_value, span, Some(&ok_ty));
+                if !is_assignable(&ok_ty, &catch_ty) {
+                    self.push_error(
+                        format!(
+                            "catch expression type mismatch: expected {ok_ty:?}, got {catch_ty:?}"
+                        ),
+                        span,
+                    );
+                    AnalyzerType::Unknown
+                } else {
+                    ok_ty
                 }
             }
             Some(HirExpr::IncDec {
@@ -1026,6 +1128,46 @@ impl<'a> Checker<'a> {
                 }
                 AnalyzerType::Unit
             }
+            "wrap" => {
+                if args.len() != 2 && args.len() != 3 {
+                    self.push_error(
+                        format!("wrap expects 2 or 3 arguments, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(first) = args.first() {
+                    let err_ty = self.check_expr(*first, span);
+                    if !is_error_like(&err_ty, &self.struct_fields) && err_ty != AnalyzerType::Unknown {
+                        self.push_error(
+                            format!("wrap first argument must be err-like, got {err_ty:?}"),
+                            span,
+                        );
+                    }
+                }
+                if let Some(second) = args.get(1) {
+                    let msg_ty = self.check_expr_expected(*second, span, Some(&AnalyzerType::Str));
+                    if !is_assignable(&AnalyzerType::Str, &msg_ty) {
+                        self.push_error(
+                            format!("wrap message must be str, got {msg_ty:?}"),
+                            span,
+                        );
+                    }
+                }
+                if let Some(third) = args.get(2) {
+                    let expected_code = AnalyzerType::Int {
+                        signed: true,
+                        bits: 32,
+                    };
+                    let code_ty = self.check_expr_expected(*third, span, Some(&expected_code));
+                    if !is_assignable(&expected_code, &code_ty) {
+                        self.push_error(
+                            format!("wrap code must be i32, got {code_ty:?}"),
+                            span,
+                        );
+                    }
+                }
+                AnalyzerType::Err
+            }
             _ => {
                 // fall through to generic behavior for other builtins
                 let callee_ty = self.resolve_named_type(name);
@@ -1180,6 +1322,40 @@ fn is_numeric_type(ty: &AnalyzerType) -> bool {
     matches!(ty, AnalyzerType::Int { .. } | AnalyzerType::Float { .. })
 }
 
+fn is_error_like(
+    ty: &AnalyzerType,
+    struct_fields: &HashMap<SymbolId, Vec<(String, AnalyzerType)>>,
+) -> bool {
+    match ty {
+        AnalyzerType::Err => true,
+        AnalyzerType::Struct(symbol_id) => {
+            let Some(fields) = struct_fields.get(symbol_id) else {
+                return false;
+            };
+            let has_message = fields
+                .iter()
+                .any(|(name, ty)| name == "message" && *ty == AnalyzerType::Str);
+            let has_code = fields.iter().any(|(name, ty)| {
+                name == "code"
+                    && *ty
+                        == AnalyzerType::Int {
+                            signed: true,
+                            bits: 32,
+                        }
+            });
+            has_message && has_code
+        }
+        _ => false,
+    }
+}
+
+fn extract_fallible_tuple(ty: &AnalyzerType) -> Option<(AnalyzerType, AnalyzerType)> {
+    match ty {
+        AnalyzerType::Tuple(items) if items.len() == 2 => Some((items[0].clone(), items[1].clone())),
+        _ => None,
+    }
+}
+
 fn all_paths_return(stmts: &[HirStmt]) -> bool {
     let Some(last) = stmts.last() else {
         return false;
@@ -1289,6 +1465,34 @@ mod tests {
         let src = "c: char = 'x'";
         let lex_output = lex(FileId::from_u32(26), src);
         let (ast, _) = parse(FileId::from_u32(26), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn question_requires_fallible_function_return() {
+        let src = "fn div(a: i32, b: i32) -> (i32, err) { return a / b, null }\nfn bad() -> i32 { return div(1, 1)? }";
+        let lex_output = lex(FileId::from_u32(61), src);
+        let (ast, _) = parse(FileId::from_u32(61), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("operator '?' requires current function return type to be (T, err)")));
+    }
+
+    #[test]
+    fn supports_domain_error_type_in_try_catch() {
+        let src = r#"
+            struct PaymentError { message: str, code: i32, detail: str }
+            op_err: PaymentError = PaymentError { message: "x", code: 1, detail: "d" }
+            pair := (0, op_err)
+            v := try pair catch(e: PaymentError) { return 0 }
+        "#;
+        let lex_output = lex(FileId::from_u32(62), src);
+        let (ast, _) = parse(FileId::from_u32(62), src.len() as u32, lex_output.tokens);
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());

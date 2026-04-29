@@ -24,6 +24,14 @@ struct CallFrame {
     scope_frames: Vec<Vec<SymbolId>>,
 }
 
+#[derive(Debug, Clone)]
+struct TryContext {
+    call_depth: usize,
+    handler_ip: usize,
+    stack_len: usize,
+    scope_depth: usize,
+}
+
 pub struct Vm<'a> {
     chunk: Chunk,
     ip: usize,
@@ -32,6 +40,7 @@ pub struct Vm<'a> {
     scope_frames: Vec<Vec<SymbolId>>,
     symbols: &'a SymbolTable,
     call_stack: Vec<CallFrame>,
+    try_stack: Vec<TryContext>,
 }
 
 impl<'a> Vm<'a> {
@@ -54,6 +63,7 @@ impl<'a> Vm<'a> {
             scope_frames: vec![Vec::new()],
             symbols,
             call_stack: Vec::new(),
+            try_stack: Vec::new(),
         }
     }
 
@@ -77,6 +87,9 @@ impl<'a> Vm<'a> {
             self.ip += 1;
 
             if let Err(d) = self.step_op(&op, span) {
+                if self.recoverable_panic(&d) && self.recover_from_panic(&d) {
+                    continue;
+                }
                 diagnostics.push(d);
                 return Err(diagnostics);
             }
@@ -155,10 +168,17 @@ impl<'a> Vm<'a> {
             Op::StructGet(field) => {
                 let base = self.pop_one(span)?;
                 match base {
-                    Value::Err { message, code } => {
+                    Value::Err {
+                        message,
+                        code,
+                        origin,
+                        cause,
+                    } => {
                         let value = match field.as_str() {
                             "message" => Value::Str(message),
                             "code" => Value::Int128(i128::from(code)),
+                            "origin" => Value::Str(origin),
+                            "cause" => cause.map(|c| *c).unwrap_or(Value::Null),
                             _ => {
                                 return Err(Diagnostic::new(
                                     format!("unknown err field '{field}'"),
@@ -311,6 +331,21 @@ impl<'a> Vm<'a> {
                 }
                 self.ip = *target;
             }
+            Op::TryStart(handler) => {
+                self.try_stack.push(TryContext {
+                    call_depth: self.call_stack.len(),
+                    handler_ip: *handler,
+                    stack_len: self.stack.len(),
+                    scope_depth: self.scope_frames.len(),
+                });
+            }
+            Op::TryEnd => {
+                if let Some(last) = self.try_stack.last() {
+                    if last.call_depth == self.call_stack.len() {
+                        let _ = self.try_stack.pop();
+                    }
+                }
+            }
 
             Op::Call(sym, argc) => {
                 let argc = *argc as usize;
@@ -428,6 +463,22 @@ impl<'a> Vm<'a> {
                 })?;
                 self.stack.push(value);
             }
+            Op::Swap => {
+                if self.stack.len() < 2 {
+                    return Err(Diagnostic::new("stack underflow (swap)", span, Severity::Error));
+                }
+                let top = self.stack.len() - 1;
+                self.stack.swap(top, top - 1);
+            }
+            Op::WrapErr => {
+                let message = self.pop_one(span)?;
+                let err = self.pop_one(span)?;
+                let Value::Str(message) = message else {
+                    return Err(Diagnostic::new("WrapErr requires message string", span, Severity::Error));
+                };
+                let wrapped = wrap_err_value(err, message, None, "wrap".to_string(), span)?;
+                self.stack.push(wrapped);
+            }
 
             Op::EnterScope => {
                 self.scope_frames.push(Vec::new());
@@ -462,10 +513,52 @@ impl<'a> Vm<'a> {
             self.env = frame.env;
             self.scope_frames = frame.scope_frames;
             self.stack.push(ret);
+            self.try_stack
+                .retain(|ctx| ctx.call_depth <= self.call_stack.len());
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    fn recoverable_panic(&self, diagnostic: &Diagnostic) -> bool {
+        diagnostic.message.starts_with("panic:") && !self.try_stack.is_empty()
+    }
+
+    fn recover_from_panic(&mut self, diagnostic: &Diagnostic) -> bool {
+        let current_depth = self.call_stack.len();
+        let Some(index) = self
+            .try_stack
+            .iter()
+            .rposition(|ctx| ctx.call_depth <= current_depth)
+        else {
+            return false;
+        };
+        let ctx = self.try_stack[index].clone();
+        self.try_stack.truncate(index);
+
+        while self.call_stack.len() > ctx.call_depth {
+            let Some(frame) = self.call_stack.pop() else {
+                break;
+            };
+            self.chunk = frame.chunk;
+            self.ip = frame.ip;
+            self.env = frame.env;
+            self.scope_frames = frame.scope_frames;
+        }
+
+        self.stack.truncate(ctx.stack_len);
+        while self.scope_frames.len() > ctx.scope_depth {
+            let Some(frame) = self.scope_frames.pop() else {
+                break;
+            };
+            for sym in frame {
+                self.env.remove(&sym);
+            }
+        }
+        self.ip = ctx.handler_ip;
+        self.stack.push(err_value_from_panic(diagnostic));
+        true
     }
 
     fn apply_neg(&mut self, span: Span) -> Result<(), Diagnostic> {
@@ -855,7 +948,12 @@ fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Dia
             } else {
                 1
             };
-            Ok(Value::Err { message, code })
+            Ok(Value::Err {
+                message,
+                code,
+                origin: "error".to_string(),
+                cause: None,
+            })
         }
         "panic" => {
             if args.len() != 1 && args.len() != 2 {
@@ -886,11 +984,59 @@ fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Dia
                 Severity::Error,
             ))
         }
+        "wrap" => {
+            if args.len() != 2 && args.len() != 3 {
+                return Err(Diagnostic::new(
+                    format!("wrap expects 2 or 3 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let base_err = args[0].clone();
+            let message = match &args[1] {
+                Value::Str(s) => s.clone(),
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("wrap message must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let code = if let Some(code_value) = args.get(2) {
+                Some(coerce_i32_code(code_value, span, "wrap")?)
+            } else {
+                None
+            };
+            wrap_err_value(base_err, message, code, "wrap".to_string(), span)
+        }
         _ => Err(Diagnostic::new(
             format!("unknown builtin '{name}'"),
             span,
             Severity::Error,
         )),
+    }
+}
+
+fn err_value_from_panic(diagnostic: &Diagnostic) -> Value {
+    let msg = diagnostic.message.strip_prefix("panic: ").unwrap_or(&diagnostic.message);
+    if let Some((message, code_part)) = msg.rsplit_once(" (code=") {
+        if let Some(raw_code) = code_part.strip_suffix(')') {
+            if let Ok(code) = raw_code.parse::<i32>() {
+                return Value::Err {
+                    message: message.to_string(),
+                    code,
+                    origin: "panic".to_string(),
+                    cause: None,
+                };
+            }
+        }
+    }
+    Value::Err {
+        message: msg.to_string(),
+        code: 1,
+        origin: "panic".to_string(),
+        cause: None,
     }
 }
 
@@ -926,6 +1072,106 @@ fn is_truthy(v: &Value) -> bool {
         Value::Tuple(items) => !items.is_empty(),
         Value::Err { .. } => true,
         Value::StructInstance { .. } => true,
+    }
+}
+
+fn wrap_err_value(
+    base_err: Value,
+    message: String,
+    code_override: Option<i32>,
+    origin: String,
+    span: Span,
+) -> Result<Value, Diagnostic> {
+    match base_err {
+        Value::Err {
+            message: base_message,
+            code: base_code,
+            origin: base_origin,
+            cause: base_cause,
+        } => {
+            let is_propagation_wrap = message == "propagated by ?";
+            let final_message = if is_propagation_wrap {
+                base_message.clone()
+            } else {
+                message
+            };
+            let final_origin = if is_propagation_wrap {
+                "propagate".to_string()
+            } else {
+                origin
+            };
+            Ok(Value::Err {
+                message: final_message,
+                code: code_override.unwrap_or(base_code),
+                origin: final_origin,
+                cause: Some(Box::new(Value::Err {
+                    message: base_message,
+                    code: base_code,
+                    origin: base_origin,
+                    cause: base_cause,
+                })),
+            })
+        }
+        Value::StructInstance { type_name, fields } => {
+            let base_message = match fields.get("message") {
+                Some(Value::Str(s)) => s.clone(),
+                _ => {
+                    return Err(Diagnostic::new(
+                        format!("error-like struct `{type_name}` must have `message: str`"),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let base_code = match fields.get("code") {
+                Some(Value::Int128(n)) => i32::try_from(*n).map_err(|_| {
+                    Diagnostic::new(
+                        format!("error-like struct `{type_name}` has code outside i32 range"),
+                        span,
+                        Severity::Error,
+                    )
+                })?,
+                Some(Value::UInt128(n)) => i32::try_from(*n).map_err(|_| {
+                    Diagnostic::new(
+                        format!("error-like struct `{type_name}` has code outside i32 range"),
+                        span,
+                        Severity::Error,
+                    )
+                })?,
+                _ => {
+                    return Err(Diagnostic::new(
+                        format!("error-like struct `{type_name}` must have `code: i32`"),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let is_propagation_wrap = message == "propagated by ?";
+            let final_message = if is_propagation_wrap {
+                base_message
+            } else {
+                message
+            };
+            let final_origin = if is_propagation_wrap {
+                "propagate".to_string()
+            } else {
+                origin
+            };
+            Ok(Value::Err {
+                message: final_message,
+                code: code_override.unwrap_or(base_code),
+                origin: final_origin,
+                cause: Some(Box::new(Value::StructInstance { type_name, fields })),
+            })
+        }
+        other => Err(Diagnostic::new(
+            format!(
+                "wrap expects err-like as first argument, got {}",
+                builtin_type_name(&other)
+            ),
+            span,
+            Severity::Error,
+        )),
     }
 }
 
@@ -1276,5 +1522,80 @@ mod tests {
         );
         let err = execute(&b.finish(), &symbols).expect_err("panic must abort");
         assert!(err.iter().any(|d| d.message.contains("panic: fatal")));
+    }
+
+    #[test]
+    fn try_context_converts_panic_into_err_value() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::TryStart(6), s);
+        b.emit(Op::Load(SymbolId(0)), s);
+        b.emit(Op::ConstStr("fatal".to_string()), s);
+        b.emit(Op::CallValue(1), s);
+        b.emit(Op::TryEnd, s);
+        b.emit(Op::Jump(10), s);
+        b.emit(Op::ConstNull, s);
+        b.emit(Op::Swap, s);
+        b.emit(Op::MakeTuple(2), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        symbols.define(
+            root,
+            "panic".to_string(),
+            crate::analyzer::Type::Function {
+                params: vec![crate::analyzer::Type::Any],
+                ret: Box::new(crate::analyzer::Type::Unit),
+            },
+            crate::hir::SymbolOrigin::Builtin,
+            true,
+        );
+        execute(&b.finish(), &symbols).expect("panic should be converted inside try");
+    }
+
+    #[test]
+    fn builtin_wrap_creates_error_cause_chain() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::Load(SymbolId(0)), s); // error
+        b.emit(Op::ConstStr("base".to_string()), s);
+        b.emit(Op::CallValue(1), s);
+        b.emit(Op::Load(SymbolId(1)), s); // wrap
+        b.emit(Op::Swap, s);
+        b.emit(Op::ConstStr("ctx".to_string()), s);
+        b.emit(Op::CallValue(2), s);
+        b.emit(Op::Dup, s);
+        b.emit(Op::StructGet("origin".to_string()), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::StructGet("cause".to_string()), s);
+        b.emit(Op::StructGet("message".to_string()), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        symbols.define(
+            root,
+            "error".to_string(),
+            crate::analyzer::Type::Function {
+                params: vec![crate::analyzer::Type::Any],
+                ret: Box::new(crate::analyzer::Type::Err),
+            },
+            crate::hir::SymbolOrigin::Builtin,
+            true,
+        );
+        symbols.define(
+            root,
+            "wrap".to_string(),
+            crate::analyzer::Type::Function {
+                params: vec![crate::analyzer::Type::Any],
+                ret: Box::new(crate::analyzer::Type::Err),
+            },
+            crate::hir::SymbolOrigin::Builtin,
+            true,
+        );
+        execute(&b.finish(), &symbols).expect("wrap should produce chained err");
     }
 }

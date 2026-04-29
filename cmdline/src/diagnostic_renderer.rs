@@ -129,6 +129,24 @@ fn suggest_fix(message: &str) -> Option<&'static str> {
         Some("ensure the divisor is never zero before this operation.")
     } else if message.contains("invalid numeric literal") || message.contains("invalid integer literal") {
         Some("check base prefixes (0b/0o/0x), place '_' only between digits, and use valid exponent form like 1.2e-3.")
+    } else if message.contains("operator '?' expects expression of type (T, err)") {
+        Some("apply '?' only to expressions that return a tuple like (value, err).")
+    } else if message.contains("operator '?' expects tuple error position to be err") {
+        Some("ensure the second tuple item is `err`, for example: (T, err).")
+    } else if message.contains("operator '?' requires current function return type to be (T, err)") {
+        Some("change the function return type to `(T, err)` when using '?'.")
+    } else if message.contains("try expression expects value of type (T, err)") {
+        Some("use `try` only with expressions that return `(value, err)`.")
+    } else if message.contains("try expression expects tuple error position to be err") {
+        Some("ensure the try expression returns `(T, err)` with `err` in the second position.")
+    } else if message.contains("catch binding type must be err-like") {
+        Some("declare catch binding as `catch(e: err)` or an error-like type with message/code.")
+    } else if message.contains("catch block must end with `return <value>`") {
+        Some("finish catch blocks with `return value` so try/catch can produce an expression value.")
+    } else if message.contains("catch expression type mismatch") {
+        Some("return a value in catch with the same type as the success branch.")
+    } else if message.contains("return type mismatch") {
+        Some("make returned values match the declared function return type.")
     } else {
         None
     }

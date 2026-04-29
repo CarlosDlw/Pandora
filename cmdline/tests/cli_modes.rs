@@ -369,7 +369,8 @@ fn runs_example_019_err_error_usage() {
         .assert()
         .success()
         .stdout(
-            contains("err(message=\"test\", code=1)")
+            contains("err(message=\"test\", code=1")
+                .and(contains("origin=\"error\""))
                 .and(contains("test"))
                 .and(contains("1"))
                 .and(contains("division by zero"))
@@ -387,4 +388,60 @@ fn runs_example_020_panic_runtime_error() {
         .assert()
         .code(1)
         .stderr(contains("panic: unrecoverable").and(contains("code=42")));
+}
+
+#[test]
+fn runs_example_021_try_catch_recover() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/021_try_catch_recover.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("caught panic panic from risky 7")
+                .and(contains("caught err regular error 9"))
+                .and(contains("42 99")),
+        );
+}
+
+#[test]
+fn runs_example_022_question_propagation() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/022_question_propagation.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("propagated division by zero 10"));
+}
+
+#[test]
+fn runs_example_023_domain_error_struct() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/023_domain_error_struct.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("payment failed 402 limit exceeded").and(contains("0")));
+}
+
+#[test]
+fn runs_example_024_error_context_chain() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/024_error_context_chain.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("division by zero")
+                .and(contains("propagate"))
+                .and(contains("division by zero")),
+        );
 }

@@ -85,6 +85,13 @@ pub enum HirExpr {
     },
     Tuple(Vec<HirId>),
     TupleAccess { tuple: HirId, index: usize },
+    Propagate { expr: HirId },
+    TryCatch {
+        try_expr: HirId,
+        err_symbol: SymbolId,
+        catch_stmts: Vec<HirStmt>,
+        catch_value: HirId,
+    },
     Invalid,
 }
 

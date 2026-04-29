@@ -1,0 +1,23 @@
+# exemplo de como podemos tratar erros
+
+fn divide(a: i32, b: i32) -> (i32, err) {
+    if b == 0 {
+        return null, error("division by zero")
+    }
+
+    return a / b, null
+}
+
+# com propagação '?'
+# retorna imediatamente se err != null
+fn calc() -> (i32, err) {
+    x := divide(10, 2)?
+    y := divide(10, 0)? # se o erro for propagado, a função termina aqui
+    return x + y, null
+}
+
+# catch com binding
+result := try divide(10, 0) catch(e: err) {
+    print(e.message)
+    return 0
+}

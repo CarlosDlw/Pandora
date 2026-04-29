@@ -308,7 +308,7 @@ impl Parser {
         self.invalid_node(span)
     }
 
-    fn parse_block_stmt(&mut self) -> ArenaId {
+    pub(super) fn parse_block_stmt(&mut self) -> ArenaId {
         let open = self.current_span_or_eof();
         self.bump();
 
@@ -422,7 +422,7 @@ impl Parser {
         self.parse_type_ref()
     }
 
-    fn parse_type_ref(&mut self) -> ArenaId {
+    pub(super) fn parse_type_ref(&mut self) -> ArenaId {
         if self.current().is_some_and(|t| t.kind == TokenKind::Fn) {
             return self.parse_fn_type_ref();
         }
@@ -1536,5 +1536,31 @@ mod tests {
         assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::StructDecl { .. }))));
         assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::TraitDecl { .. }))));
         assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::ImplBlock { .. }))));
+    }
+
+    #[test]
+    fn parses_propagate_and_try_catch_expressions() {
+        let source = r#"
+            fn div(a: i32, b: i32) -> (i32, err) { return a / b, null }
+            fn f() -> (i32, err) { x := div(4, 2)?; return x, null }
+            y := try div(1, 0) catch(e: err) { print(e.message); return 0 }
+        "#;
+        let lex_out = lex(FileId::from_u32(59), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(59), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let Some(AstNode::FnDecl { body, .. }) = ast.get(ast.roots[1]) else {
+            panic!("expected second fn");
+        };
+        let Some(AstNode::BlockStmt { statements, .. }) = ast.get(*body) else {
+            panic!("expected block");
+        };
+        let Some(AstNode::LetDecl { value, .. }) = ast.get(statements[0]) else {
+            panic!("expected let");
+        };
+        assert!(matches!(ast.get(*value), Some(AstNode::PropagateExpr { .. })));
+        let Some(AstNode::LetDecl { value, .. }) = ast.get(ast.roots[2]) else {
+            panic!("expected let");
+        };
+        assert!(matches!(ast.get(*value), Some(AstNode::TryCatchExpr { .. })));
     }
 }

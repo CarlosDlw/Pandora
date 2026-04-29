@@ -27,6 +27,8 @@ pub enum Value {
     Err {
         message: String,
         code: i32,
+        origin: String,
+        cause: Option<Box<Value>>,
     },
     StructInstance {
         type_name: String,
@@ -51,7 +53,21 @@ impl Value {
                 let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
                 format!("({})", rendered.join(", "))
             }
-            Value::Err { message, code } => format!("err(message=\"{}\", code={})", message, code),
+            Value::Err {
+                message,
+                code,
+                origin,
+                cause,
+            } => {
+                let mut rendered = format!(
+                    "err(message=\"{}\", code={}, origin=\"{}\")",
+                    message, code, origin
+                );
+                if let Some(cause) = cause {
+                    rendered.push_str(&format!(" <- {}", cause.display_for_print()));
+                }
+                rendered
+            }
             Value::StructInstance { type_name, .. } => format!("<{}>", type_name),
         }
     }

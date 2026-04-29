@@ -612,6 +612,93 @@ fn emit_expr(
                 }
             }
         }
+        HirExpr::Propagate { expr } => {
+            emit_expr(hir, model, *expr, b, diagnostics, method_table);
+            b.emit(Op::Dup, span);
+            b.emit(Op::TupleGet(1), span);
+            b.emit(Op::ConstNull, span);
+            b.emit(Op::Ne, span);
+            let continue_at = b.emit_placeholder_jump_if_false(span);
+            b.emit(Op::TupleGet(1), span);
+            b.emit(Op::ConstStr("propagated by ?".to_string()), span);
+            b.emit(Op::WrapErr, span);
+            b.emit(Op::ConstNull, span);
+            b.emit(Op::Swap, span);
+            b.emit(Op::MakeTuple(2), span);
+            b.emit(Op::Return, span);
+            let ok_target = b.len();
+            if !b.patch_jump_target(continue_at, ok_target) {
+                diagnostics.push(Diagnostic::new("failed to patch '?' continue jump", span, Severity::Error));
+            }
+            b.emit(Op::TupleGet(0), span);
+        }
+        HirExpr::TryCatch {
+            try_expr,
+            err_symbol,
+            catch_stmts,
+            catch_value,
+        } => {
+            let panic_handler_jump = b.emit_placeholder_try_start(span);
+            emit_expr(hir, model, *try_expr, b, diagnostics, method_table);
+            b.emit(Op::TryEnd, span);
+            let skip_panic_handler = b.emit_placeholder_jump(span);
+            let panic_handler_label = b.len();
+            b.emit(Op::ConstNull, span);
+            b.emit(Op::Swap, span);
+            b.emit(Op::MakeTuple(2), span);
+            if !b.patch_jump_target(panic_handler_jump, panic_handler_label) {
+                diagnostics.push(Diagnostic::new(
+                    "failed to patch try panic handler jump",
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let post_panic_label = b.len();
+            if !b.patch_jump_target(skip_panic_handler, post_panic_label) {
+                diagnostics.push(Diagnostic::new(
+                    "failed to patch try panic skip jump",
+                    span,
+                    Severity::Error,
+                ));
+            }
+
+            b.emit(Op::Dup, span);
+            b.emit(Op::TupleGet(1), span);
+            b.emit(Op::ConstNull, span);
+            b.emit(Op::Ne, span);
+            let success_jump = b.emit_placeholder_jump_if_false(span);
+            b.emit(Op::Dup, span);
+            b.emit(Op::TupleGet(1), span);
+            b.emit(Op::EnterScope, span);
+            b.emit(Op::Bind(*err_symbol), span);
+            b.emit(Op::Pop, span);
+            let mut catch_loop_stack = Vec::new();
+            let mut catch_scope_depth = 1usize;
+            for stmt in catch_stmts {
+                emit_stmt(
+                    hir,
+                    model,
+                    stmt,
+                    b,
+                    diagnostics,
+                    &mut catch_loop_stack,
+                    &mut catch_scope_depth,
+                    method_table,
+                );
+            }
+            emit_expr(hir, model, *catch_value, b, diagnostics, method_table);
+            b.emit(Op::ExitScope, span);
+            let end_jump = b.emit_placeholder_jump(span);
+            let success_label = b.len();
+            if !b.patch_jump_target(success_jump, success_label) {
+                diagnostics.push(Diagnostic::new("failed to patch try success jump", span, Severity::Error));
+            }
+            b.emit(Op::TupleGet(0), span);
+            let end_label = b.len();
+            if !b.patch_jump_target(end_jump, end_label) {
+                diagnostics.push(Diagnostic::new("failed to patch try end jump", span, Severity::Error));
+            }
+        }
         HirExpr::Invalid => {
             diagnostics.push(Diagnostic::new("invalid expression in bytecode", span, Severity::Error));
         }

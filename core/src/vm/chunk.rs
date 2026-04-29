@@ -60,6 +60,12 @@ impl ChunkBuilder {
         at
     }
 
+    pub fn emit_placeholder_try_start(&mut self, span: Span) -> usize {
+        let at = self.len();
+        self.emit(Op::TryStart(usize::MAX), span);
+        at
+    }
+
     pub fn patch_jump_target(&mut self, at: usize, target: usize) -> bool {
         if at >= self.code.len() {
             return false;
@@ -71,6 +77,10 @@ impl ChunkBuilder {
             }
             Op::Jump(_) => {
                 self.code[at] = Op::Jump(target);
+                true
+            }
+            Op::TryStart(_) => {
+                self.code[at] = Op::TryStart(target);
                 true
             }
             _ => false,

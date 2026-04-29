@@ -70,6 +70,15 @@ impl Parser {
                 });
                 continue;
             }
+            if self.current().is_some_and(|t| t.kind == TokenKind::Question)
+                && Precedence::Highest >= min_prec
+            {
+                let token = self.current().expect("checked above").clone();
+                self.bump();
+                let span = merge_pair(self.node_span(left), token.span);
+                left = self.insert_node(AstNode::PropagateExpr { expr: left, span });
+                continue;
+            }
 
             if let Some((op, prec, right_assoc)) = self.current_binary_op() {
                 if prec < min_prec {
@@ -183,6 +192,7 @@ impl Parser {
                 self.bump();
                 self.insert_node(AstNode::NullLiteral { span: token.span })
             }
+            TokenKind::Try => self.parse_try_catch_expr(),
             TokenKind::Minus => {
                 let op_span = token.span;
                 self.bump();
@@ -262,6 +272,56 @@ impl Parser {
                 self.invalid_node(token.span)
             }
         }
+    }
+
+    fn parse_try_catch_expr(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        let try_expr = self.parse_expression_bp(Precedence::Lowest);
+        if !self.consume_if(TokenKind::Catch) {
+            self.push_error("expected 'catch' after try expression", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        if !self.consume_if(TokenKind::LeftParen) {
+            self.push_error("expected '(' after 'catch'", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let err_name = match self.current() {
+            Some(token) if token.kind == TokenKind::Identifier => {
+                let token = token.clone();
+                self.bump();
+                self.insert_node(AstNode::Identifier {
+                    name: token.lexeme,
+                    span: token.span,
+                })
+            }
+            _ => {
+                self.push_error("expected catch binding name", self.current_span_or_eof());
+                return self.invalid_node(start);
+            }
+        };
+        if !self.consume_if(TokenKind::Colon) {
+            self.push_error("expected ':' in catch binding", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let err_ty = self.parse_type_ref();
+        if !self.consume_if(TokenKind::RightParen) {
+            self.push_error("expected ')' after catch binding", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        if !self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+            self.push_error("expected '{' before catch block", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let catch_block = self.parse_block_stmt();
+        let span = merge_pair(start, self.node_span(catch_block));
+        self.insert_node(AstNode::TryCatchExpr {
+            try_expr,
+            err_name,
+            err_ty,
+            catch_block,
+            span,
+        })
     }
 
     fn current_binary_op(&self) -> Option<(BinaryOp, Precedence, bool)> {

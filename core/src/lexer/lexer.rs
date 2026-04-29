@@ -267,6 +267,10 @@ impl<'a> Lexer<'a> {
                         self.push_token(TokenKind::Colon, start, self.cursor);
                     }
                 }
+                '?' => {
+                    self.bump();
+                    self.push_token(TokenKind::Question, start, self.cursor);
+                }
                 '=' => {
                     self.bump();
                     if self.peek() == Some('=') {
@@ -308,6 +312,8 @@ impl<'a> Lexer<'a> {
             "null" => TokenKind::Null,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
+            "try" => TokenKind::Try,
+            "catch" => TokenKind::Catch,
             "while" => TokenKind::While,
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,

@@ -1,0 +1,14 @@
+struct PaymentError { message: str, code: i32, detail: str }
+op_err: PaymentError = PaymentError {
+    message: "payment failed",
+    code: 402,
+    detail: "limit exceeded",
+}
+pair := (0, op_err)
+
+result := try pair catch(e: PaymentError) {
+    print(e.message, e.code, e.detail)
+    return 0
+}
+
+print(result)

@@ -1,0 +1,20 @@
+fn divide(a: i32, b: i32) -> (i32, err) {
+    if b == 0 {
+        return null, error("division by zero", 10)
+    }
+    return a / b, null
+}
+
+fn calc() -> (i32, err) {
+    x := divide(10, 0)?
+    return x, null
+}
+
+value, op_err := calc()
+if op_err != null {
+    print(op_err.message)
+    print(op_err.origin)
+    print(op_err.cause.message)
+} else {
+    print(value)
+}

@@ -1,0 +1,19 @@
+fn divide(a: i32, b: i32) -> (i32, err) {
+    if b == 0 {
+        return null, error("division by zero", 10)
+    }
+    return a / b, null
+}
+
+fn compute() -> (i32, err) {
+    x := divide(20, 2)?
+    y := divide(10, 0)?
+    return x + y, null
+}
+
+result, op_err := compute()
+if op_err != null {
+    print("propagated", op_err.message, op_err.code)
+} else {
+    print("ok", result)
+}

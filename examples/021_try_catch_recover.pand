@@ -1,0 +1,18 @@
+fn risky(flag: bool) -> (i32, err) {
+    if flag != false {
+        panic("panic from risky", 7)
+    }
+    return null, error("regular error", 9)
+}
+
+a := try risky(true) catch(e: err) {
+    print("caught panic", e.message, e.code)
+    return 42
+}
+
+b := try risky(false) catch(e: err) {
+    print("caught err", e.message, e.code)
+    return 99
+}
+
+print(a, b)

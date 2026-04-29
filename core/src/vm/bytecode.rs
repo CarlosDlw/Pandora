@@ -73,6 +73,8 @@ pub enum Op {
     Shr,
     JumpIfFalse(usize),
     Jump(usize),
+    TryStart(usize),
+    TryEnd,
 
     Call(SymbolId, u8),
     CallValue(u8),
@@ -81,7 +83,9 @@ pub enum Op {
     TupleGet(usize),
     MakeStruct(String, Vec<String>),
     StructGet(String),
+    WrapErr,
 
+    Swap,
     Dup,
     Pop,
     Return,

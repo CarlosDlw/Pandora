@@ -36,6 +36,14 @@ pub fn default_registry() -> BuiltinRegistry {
                 params: vec![Type::Any],
                 ret: Box::new(Type::Unit),
             },
+        },
+        Builtin {
+            name: "wrap",
+            ty: Type::Function {
+                // Contract enforced in checker/runtime: (err-like, str) or (err-like, str, i32)
+                params: vec![Type::Any],
+                ret: Box::new(Type::Err),
+            },
         }],
     }
 }

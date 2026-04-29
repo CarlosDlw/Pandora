@@ -149,6 +149,17 @@ pub enum AstNode {
         position: IncDecPosition,
         span: Span,
     },
+    PropagateExpr {
+        expr: ArenaId,
+        span: Span,
+    },
+    TryCatchExpr {
+        try_expr: ArenaId,
+        err_name: ArenaId,
+        err_ty: ArenaId,
+        catch_block: ArenaId,
+        span: Span,
+    },
     LetDecl {
         name: ArenaId,
         ty: Option<ArenaId>,
@@ -257,6 +268,8 @@ impl AstNode {
             | Self::StaticMethodCallExpr { span, .. }
             | Self::StructLiteralExpr { span, .. }
             | Self::IncDecExpr { span, .. }
+            | Self::PropagateExpr { span, .. }
+            | Self::TryCatchExpr { span, .. }
             | Self::LetDecl { span, .. }
             | Self::TupleDestructureDecl { span, .. }
             | Self::FnDecl { span, .. }

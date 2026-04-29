@@ -306,3 +306,63 @@ fn check_mode_reports_error_builtin_invalid_args() {
         .code(1)
         .stderr(contains("error message must be str").and(contains("error code must be i32")));
 }
+
+#[test]
+fn check_mode_reports_question_outside_fallible_function() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"fn divide(a: i32, b: i32) -> (i32, err) { return a / b, null }\nfn bad() -> i32 { return divide(4, 2)? }\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(
+            contains("operator '?' requires current function return type to be (T, err)")
+                .and(contains("change the function return type to `(T, err)` when using '?'")),
+        );
+}
+
+#[test]
+fn check_mode_reports_try_catch_binding_non_err_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"fn divide(a: i32, b: i32) -> (i32, err) { return a / b, null }\nx := try divide(1, 1) catch(e: i32) { return 0 }\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(
+            contains("catch binding type must be err-like")
+                .and(contains("declare catch binding as `catch(e: err)` or an error-like type with message/code")),
+        );
+}
+
+#[test]
+fn check_mode_reports_catch_without_required_return_value() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"fn divide(a: i32, b: i32) -> (i32, err) { return a / b, null }\nx := try divide(1, 1) catch(e: err) { print(e.message) }\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(
+            contains("catch block must end with `return <value>`")
+                .and(contains("finish catch blocks with `return value`")),
+        );
+}
