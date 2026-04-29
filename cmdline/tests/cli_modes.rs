@@ -883,3 +883,65 @@ fn runs_example_051_std_os_basics() {
                 .and(contains("true true true true")),
         );
 }
+
+#[test]
+fn runs_example_052_std_proc_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/052_std_proc_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true")
+                .and(contains("true true true true"))
+                .and(contains("true true true true"))
+                .and(contains("true")),
+        );
+}
+
+#[test]
+fn runs_example_053_std_thread_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/053_std_thread_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true true")
+                .and(contains("true true true true true")),
+        );
+}
+
+#[test]
+fn runs_example_054_std_sync_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/054_std_sync_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true")
+                .and(contains("true true true true true"))
+                .and(contains("true true true"))
+                .and(contains("true true true")),
+        );
+}
+
+#[test]
+fn runs_example_055_std_net_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/055_std_net_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true")
+                .and(contains("true true true true"))
+                .and(contains("true true true true true"))
+                .and(contains("true true")),
+        );
+}

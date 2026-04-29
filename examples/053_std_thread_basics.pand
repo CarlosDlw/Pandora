@@ -1,0 +1,14 @@
+from "std/thread" import spawn_thread, join_thread, sleep_thread_ms, mutex_new, mutex_lock, mutex_try_lock, mutex_unlock
+
+tid, spawn_err := spawn_thread("echo pandora_thread")
+code, join_err := join_thread(tid)
+sleep_err := sleep_thread_ms(1)
+
+m := mutex_new()
+lock_err := mutex_lock(m)
+ok_try, try_err := mutex_try_lock(m)
+unlock_err := mutex_unlock(m)
+unlock_again_err := mutex_unlock(m)
+
+print(spawn_err == null, join_err == null, code == 0, sleep_err == null)
+print(lock_err == null, try_err == null, ok_try == false, unlock_err == null, unlock_again_err != null)

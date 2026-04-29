@@ -1,0 +1,16 @@
+from "std/net" import dns_lookup, udp_bind, udp_local_addr, udp_send_to, udp_recv_from, tcp_connect
+
+ips, dns_err := dns_lookup("localhost")
+
+rx, rx_err := udp_bind("127.0.0.1:0")
+tx, tx_err := udp_bind("127.0.0.1:0")
+rx_addr, rx_addr_err := udp_local_addr(rx)
+sent, send_err := udp_send_to(tx, "hello_udp", rx_addr)
+msg, from_addr, recv_err := udp_recv_from(rx, 128)
+
+tcp_id, tcp_err := tcp_connect("127.0.0.1:1")
+
+print(dns_err == null, len(ips).gt((0).to_u32()))
+print(rx_err == null, tx_err == null, rx_addr_err == null, len(rx_addr).gt((0).to_u32()))
+print(send_err == null, sent.gt((0).to_u32()), recv_err == null, msg == "hello_udp", len(from_addr).gt((0).to_u32()))
+print(tcp_id.eq((0).to_u32()), tcp_err != null)

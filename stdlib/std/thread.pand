@@ -1,0 +1,11 @@
+# std/thread
+# Thread lifecycle and basic synchronization primitives.
+
+fn spawn_thread(command: str) -> (u64, err) { return thread_spawn(command) }
+fn join_thread(tid: u64) -> (i32, err) { return thread_join(tid) }
+fn sleep_thread_ms(ms: u64) -> err { return thread_sleep_ms(ms) }
+
+fn mutex_new() -> u64 { return thread_mutex_new() }
+fn mutex_lock(id: u64) -> err { return thread_mutex_lock(id) }
+fn mutex_try_lock(id: u64) -> (bool, err) { return thread_mutex_try_lock(id) }
+fn mutex_unlock(id: u64) -> err { return thread_mutex_unlock(id) }

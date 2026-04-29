@@ -1277,6 +1277,830 @@ pub fn default_registry() -> BuiltinRegistry {
             ret: Box::new(Type::Err),
         },
     },
+    BuiltinFunction {
+        name: "proc_spawn",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "spawn",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "proc_wait",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "wait",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "proc_kill",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "kill",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "proc_exec",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "exec_proc",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "proc_pipe",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "pipe",
+        ty: Type::Function {
+            params: vec![Type::Str, Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Str,
+                Type::Str,
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "thread_spawn",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "spawn_thread",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "thread_join",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "join_thread",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 32,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "thread_sleep_ms",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "sleep_thread_ms",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "thread_mutex_new",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "mutex_new",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "thread_mutex_lock",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "mutex_lock",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "thread_mutex_try_lock",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Bool, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "mutex_try_lock",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Bool, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "thread_mutex_unlock",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "mutex_unlock",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_mutex_new",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "mutex_new_sync",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_mutex_lock",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "mutex_lock_sync",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_mutex_unlock",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "mutex_unlock_sync",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_atomic_i64_new",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: true,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "atomic_i64_new",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: true,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_atomic_i64_load",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "atomic_i64_load",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_atomic_i64_store",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "atomic_i64_store",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_atomic_i64_add",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "atomic_i64_add",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: true,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: true,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_channel_new",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "channel_new",
+        ty: Type::Function {
+            params: vec![],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_channel_send",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Any,
+            ],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "channel_send",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Any,
+            ],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_channel_recv",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "channel_recv",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "sync_channel_try_recv",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Bool, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "channel_try_recv",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Any, Type::Bool, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_dns_lookup",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Array(Box::new(Type::Str)), Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "dns_lookup",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Array(Box::new(Type::Str)), Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_udp_bind",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "udp_bind",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_udp_local_addr",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "udp_local_addr",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_udp_send_to",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Str,
+                Type::Str,
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "udp_send_to",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Str,
+                Type::Str,
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_udp_recv_from",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "udp_recv_from",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_tcp_connect",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "tcp_connect",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_tcp_send",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Str,
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "tcp_send",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Str,
+            ],
+            ret: Box::new(Type::Tuple(vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Err,
+            ])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_tcp_recv",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "tcp_recv",
+        ty: Type::Function {
+            params: vec![
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+                Type::Int {
+                    signed: false,
+                    bits: 64,
+                },
+            ],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "net_tcp_close",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
+    BuiltinFunction {
+        name: "tcp_close",
+        ty: Type::Function {
+            params: vec![Type::Int {
+                signed: false,
+                bits: 64,
+            }],
+            ret: Box::new(Type::Err),
+        },
+    },
     ];
 
     let mut methods = Vec::new();

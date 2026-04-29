@@ -1,0 +1,14 @@
+# std/net
+# Networking primitives: DNS, UDP and TCP sockets.
+
+fn dns_lookup(host: str) -> ([str], err) { return net_dns_lookup(host) }
+
+fn udp_bind(addr: str) -> (u64, err) { return net_udp_bind(addr) }
+fn udp_local_addr(id: u64) -> (str, err) { return net_udp_local_addr(id) }
+fn udp_send_to(id: u64, payload: str, to: str) -> (u64, err) { return net_udp_send_to(id, payload, to) }
+fn udp_recv_from(id: u64, max: u64) -> (str, str, err) { return net_udp_recv_from(id, max) }
+
+fn tcp_connect(addr: str) -> (u64, err) { return net_tcp_connect(addr) }
+fn tcp_send(id: u64, payload: str) -> (u64, err) { return net_tcp_send(id, payload) }
+fn tcp_recv(id: u64, max: u64) -> (str, err) { return net_tcp_recv(id, max) }
+fn tcp_close(id: u64) -> err { return net_tcp_close(id) }

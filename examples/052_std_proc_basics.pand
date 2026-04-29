@@ -1,0 +1,14 @@
+from "std/proc" import spawn, wait, kill, exec_proc, pipe
+
+pid, spawn_err := spawn("echo pandora_spawn")
+code_wait, wait_err := wait(pid)
+
+code_exec, out_exec, err_exec, exec_err := exec_proc("echo pandora_exec")
+code_pipe, out_pipe, err_pipe, pipe_err := pipe("printf 'a\nb\nc\n'", "wc -l")
+
+missing_kill_err := kill(pid)
+
+print(spawn_err == null, wait_err == null, code_wait == 0)
+print(exec_err == null, code_exec == 0, out_exec.contains("pandora_exec"), len(err_exec).ge((0).to_u32()))
+print(pipe_err == null, code_pipe == 0, out_pipe.contains("3"), len(err_pipe).ge((0).to_u32()))
+print(missing_kill_err != null)

@@ -690,3 +690,107 @@ fn check_mode_reports_internal_os_intrinsic_forbidden() {
         .code(1)
         .stderr(contains("internal intrinsic 'os_exec'"));
 }
+
+#[test]
+fn check_mode_reports_proc_wait_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(wait(\"123\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_proc_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(proc_exec(\"echo hi\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'proc_exec'"));
+}
+
+#[test]
+fn check_mode_reports_thread_mutex_lock_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(mutex_lock(\"x\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_thread_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(thread_spawn(\"echo hi\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'thread_spawn'"));
+}
+
+#[test]
+fn check_mode_reports_sync_atomic_store_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(atomic_i64_store(\"x\", 1))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_sync_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(sync_channel_new())\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'sync_channel_new'"));
+}
+
+#[test]
+fn check_mode_reports_net_udp_bind_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(udp_bind(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_net_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(net_dns_lookup(\"localhost\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'net_dns_lookup'"));
+}

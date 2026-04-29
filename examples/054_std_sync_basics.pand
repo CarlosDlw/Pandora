@@ -1,0 +1,21 @@
+from "std/sync" import mutex_new_sync, mutex_lock_sync, mutex_unlock_sync, atomic_i64_new, atomic_i64_load, atomic_i64_store, atomic_i64_add, channel_new, channel_send, channel_recv, channel_try_recv
+
+m := mutex_new_sync()
+lock_err := mutex_lock_sync(m)
+unlock_err := mutex_unlock_sync(m)
+unlock_again_err := mutex_unlock_sync(m)
+
+a := atomic_i64_new(10)
+v0, load0_err := atomic_i64_load(a)
+store_err := atomic_i64_store(a, 20)
+v1, add_err := atomic_i64_add(a, 5)
+
+c := channel_new()
+send_err := channel_send(c, "payload")
+vch, recv_err := channel_recv(c)
+try_v, has_value, try_err := channel_try_recv(c)
+
+print(lock_err == null, unlock_err == null, unlock_again_err != null)
+print(load0_err == null, v0.to_i32() == 10, store_err == null, add_err == null, v1.to_i32() == 25)
+print(send_err == null, recv_err == null, vch == "payload")
+print(try_err == null, has_value == false, try_v == null)

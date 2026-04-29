@@ -1,0 +1,9 @@
+# std/proc
+# Process creation/control, pipes and exec helpers.
+
+fn spawn(command: str) -> (u64, err) { return proc_spawn(command) }
+fn wait(pid: u64) -> (i32, err) { return proc_wait(pid) }
+fn kill(pid: u64) -> err { return proc_kill(pid) }
+
+fn exec_proc(command: str) -> (i32, str, str, err) { return proc_exec(command) }
+fn pipe(left: str, right: str) -> (i32, str, str, err) { return proc_pipe(left, right) }

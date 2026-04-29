@@ -1,0 +1,16 @@
+# std/sync
+# Concurrency primitives: locks, atomics and channels.
+
+fn mutex_new_sync() -> u64 { return sync_mutex_new() }
+fn mutex_lock_sync(id: u64) -> err { return sync_mutex_lock(id) }
+fn mutex_unlock_sync(id: u64) -> err { return sync_mutex_unlock(id) }
+
+fn atomic_i64_new(initial: i64) -> u64 { return sync_atomic_i64_new(initial) }
+fn atomic_i64_load(id: u64) -> (i64, err) { return sync_atomic_i64_load(id) }
+fn atomic_i64_store(id: u64, value: i64) -> err { return sync_atomic_i64_store(id, value) }
+fn atomic_i64_add(id: u64, delta: i64) -> (i64, err) { return sync_atomic_i64_add(id, delta) }
+
+fn channel_new() -> u64 { return sync_channel_new() }
+fn channel_send(id: u64, value: any) -> err { return sync_channel_send(id, value) }
+fn channel_recv(id: u64) -> (any, err) { return sync_channel_recv(id) }
+fn channel_try_recv(id: u64) -> (any, bool, err) { return sync_channel_try_recv(id) }

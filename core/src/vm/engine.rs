@@ -2,6 +2,11 @@
 //! user-defined callees are rejected until closures/functions exist.
 
 use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs, UdpSocket};
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -2541,6 +2546,831 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 })
             }
         }
+        "proc_spawn" | "spawn" => {
+            let [command] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let command = expect_str_arg(command, "spawn command", span)?;
+            let child = spawn_shell_command(command).map_err(|e| {
+                Diagnostic::new(
+                    format!("failed to spawn process: {e}"),
+                    span,
+                    Severity::Error,
+                )
+            })?;
+            let pid = child.id();
+            let mut table = proc_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock process table", span, Severity::Error)
+            })?;
+            table.insert(pid, child);
+            Ok(Value::Tuple(vec![Value::UInt128(pid as u128), Value::Null]))
+        }
+        "proc_wait" | "wait" => {
+            let [pid] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let pid = expect_u64_arg(pid, "wait pid", span)?;
+            let Some(mut child) = proc_take_child(pid, span)? else {
+                return Ok(Value::Tuple(vec![
+                    Value::Int128(-1),
+                    Value::Err {
+                        message: format!("unknown child pid {pid}"),
+                        code: 1,
+                        origin: "wait".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            match child.wait() {
+                Ok(status) => Ok(Value::Tuple(vec![
+                    Value::Int128(status.code().unwrap_or(-1) as i128),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Int128(-1),
+                    io_err("wait", e),
+                ])),
+            }
+        }
+        "proc_kill" | "kill" => {
+            let [pid] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let pid = expect_u64_arg(pid, "kill pid", span)?;
+            let mut table = proc_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock process table", span, Severity::Error)
+            })?;
+            let Some(child) = table.get_mut(&(pid as u32)) else {
+                return Ok(Value::Err {
+                    message: format!("unknown child pid {pid}"),
+                    code: 1,
+                    origin: "kill".to_string(),
+                    cause: None,
+                });
+            };
+            match child.kill() {
+                Ok(_) => Ok(Value::Null),
+                Err(e) => Ok(io_err("kill", e)),
+            }
+        }
+        "proc_exec" | "exec_proc" => {
+            let [command] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let command = expect_str_arg(command, "exec_proc command", span)?;
+            match run_shell_command(command) {
+                Ok(out) => Ok(Value::Tuple(vec![
+                    Value::Int128(out.status.code().unwrap_or(-1) as i128),
+                    Value::Str(String::from_utf8_lossy(&out.stdout).to_string()),
+                    Value::Str(String::from_utf8_lossy(&out.stderr).to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Int128(-1),
+                    Value::Str(String::new()),
+                    Value::Str(String::new()),
+                    io_err("exec_proc", e),
+                ])),
+            }
+        }
+        "proc_pipe" | "pipe" => {
+            let [left, right] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let left = expect_str_arg(left, "pipe left", span)?;
+            let right = expect_str_arg(right, "pipe right", span)?;
+            let command = format!("{left} | {right}");
+            match run_shell_command(&command) {
+                Ok(out) => Ok(Value::Tuple(vec![
+                    Value::Int128(out.status.code().unwrap_or(-1) as i128),
+                    Value::Str(String::from_utf8_lossy(&out.stdout).to_string()),
+                    Value::Str(String::from_utf8_lossy(&out.stderr).to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Int128(-1),
+                    Value::Str(String::new()),
+                    Value::Str(String::new()),
+                    io_err("pipe", e),
+                ])),
+            }
+        }
+        "thread_spawn" | "spawn_thread" => {
+            let [command] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let command = expect_str_arg(command, "spawn_thread command", span)?.to_string();
+            let tid = next_thread_id();
+            let handle = std::thread::spawn(move || match run_shell_command(&command) {
+                Ok(output) => output.status.code().unwrap_or(-1),
+                Err(_) => -1,
+            });
+            let mut table = thread_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock thread table", span, Severity::Error)
+            })?;
+            table.insert(tid, handle);
+            Ok(Value::Tuple(vec![Value::UInt128(tid as u128), Value::Null]))
+        }
+        "thread_join" | "join_thread" => {
+            let [tid] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let tid = expect_u64_arg(tid, "join_thread tid", span)?;
+            let handle = {
+                let mut table = thread_table().lock().map_err(|_| {
+                    Diagnostic::new("failed to lock thread table", span, Severity::Error)
+                })?;
+                table.remove(&tid)
+            };
+            let Some(handle) = handle else {
+                return Ok(Value::Tuple(vec![
+                    Value::Int128(-1),
+                    Value::Err {
+                        message: format!("unknown thread id {tid}"),
+                        code: 1,
+                        origin: "join_thread".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            match handle.join() {
+                Ok(code) => Ok(Value::Tuple(vec![Value::Int128(code as i128), Value::Null])),
+                Err(_) => Ok(Value::Tuple(vec![
+                    Value::Int128(-1),
+                    Value::Err {
+                        message: "thread panicked during join".to_string(),
+                        code: 1,
+                        origin: "join_thread".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "thread_sleep_ms" | "sleep_thread_ms" => {
+            let [ms] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let ms = expect_u64_arg(ms, "sleep_thread_ms ms", span)?;
+            std::thread::sleep(Duration::from_millis(ms));
+            Ok(Value::Null)
+        }
+        "thread_mutex_new" | "mutex_new" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = next_mutex_id();
+            let mut table = mutex_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock mutex table", span, Severity::Error)
+            })?;
+            table.insert(id, false);
+            Ok(Value::UInt128(id as u128))
+        }
+        "thread_mutex_lock" | "mutex_lock" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "mutex_lock id", span)?;
+            let mut table = mutex_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock mutex table", span, Severity::Error)
+            })?;
+            let Some(locked) = table.get_mut(&id) else {
+                return Ok(Value::Err {
+                    message: format!("unknown mutex id {id}"),
+                    code: 1,
+                    origin: "mutex_lock".to_string(),
+                    cause: None,
+                });
+            };
+            if *locked {
+                return Ok(Value::Err {
+                    message: "mutex already locked".to_string(),
+                    code: 1,
+                    origin: "mutex_lock".to_string(),
+                    cause: None,
+                });
+            }
+            *locked = true;
+            Ok(Value::Null)
+        }
+        "thread_mutex_try_lock" | "mutex_try_lock" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "mutex_try_lock id", span)?;
+            let mut table = mutex_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock mutex table", span, Severity::Error)
+            })?;
+            let Some(locked) = table.get_mut(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Bool(false),
+                    Value::Err {
+                        message: format!("unknown mutex id {id}"),
+                        code: 1,
+                        origin: "mutex_try_lock".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            if *locked {
+                Ok(Value::Tuple(vec![Value::Bool(false), Value::Null]))
+            } else {
+                *locked = true;
+                Ok(Value::Tuple(vec![Value::Bool(true), Value::Null]))
+            }
+        }
+        "thread_mutex_unlock" | "mutex_unlock" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "mutex_unlock id", span)?;
+            let mut table = mutex_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock mutex table", span, Severity::Error)
+            })?;
+            let Some(locked) = table.get_mut(&id) else {
+                return Ok(Value::Err {
+                    message: format!("unknown mutex id {id}"),
+                    code: 1,
+                    origin: "mutex_unlock".to_string(),
+                    cause: None,
+                });
+            };
+            if !*locked {
+                return Ok(Value::Err {
+                    message: "mutex is not locked".to_string(),
+                    code: 1,
+                    origin: "mutex_unlock".to_string(),
+                    cause: None,
+                });
+            }
+            *locked = false;
+            Ok(Value::Null)
+        }
+        "sync_mutex_new" | "mutex_new_sync" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = next_sync_mutex_id();
+            let mut table = sync_mutex_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock sync mutex table", span, Severity::Error)
+            })?;
+            table.insert(id, false);
+            Ok(Value::UInt128(id as u128))
+        }
+        "sync_mutex_lock" | "mutex_lock_sync" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "mutex_lock_sync id", span)?;
+            let mut table = sync_mutex_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock sync mutex table", span, Severity::Error)
+            })?;
+            let Some(locked) = table.get_mut(&id) else {
+                return Ok(Value::Err {
+                    message: format!("unknown sync mutex id {id}"),
+                    code: 1,
+                    origin: "mutex_lock_sync".to_string(),
+                    cause: None,
+                });
+            };
+            if *locked {
+                return Ok(Value::Err {
+                    message: "sync mutex already locked".to_string(),
+                    code: 1,
+                    origin: "mutex_lock_sync".to_string(),
+                    cause: None,
+                });
+            }
+            *locked = true;
+            Ok(Value::Null)
+        }
+        "sync_mutex_unlock" | "mutex_unlock_sync" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "mutex_unlock_sync id", span)?;
+            let mut table = sync_mutex_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock sync mutex table", span, Severity::Error)
+            })?;
+            let Some(locked) = table.get_mut(&id) else {
+                return Ok(Value::Err {
+                    message: format!("unknown sync mutex id {id}"),
+                    code: 1,
+                    origin: "mutex_unlock_sync".to_string(),
+                    cause: None,
+                });
+            };
+            if !*locked {
+                return Ok(Value::Err {
+                    message: "sync mutex is not locked".to_string(),
+                    code: 1,
+                    origin: "mutex_unlock_sync".to_string(),
+                    cause: None,
+                });
+            }
+            *locked = false;
+            Ok(Value::Null)
+        }
+        "sync_atomic_i64_new" | "atomic_i64_new" => {
+            let [initial] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let initial = expect_i64_like(initial, "atomic_i64_new initial", span)?;
+            let id = next_atomic_id();
+            let mut table = atomic_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock atomic table", span, Severity::Error)
+            })?;
+            table.insert(id, initial);
+            Ok(Value::UInt128(id as u128))
+        }
+        "sync_atomic_i64_load" | "atomic_i64_load" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "atomic_i64_load id", span)?;
+            let table = atomic_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock atomic table", span, Severity::Error)
+            })?;
+            let Some(v) = table.get(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Int128(0),
+                    Value::Err {
+                        message: format!("unknown atomic id {id}"),
+                        code: 1,
+                        origin: "atomic_i64_load".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            Ok(Value::Tuple(vec![Value::Int128(*v as i128), Value::Null]))
+        }
+        "sync_atomic_i64_store" | "atomic_i64_store" => {
+            let [id, value] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "atomic_i64_store id", span)?;
+            let value = expect_i64_like(value, "atomic_i64_store value", span)?;
+            let mut table = atomic_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock atomic table", span, Severity::Error)
+            })?;
+            let Some(slot) = table.get_mut(&id) else {
+                return Ok(Value::Err {
+                    message: format!("unknown atomic id {id}"),
+                    code: 1,
+                    origin: "atomic_i64_store".to_string(),
+                    cause: None,
+                });
+            };
+            *slot = value;
+            Ok(Value::Null)
+        }
+        "sync_atomic_i64_add" | "atomic_i64_add" => {
+            let [id, delta] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "atomic_i64_add id", span)?;
+            let delta = expect_i64_like(delta, "atomic_i64_add delta", span)?;
+            let mut table = atomic_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock atomic table", span, Severity::Error)
+            })?;
+            let Some(slot) = table.get_mut(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Int128(0),
+                    Value::Err {
+                        message: format!("unknown atomic id {id}"),
+                        code: 1,
+                        origin: "atomic_i64_add".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            *slot = slot.saturating_add(delta);
+            Ok(Value::Tuple(vec![Value::Int128(*slot as i128), Value::Null]))
+        }
+        "sync_channel_new" | "channel_new" => {
+            let [] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = next_channel_id();
+            let mut table = channel_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock channel table", span, Severity::Error)
+            })?;
+            table.insert(id, VecDeque::new());
+            Ok(Value::UInt128(id as u128))
+        }
+        "sync_channel_send" | "channel_send" => {
+            let [id, value] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "channel_send id", span)?;
+            let mut table = channel_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock channel table", span, Severity::Error)
+            })?;
+            let Some(queue) = table.get_mut(&id) else {
+                return Ok(Value::Err {
+                    message: format!("unknown channel id {id}"),
+                    code: 1,
+                    origin: "channel_send".to_string(),
+                    cause: None,
+                });
+            };
+            queue.push_back(value.clone());
+            Ok(Value::Null)
+        }
+        "sync_channel_recv" | "channel_recv" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "channel_recv id", span)?;
+            let mut table = channel_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock channel table", span, Severity::Error)
+            })?;
+            let Some(queue) = table.get_mut(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Null,
+                    Value::Err {
+                        message: format!("unknown channel id {id}"),
+                        code: 1,
+                        origin: "channel_recv".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            match queue.pop_front() {
+                Some(v) => Ok(Value::Tuple(vec![v, Value::Null])),
+                None => Ok(Value::Tuple(vec![
+                    Value::Null,
+                    Value::Err {
+                        message: "channel is empty".to_string(),
+                        code: 1,
+                        origin: "channel_recv".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "sync_channel_try_recv" | "channel_try_recv" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "channel_try_recv id", span)?;
+            let mut table = channel_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock channel table", span, Severity::Error)
+            })?;
+            let Some(queue) = table.get_mut(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Null,
+                    Value::Bool(false),
+                    Value::Err {
+                        message: format!("unknown channel id {id}"),
+                        code: 1,
+                        origin: "channel_try_recv".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            match queue.pop_front() {
+                Some(v) => Ok(Value::Tuple(vec![v, Value::Bool(true), Value::Null])),
+                None => Ok(Value::Tuple(vec![Value::Null, Value::Bool(false), Value::Null])),
+            }
+        }
+        "net_dns_lookup" | "dns_lookup" => {
+            let [host] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let host = expect_str_arg(host, "dns_lookup host", span)?;
+            match (host, 0).to_socket_addrs() {
+                Ok(iter) => {
+                    let mut out = Vec::new();
+                    for addr in iter {
+                        out.push(Value::Str(addr.ip().to_string()));
+                    }
+                    Ok(Value::Tuple(vec![Value::Array(out), Value::Null]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![Value::Array(vec![]), io_err("dns_lookup", e)])),
+            }
+        }
+        "net_udp_bind" | "udp_bind" => {
+            let [addr] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let addr = expect_str_arg(addr, "udp_bind addr", span)?;
+            match UdpSocket::bind(addr) {
+                Ok(sock) => {
+                    let _ = sock.set_read_timeout(Some(Duration::from_millis(200)));
+                    let id = next_udp_socket_id();
+                    let mut table = udp_socket_table().lock().map_err(|_| {
+                        Diagnostic::new("failed to lock udp socket table", span, Severity::Error)
+                    })?;
+                    table.insert(id, sock);
+                    Ok(Value::Tuple(vec![Value::UInt128(id as u128), Value::Null]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("udp_bind", e)])),
+            }
+        }
+        "net_udp_local_addr" | "udp_local_addr" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "udp_local_addr id", span)?;
+            let table = udp_socket_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock udp socket table", span, Severity::Error)
+            })?;
+            let Some(sock) = table.get(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: format!("unknown udp socket id {id}"),
+                        code: 1,
+                        origin: "udp_local_addr".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            match sock.local_addr() {
+                Ok(addr) => Ok(Value::Tuple(vec![Value::Str(addr.to_string()), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("udp_local_addr", e)])),
+            }
+        }
+        "net_udp_send_to" | "udp_send_to" => {
+            let [id, payload, to] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 3 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "udp_send_to id", span)?;
+            let payload = expect_str_arg(payload, "udp_send_to payload", span)?;
+            let to = expect_str_arg(to, "udp_send_to to", span)?;
+            let table = udp_socket_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock udp socket table", span, Severity::Error)
+            })?;
+            let Some(sock) = table.get(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::UInt128(0),
+                    Value::Err {
+                        message: format!("unknown udp socket id {id}"),
+                        code: 1,
+                        origin: "udp_send_to".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            match sock.send_to(payload.as_bytes(), to) {
+                Ok(n) => Ok(Value::Tuple(vec![Value::UInt128(n as u128), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("udp_send_to", e)])),
+            }
+        }
+        "net_udp_recv_from" | "udp_recv_from" => {
+            let [id, max] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "udp_recv_from id", span)?;
+            let max = expect_u64_arg(max, "udp_recv_from max", span)? as usize;
+            let table = udp_socket_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock udp socket table", span, Severity::Error)
+            })?;
+            let Some(sock) = table.get(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: format!("unknown udp socket id {id}"),
+                        code: 1,
+                        origin: "udp_recv_from".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            let mut buf = vec![0_u8; max.max(1)];
+            match sock.recv_from(&mut buf) {
+                Ok((n, from)) => Ok(Value::Tuple(vec![
+                    Value::Str(String::from_utf8_lossy(&buf[..n]).to_string()),
+                    Value::Str(from.to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Str(String::new()),
+                    io_err("udp_recv_from", e),
+                ])),
+            }
+        }
+        "net_tcp_connect" | "tcp_connect" => {
+            let [addr] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let addr = expect_str_arg(addr, "tcp_connect addr", span)?;
+            match TcpStream::connect(addr) {
+                Ok(stream) => {
+                    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+                    let id = next_tcp_stream_id();
+                    let mut table = tcp_stream_table().lock().map_err(|_| {
+                        Diagnostic::new("failed to lock tcp stream table", span, Severity::Error)
+                    })?;
+                    table.insert(id, stream);
+                    Ok(Value::Tuple(vec![Value::UInt128(id as u128), Value::Null]))
+                }
+                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("tcp_connect", e)])),
+            }
+        }
+        "net_tcp_send" | "tcp_send" => {
+            let [id, payload] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "tcp_send id", span)?;
+            let payload = expect_str_arg(payload, "tcp_send payload", span)?;
+            let mut table = tcp_stream_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock tcp stream table", span, Severity::Error)
+            })?;
+            let Some(stream) = table.get_mut(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::UInt128(0),
+                    Value::Err {
+                        message: format!("unknown tcp stream id {id}"),
+                        code: 1,
+                        origin: "tcp_send".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            match stream.write(payload.as_bytes()) {
+                Ok(n) => Ok(Value::Tuple(vec![Value::UInt128(n as u128), Value::Null])),
+                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("tcp_send", e)])),
+            }
+        }
+        "net_tcp_recv" | "tcp_recv" => {
+            let [id, max] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "tcp_recv id", span)?;
+            let max = expect_u64_arg(max, "tcp_recv max", span)? as usize;
+            let mut table = tcp_stream_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock tcp stream table", span, Severity::Error)
+            })?;
+            let Some(stream) = table.get_mut(&id) else {
+                return Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: format!("unknown tcp stream id {id}"),
+                        code: 1,
+                        origin: "tcp_recv".to_string(),
+                        cause: None,
+                    },
+                ]));
+            };
+            let mut buf = vec![0_u8; max.max(1)];
+            match stream.read(&mut buf) {
+                Ok(n) => Ok(Value::Tuple(vec![
+                    Value::Str(String::from_utf8_lossy(&buf[..n]).to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("tcp_recv", e)])),
+            }
+        }
+        "net_tcp_close" | "tcp_close" => {
+            let [id] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let id = expect_u64_arg(id, "tcp_close id", span)?;
+            let mut table = tcp_stream_table().lock().map_err(|_| {
+                Diagnostic::new("failed to lock tcp stream table", span, Severity::Error)
+            })?;
+            if table.remove(&id).is_some() {
+                Ok(Value::Null)
+            } else {
+                Ok(Value::Err {
+                    message: format!("unknown tcp stream id {id}"),
+                    code: 1,
+                    origin: "tcp_close".to_string(),
+                    cause: None,
+                })
+            }
+        }
         name if name.starts_with("__meth_is_") || name.starts_with("__meth_iu_") => {
             dispatch_integer_method(name, args, span)
         }
@@ -3581,6 +4411,146 @@ fn expect_u64_arg(value: &Value, label: &str, span: Span) -> Result<u64, Diagnos
 fn time_tick_start() -> &'static Instant {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now)
+}
+
+fn proc_table() -> &'static Mutex<HashMap<u32, Child>> {
+    static CHILDREN: OnceLock<Mutex<HashMap<u32, Child>>> = OnceLock::new();
+    CHILDREN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn proc_take_child(pid: u64, span: Span) -> Result<Option<Child>, Diagnostic> {
+    let pid = u32::try_from(pid)
+        .map_err(|_| Diagnostic::new("pid out of range", span, Severity::Error))?;
+    let mut table = proc_table()
+        .lock()
+        .map_err(|_| Diagnostic::new("failed to lock process table", span, Severity::Error))?;
+    Ok(table.remove(&pid))
+}
+
+fn run_shell_command(command: &str) -> std::io::Result<std::process::Output> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd").args(["/C", command]).output()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new("sh").args(["-c", command]).output()
+    }
+}
+
+fn spawn_shell_command(command: &str) -> std::io::Result<Child> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", command])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new("sh")
+            .args(["-c", command])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    }
+}
+
+fn thread_table() -> &'static Mutex<HashMap<u64, std::thread::JoinHandle<i32>>> {
+    static THREADS: OnceLock<Mutex<HashMap<u64, std::thread::JoinHandle<i32>>>> = OnceLock::new();
+    THREADS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_thread_id() -> u64 {
+    static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn mutex_table() -> &'static Mutex<HashMap<u64, bool>> {
+    static MUTEXES: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
+    MUTEXES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_mutex_id() -> u64 {
+    static NEXT_MUTEX_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_MUTEX_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn sync_mutex_table() -> &'static Mutex<HashMap<u64, bool>> {
+    static SYNC_MUTEXES: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
+    SYNC_MUTEXES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_sync_mutex_id() -> u64 {
+    static NEXT_SYNC_MUTEX_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_SYNC_MUTEX_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn atomic_table() -> &'static Mutex<HashMap<u64, i64>> {
+    static ATOMICS: OnceLock<Mutex<HashMap<u64, i64>>> = OnceLock::new();
+    ATOMICS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_atomic_id() -> u64 {
+    static NEXT_ATOMIC_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_ATOMIC_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn channel_table() -> &'static Mutex<HashMap<u64, VecDeque<Value>>> {
+    static CHANNELS: OnceLock<Mutex<HashMap<u64, VecDeque<Value>>>> = OnceLock::new();
+    CHANNELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_channel_id() -> u64 {
+    static NEXT_CHANNEL_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_CHANNEL_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn expect_i64_like(value: &Value, label: &str, span: Span) -> Result<i64, Diagnostic> {
+    match value {
+        Value::Int128(v) => i64::try_from(*v).map_err(|_| {
+            Diagnostic::new(
+                format!("{label}: integer out of range for i64"),
+                span,
+                Severity::Error,
+            )
+        }),
+        Value::UInt128(v) => i64::try_from(*v).map_err(|_| {
+            Diagnostic::new(
+                format!("{label}: unsigned integer out of range for i64"),
+                span,
+                Severity::Error,
+            )
+        }),
+        _ => Err(Diagnostic::new(
+            format!("{label}: expected integer argument"),
+            span,
+            Severity::Error,
+        )),
+    }
+}
+
+fn udp_socket_table() -> &'static Mutex<HashMap<u64, UdpSocket>> {
+    static UDP_SOCKETS: OnceLock<Mutex<HashMap<u64, UdpSocket>>> = OnceLock::new();
+    UDP_SOCKETS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_udp_socket_id() -> u64 {
+    static NEXT_UDP_SOCKET_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_UDP_SOCKET_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn tcp_stream_table() -> &'static Mutex<HashMap<u64, TcpStream>> {
+    static TCP_STREAMS: OnceLock<Mutex<HashMap<u64, TcpStream>>> = OnceLock::new();
+    TCP_STREAMS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_tcp_stream_id() -> u64 {
+    static NEXT_TCP_STREAM_ID: AtomicU64 = AtomicU64::new(1);
+    NEXT_TCP_STREAM_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 fn format_unix_secs_iso_utc(secs: u64) -> String {
