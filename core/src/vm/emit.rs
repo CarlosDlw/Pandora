@@ -21,9 +21,19 @@ use super::{
 pub fn compile_program(hir: &Hir, model: &SemanticModel) -> (Chunk, Diagnostics) {
     let mut builder = ChunkBuilder::new();
     let mut diagnostics = Diagnostics::new();
+    let mut loop_stack = Vec::new();
+    let mut scope_depth = 0usize;
 
     for stmt in &hir.stmts {
-        emit_stmt(hir, model, stmt, &mut builder, &mut diagnostics);
+        emit_stmt(
+            hir,
+            model,
+            stmt,
+            &mut builder,
+            &mut diagnostics,
+            &mut loop_stack,
+            &mut scope_depth,
+        );
     }
 
     let ret_span = hir
@@ -43,6 +53,9 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         | HirStmt::Expr { span, .. }
         | HirStmt::Block { span, .. }
         | HirStmt::If { span, .. }
+        | HirStmt::While { span, .. }
+        | HirStmt::Break { span, .. }
+        | HirStmt::Continue { span, .. }
         | HirStmt::Invalid { span } => *span,
     }
 }
@@ -60,6 +73,8 @@ fn emit_stmt(
     stmt: &HirStmt,
     b: &mut ChunkBuilder,
     diagnostics: &mut Diagnostics,
+    loop_stack: &mut Vec<LoopContext>,
+    scope_depth: &mut usize,
 ) {
     match stmt {
         HirStmt::Let {
@@ -80,10 +95,12 @@ fn emit_stmt(
         }
         HirStmt::Block { stmts, span } => {
             b.emit(Op::EnterScope, *span);
+            *scope_depth += 1;
             for stmt in stmts {
-                emit_stmt(hir, model, stmt, b, diagnostics);
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
             }
             b.emit(Op::ExitScope, *span);
+            *scope_depth = scope_depth.saturating_sub(1);
         }
         HirStmt::If {
             condition,
@@ -94,10 +111,12 @@ fn emit_stmt(
             emit_expr(hir, model, *condition, b, diagnostics);
             let jump_if_false_at = b.emit_placeholder_jump_if_false(*span);
             b.emit(Op::EnterScope, *span);
+            *scope_depth += 1;
             for stmt in then_branch {
-                emit_stmt(hir, model, stmt, b, diagnostics);
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
             }
             b.emit(Op::ExitScope, *span);
+            *scope_depth = scope_depth.saturating_sub(1);
             if let Some(else_stmts) = else_branch {
                 let jump_end_at = b.emit_placeholder_jump(*span);
                 let else_start = b.len();
@@ -105,10 +124,12 @@ fn emit_stmt(
                     diagnostics.push(Diagnostic::new("failed to patch conditional jump", *span, Severity::Error));
                 }
                 b.emit(Op::EnterScope, *span);
+                *scope_depth += 1;
                 for stmt in else_stmts {
-                    emit_stmt(hir, model, stmt, b, diagnostics);
+                    emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
                 }
                 b.emit(Op::ExitScope, *span);
+                *scope_depth = scope_depth.saturating_sub(1);
                 let end = b.len();
                 if !b.patch_jump_target(jump_end_at, end) {
                     diagnostics.push(Diagnostic::new("failed to patch end jump", *span, Severity::Error));
@@ -120,9 +141,83 @@ fn emit_stmt(
                 }
             }
         }
+        HirStmt::While {
+            condition,
+            body,
+            span,
+        } => {
+            let cond_target = b.len();
+            emit_expr(hir, model, *condition, b, diagnostics);
+            let jump_out_at = b.emit_placeholder_jump_if_false(*span);
+
+            loop_stack.push(LoopContext {
+                cond_target,
+                break_sites: Vec::new(),
+                scope_depth_at_loop: *scope_depth,
+            });
+
+            b.emit(Op::EnterScope, *span);
+            *scope_depth += 1;
+            for stmt in body {
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
+            }
+            b.emit(Op::ExitScope, *span);
+            *scope_depth = scope_depth.saturating_sub(1);
+
+            b.emit(Op::Jump(cond_target), *span);
+            let loop_end = b.len();
+            if !b.patch_jump_target(jump_out_at, loop_end) {
+                diagnostics.push(Diagnostic::new("failed to patch while exit jump", *span, Severity::Error));
+            }
+            if let Some(ctx) = loop_stack.pop() {
+                for site in ctx.break_sites {
+                    if !b.patch_jump_target(site, loop_end) {
+                        diagnostics.push(Diagnostic::new("failed to patch break jump", *span, Severity::Error));
+                    }
+                }
+            } else {
+                diagnostics.push(Diagnostic::new("internal loop stack underflow in emitter", *span, Severity::Error));
+            }
+        }
+        HirStmt::Break { span } => {
+            let Some(loop_ctx) = loop_stack.last_mut() else {
+                diagnostics.push(Diagnostic::new("break used outside of loop", *span, Severity::Error));
+                return;
+            };
+            emit_scope_unwind_for_loop_exit(b, *span, *scope_depth, loop_ctx.scope_depth_at_loop);
+            let break_jump = b.emit_placeholder_jump(*span);
+            loop_ctx.break_sites.push(break_jump);
+        }
+        HirStmt::Continue { span } => {
+            let Some(loop_ctx) = loop_stack.last() else {
+                diagnostics.push(Diagnostic::new("continue used outside of loop", *span, Severity::Error));
+                return;
+            };
+            emit_scope_unwind_for_loop_exit(b, *span, *scope_depth, loop_ctx.scope_depth_at_loop);
+            b.emit(Op::Jump(loop_ctx.cond_target), *span);
+        }
         HirStmt::Invalid { span } => {
             diagnostics.push(Diagnostic::new("invalid statement skipped in bytecode", *span, Severity::Error));
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LoopContext {
+    cond_target: usize,
+    break_sites: Vec<usize>,
+    scope_depth_at_loop: usize,
+}
+
+fn emit_scope_unwind_for_loop_exit(
+    b: &mut ChunkBuilder,
+    span: Span,
+    current_scope_depth: usize,
+    target_scope_depth: usize,
+) {
+    let unwind_count = current_scope_depth.saturating_sub(target_scope_depth);
+    for _ in 0..unwind_count {
+        b.emit(Op::ExitScope, span);
     }
 }
 

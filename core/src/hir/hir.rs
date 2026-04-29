@@ -77,6 +77,17 @@ pub enum HirStmt {
         else_branch: Option<Vec<HirStmt>>,
         span: Span,
     },
+    While {
+        condition: HirId,
+        body: Vec<HirStmt>,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Continue {
+        span: Span,
+    },
     Invalid {
         span: Span,
     },

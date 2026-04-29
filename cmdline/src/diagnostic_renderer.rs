@@ -99,12 +99,20 @@ fn suggest_fix(message: &str) -> Option<&'static str> {
         Some("close the missing ')' at the end of the expression or call.")
     } else if message.contains("expected '{' after if condition") {
         Some("add a block after the condition, for example: if condition { ... }")
+    } else if message.contains("expected '{' after while condition") {
+        Some("add a block after the while condition, for example: while condition { ... }")
     } else if message.contains("expected '{' or 'if' after 'else'") {
         Some("use `else if condition { ... }` or `else { ... }`.")
     } else if message.contains("unexpected 'else' without matching 'if'") {
         Some("remove this `else` or add the corresponding `if` before it.")
     } else if message.contains("if condition is not truthy/falsy-compatible") {
         Some("use a truthy/falsy-compatible value in the condition, such as bool, number, string, or char.")
+    } else if message.contains("while condition is not truthy/falsy-compatible") {
+        Some("use a truthy/falsy-compatible value in the while condition, such as bool, number, string, or char.")
+    } else if message.contains("break used outside of loop") {
+        Some("use `break` only inside a loop body.")
+    } else if message.contains("continue used outside of loop") {
+        Some("use `continue` only inside a loop body.")
     } else if message.contains("expected '}'") {
         Some("close the block with '}' to end its local scope.")
     } else if message.contains("undefined symbol") {

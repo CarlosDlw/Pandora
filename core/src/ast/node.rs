@@ -97,6 +97,17 @@ pub enum AstNode {
         else_branch: Option<ArenaId>,
         span: Span,
     },
+    WhileStmt {
+        condition: ArenaId,
+        body: ArenaId,
+        span: Span,
+    },
+    BreakStmt {
+        span: Span,
+    },
+    ContinueStmt {
+        span: Span,
+    },
     BlockStmt {
         statements: Vec<ArenaId>,
         span: Span,
@@ -124,6 +135,9 @@ impl AstNode {
             | Self::LetDecl { span, .. }
             | Self::AssignStmt { span, .. }
             | Self::IfStmt { span, .. }
+            | Self::WhileStmt { span, .. }
+            | Self::BreakStmt { span, .. }
+            | Self::ContinueStmt { span, .. }
             | Self::BlockStmt { span, .. }
             | Self::ExprStmt { span, .. } => *span,
         }

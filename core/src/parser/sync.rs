@@ -29,6 +29,9 @@ impl Parser {
             current.kind,
             TokenKind::If
                 | TokenKind::Else
+                | TokenKind::While
+                | TokenKind::Break
+                | TokenKind::Continue
                 | TokenKind::Integer
                 | TokenKind::Float
                 | TokenKind::String

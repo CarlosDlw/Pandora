@@ -17,6 +17,7 @@ pub struct Parser {
     file_id: FileId,
     source_len: u32,
     invalid_node_id: ArenaId,
+    loop_depth: usize,
 }
 
 pub fn parse(file_id: FileId, source_len: u32, tokens: Vec<Token>) -> (Ast, Diagnostics) {
@@ -41,6 +42,7 @@ impl Parser {
             file_id,
             source_len,
             invalid_node_id,
+            loop_depth: 0,
         }
     }
 
@@ -59,6 +61,15 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> ArenaId {
+        if self.current().is_some_and(|token| token.kind == TokenKind::While) {
+            return self.parse_while_stmt();
+        }
+        if self.current().is_some_and(|token| token.kind == TokenKind::Break) {
+            return self.parse_break_stmt();
+        }
+        if self.current().is_some_and(|token| token.kind == TokenKind::Continue) {
+            return self.parse_continue_stmt();
+        }
         if self.current().is_some_and(|token| token.kind == TokenKind::If) {
             return self.parse_if_stmt();
         }
@@ -81,6 +92,43 @@ impl Parser {
         let expr = self.parse_expression();
         let span = self.node_span(expr);
         self.insert_node(AstNode::ExprStmt { expr, span })
+    }
+
+    fn parse_while_stmt(&mut self) -> ArenaId {
+        let while_span = self.current_span_or_eof();
+        self.bump();
+        if self.current().is_none() || self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+            self.push_error("expected condition expression after 'while'", self.current_span_or_eof());
+        }
+        let condition = self.parse_expression();
+        let prev_depth = self.loop_depth;
+        self.loop_depth += 1;
+        let body = self.parse_if_branch_block("expected '{' after while condition");
+        self.loop_depth = prev_depth;
+        let span = merge_span(while_span, self.node_span(body));
+        self.insert_node(AstNode::WhileStmt {
+            condition,
+            body,
+            span,
+        })
+    }
+
+    fn parse_break_stmt(&mut self) -> ArenaId {
+        let span = self.current_span_or_eof();
+        self.bump();
+        if self.loop_depth == 0 {
+            self.push_error("break used outside of loop", span);
+        }
+        self.insert_node(AstNode::BreakStmt { span })
+    }
+
+    fn parse_continue_stmt(&mut self) -> ArenaId {
+        let span = self.current_span_or_eof();
+        self.bump();
+        if self.loop_depth == 0 {
+            self.push_error("continue used outside of loop", span);
+        }
+        self.insert_node(AstNode::ContinueStmt { span })
     }
 
     fn parse_if_stmt(&mut self) -> ArenaId {
@@ -605,5 +653,43 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|d| d.message.contains("unexpected 'else' without matching 'if'")));
+    }
+
+    #[test]
+    fn parses_while_break_continue_statements() {
+        let source = "while 1 { if true { continue }; break }";
+        let lex_out = lex(FileId::from_u32(16), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(16), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(ast.get(ast.roots[0]), Some(AstNode::WhileStmt { .. })));
+    }
+
+    #[test]
+    fn reports_missing_while_block() {
+        let source = "while true x := 1";
+        let lex_out = lex(FileId::from_u32(17), source);
+        let (_ast, diagnostics) = parse(FileId::from_u32(17), source.len() as u32, lex_out.tokens);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("expected '{' after while condition")));
+    }
+
+    #[test]
+    fn reports_break_outside_loop() {
+        let source = "break";
+        let lex_out = lex(FileId::from_u32(18), source);
+        let (_ast, diagnostics) = parse(FileId::from_u32(18), source.len() as u32, lex_out.tokens);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("break used outside of loop")));
+    }
+
+    #[test]
+    fn reports_continue_outside_loop() {
+        let source = "continue";
+        let lex_out = lex(FileId::from_u32(19), source);
+        let (_ast, diagnostics) = parse(FileId::from_u32(19), source.len() as u32, lex_out.tokens);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("continue used outside of loop")));
     }
 }

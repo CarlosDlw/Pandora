@@ -111,6 +111,21 @@ impl<'a> Lowering<'a> {
                     span: *span,
                 }
             }
+            AstNode::WhileStmt {
+                condition,
+                body,
+                span,
+            } => {
+                let condition = self.lower_expr(*condition);
+                let body = self.lower_if_branch(*body);
+                HirStmt::While {
+                    condition,
+                    body,
+                    span: *span,
+                }
+            }
+            AstNode::BreakStmt { span } => HirStmt::Break { span: *span },
+            AstNode::ContinueStmt { span } => HirStmt::Continue { span: *span },
             AstNode::Invalid { span } => HirStmt::Invalid { span: *span },
             other => {
                 let expr = self.lower_expr(id);
@@ -250,6 +265,9 @@ impl<'a> Lowering<'a> {
             AstNode::LetDecl { .. }
             | AstNode::AssignStmt { .. }
             | AstNode::IfStmt { .. }
+            | AstNode::WhileStmt { .. }
+            | AstNode::BreakStmt { .. }
+            | AstNode::ContinueStmt { .. }
             | AstNode::ExprStmt { .. }
             | AstNode::BlockStmt { .. } => {
                 self.push_error("statement used where expression expected", self.node_span(id));
@@ -581,5 +599,19 @@ mod tests {
         let (hir, _symbols, diagnostics) = lower(&ast);
         assert!(!diagnostics.has_errors());
         assert!(matches!(hir.stmts.first(), Some(HirStmt::If { .. })));
+    }
+
+    #[test]
+    fn lowers_while_break_continue_into_hir() {
+        let src = "while 1 { continue; break }";
+        let lex_output = lex(FileId::from_u32(11), src);
+        let (ast, _) = parse(FileId::from_u32(11), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        let Some(HirStmt::While { body, .. }) = hir.stmts.first() else {
+            panic!("expected while");
+        };
+        assert!(body.iter().any(|s| matches!(s, HirStmt::Continue { .. })));
+        assert!(body.iter().any(|s| matches!(s, HirStmt::Break { .. })));
     }
 }

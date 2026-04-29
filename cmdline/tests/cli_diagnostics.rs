@@ -118,3 +118,35 @@ fn check_mode_reports_invalid_if_condition() {
                 .and(contains("truthy/falsy-compatible value")),
         );
 }
+
+#[test]
+fn check_mode_reports_break_outside_loop() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"break\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(
+            contains("error: break used outside of loop")
+                .and(contains("use `break` only inside a loop body")),
+        );
+}
+
+#[test]
+fn check_mode_reports_continue_outside_loop() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"continue\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(
+            contains("error: continue used outside of loop")
+                .and(contains("use `continue` only inside a loop body")),
+        );
+}

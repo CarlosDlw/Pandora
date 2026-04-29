@@ -90,3 +90,18 @@ fn runs_example_004_if_else() {
                 .and(contains("else-if branch")),
         );
 }
+
+#[test]
+fn runs_example_005_while_break_continue() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/005_while_break_continue.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("sum of odd numbers below 8: 16")
+                .and(contains("done")),
+        );
+}

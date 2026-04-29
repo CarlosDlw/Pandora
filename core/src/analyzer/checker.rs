@@ -21,6 +21,7 @@ pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnost
         symbols,
         diagnostics: Diagnostics::new(),
         model: SemanticModel::default(),
+        loop_depth: 0,
     };
     checker.check_program();
     (checker.model, checker.diagnostics)
@@ -31,6 +32,7 @@ struct Checker<'a> {
     symbols: &'a mut SymbolTable,
     diagnostics: Diagnostics,
     model: SemanticModel,
+    loop_depth: usize,
 }
 
 impl<'a> Checker<'a> {
@@ -120,6 +122,37 @@ impl<'a> Checker<'a> {
                     for stmt in else_stmts {
                         let _ = self.check_stmt(stmt);
                     }
+                }
+                AnalyzerType::Unknown
+            }
+            HirStmt::While {
+                condition,
+                body,
+                span,
+            } => {
+                let cond_ty = self.check_expr(*condition, *span);
+                if !is_truthy_falsy_compatible(&cond_ty) && cond_ty != AnalyzerType::Unknown {
+                    self.push_error(
+                        format!("while condition is not truthy/falsy-compatible: {cond_ty:?}"),
+                        *span,
+                    );
+                }
+                self.loop_depth += 1;
+                for stmt in body {
+                    let _ = self.check_stmt(stmt);
+                }
+                self.loop_depth = self.loop_depth.saturating_sub(1);
+                AnalyzerType::Unknown
+            }
+            HirStmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    self.push_error("break used outside of loop", *span);
+                }
+                AnalyzerType::Unknown
+            }
+            HirStmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    self.push_error("continue used outside of loop", *span);
                 }
                 AnalyzerType::Unknown
             }
@@ -696,5 +729,37 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|d| d.message.contains("if condition is not truthy/falsy-compatible")));
+    }
+
+    #[test]
+    fn accepts_truthy_while_condition() {
+        let src = "while 1 { break }";
+        let lex_output = lex(FileId::from_u32(35), src);
+        let (ast, _) = parse(FileId::from_u32(35), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_break_outside_loop_semantically() {
+        let src = "break";
+        let lex_output = lex(FileId::from_u32(36), src);
+        let (ast, _) = parse(FileId::from_u32(36), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.iter().any(|d| d.message.contains("break used outside of loop")));
+    }
+
+    #[test]
+    fn rejects_continue_outside_loop_semantically() {
+        let src = "continue";
+        let lex_output = lex(FileId::from_u32(37), src);
+        let (ast, _) = parse(FileId::from_u32(37), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("continue used outside of loop")));
     }
 }

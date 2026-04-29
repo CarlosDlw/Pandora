@@ -237,6 +237,9 @@ impl<'a> Lexer<'a> {
             "true" | "false" => TokenKind::Bool,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
+            "while" => TokenKind::While,
+            "break" => TokenKind::Break,
+            "continue" => TokenKind::Continue,
             _ if is_known_type(text) => TokenKind::TypeName,
             _ => TokenKind::Identifier,
         };
@@ -669,5 +672,32 @@ print(name, age)
             .tokens
             .iter()
             .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "gift"));
+    }
+
+    #[test]
+    fn lexes_while_break_continue_keywords() {
+        let output = lex(FileId::from_u32(12), "while true { break; continue }");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::While));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Break));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Continue));
+    }
+
+    #[test]
+    fn keeps_loop_keyword_prefixes_as_identifiers() {
+        let output = lex(FileId::from_u32(13), "breakfast := 1; continued := 2; meanwhile := 3");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output
+            .tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "breakfast"));
+        assert!(output
+            .tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "continued"));
+        assert!(output
+            .tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "meanwhile"));
     }
 }
