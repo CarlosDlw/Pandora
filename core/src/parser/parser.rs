@@ -61,6 +61,15 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> ArenaId {
+        if self.current().is_some_and(|token| token.kind == TokenKind::Struct) {
+            return self.parse_struct_decl();
+        }
+        if self.current().is_some_and(|token| token.kind == TokenKind::Trait) {
+            return self.parse_trait_decl();
+        }
+        if self.current().is_some_and(|token| token.kind == TokenKind::Impl) {
+            return self.parse_impl_block();
+        }
         if self.current().is_some_and(|token| token.kind == TokenKind::Fn) {
             return self.parse_fn_decl();
         }
@@ -403,6 +412,11 @@ impl Parser {
         if self.current().is_some_and(|t| t.kind == TokenKind::Fn) {
             return self.parse_fn_type_ref();
         }
+        if self.current().is_some_and(|t| t.kind == TokenKind::SelfType) {
+            let span = self.current_span_or_eof();
+            self.bump();
+            return self.insert_node(AstNode::SelfTypeRef { span });
+        }
         if self.current().is_some_and(|t| t.kind == TokenKind::LeftParen) {
             return self.parse_tuple_type_ref();
         }
@@ -480,9 +494,16 @@ impl Parser {
         self.insert_node(AstNode::TypeName { name, span })
     }
 
-    fn type_name_from_node(&self, id: ArenaId) -> String {
+    pub(super) fn type_name_from_node(&self, id: ArenaId) -> String {
         match self.arena.get(id) {
             Some(AstNode::TypeName { name, .. }) => name.clone(),
+            _ => "<invalid>".to_string(),
+        }
+    }
+
+    pub(super) fn identifier_name_from_node(&self, id: ArenaId) -> String {
+        match self.arena.get(id) {
+            Some(AstNode::Identifier { name, .. }) => name.clone(),
             _ => "<invalid>".to_string(),
         }
     }
@@ -509,34 +530,7 @@ impl Parser {
             self.push_error("expected '(' after function name", span);
             return self.invalid_node(span);
         }
-        let mut params = Vec::new();
-        if !self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
-            loop {
-                let param_name_token = match self.current() {
-                    Some(token) if token.kind == TokenKind::Identifier => token.clone(),
-                    _ => {
-                        let span = self.current_span_or_eof();
-                        self.push_error("expected parameter name", span);
-                        return self.invalid_node(span);
-                    }
-                };
-                self.bump();
-                let param_name = self.insert_node(AstNode::Identifier {
-                    name: param_name_token.lexeme,
-                    span: param_name_token.span,
-                });
-                if !self.consume_if(TokenKind::Colon) {
-                    self.push_error("expected ':' after parameter name", self.current_span_or_eof());
-                    return self.invalid_node(param_name_token.span);
-                }
-                let param_ty = self.parse_type_ref();
-                params.push((param_name, param_ty));
-                if self.consume_if(TokenKind::Comma) {
-                    continue;
-                }
-                break;
-            }
-        }
+        let params = self.parse_fn_params(true);
         if !self.consume_if(TokenKind::RightParen) {
             self.push_error("expected ')' after function parameters", self.current_span_or_eof());
             return self.invalid_node(name_token.span);
@@ -554,6 +548,173 @@ impl Parser {
             return_ty,
             body,
             span,
+        })
+    }
+
+    fn parse_struct_decl(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        let name = self.parse_required_identifier("expected struct name after 'struct'");
+        if !self.consume_if(TokenKind::LeftBrace) {
+            self.push_error("expected '{' after struct name", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let mut fields = Vec::new();
+        while self.current().is_some() && !self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+            let field_name = self.parse_required_identifier("expected field name in struct");
+            if !self.consume_if(TokenKind::Colon) {
+                self.push_error("expected ':' after field name", self.current_span_or_eof());
+                return self.invalid_node(start);
+            }
+            let field_ty = self.parse_type_ref();
+            fields.push((field_name, field_ty));
+            if self.consume_if(TokenKind::Comma) {
+                continue;
+            }
+            break;
+        }
+        if !self.consume_if(TokenKind::RightBrace) {
+            self.push_error("expected '}' after struct fields", self.current_span_or_eof());
+        }
+        let span = merge_span(start, self.previous_span_or(start));
+        self.insert_node(AstNode::StructDecl { name, fields, span })
+    }
+
+    fn parse_trait_decl(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        let name = self.parse_required_identifier("expected trait name after 'trait'");
+        if !self.consume_if(TokenKind::LeftBrace) {
+            self.push_error("expected '{' after trait name", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let mut methods = Vec::new();
+        while self.current().is_some() && !self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+            if !self.current().is_some_and(|t| t.kind == TokenKind::Fn) {
+                self.push_error("expected 'fn' in trait declaration", self.current_span_or_eof());
+                self.bump();
+                continue;
+            }
+            let method = self.parse_trait_method_signature();
+            methods.push(method);
+            self.consume_if(TokenKind::Semicolon);
+        }
+        if !self.consume_if(TokenKind::RightBrace) {
+            self.push_error("expected '}' after trait body", self.current_span_or_eof());
+        }
+        let span = merge_span(start, self.previous_span_or(start));
+        self.insert_node(AstNode::TraitDecl { name, methods, span })
+    }
+
+    fn parse_impl_block(&mut self) -> ArenaId {
+        let start = self.current_span_or_eof();
+        self.bump();
+        let first_ty = self.parse_type_ref();
+        let (trait_ty, target_ty) = if self.consume_if(TokenKind::For) {
+            (Some(first_ty), self.parse_type_ref())
+        } else {
+            (None, first_ty)
+        };
+        if !self.consume_if(TokenKind::LeftBrace) {
+            self.push_error("expected '{' after impl header", self.current_span_or_eof());
+            return self.invalid_node(start);
+        }
+        let mut methods = Vec::new();
+        while self.current().is_some() && !self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+            if !self.current().is_some_and(|t| t.kind == TokenKind::Fn) {
+                self.push_error("expected 'fn' in impl block", self.current_span_or_eof());
+                self.bump();
+                continue;
+            }
+            methods.push(self.parse_fn_decl());
+            self.consume_if(TokenKind::Semicolon);
+        }
+        if !self.consume_if(TokenKind::RightBrace) {
+            self.push_error("expected '}' after impl body", self.current_span_or_eof());
+        }
+        let span = merge_span(start, self.previous_span_or(start));
+        self.insert_node(AstNode::ImplBlock {
+            target_ty,
+            trait_ty,
+            methods,
+            span,
+        })
+    }
+
+    fn parse_trait_method_signature(&mut self) -> ArenaId {
+        let fn_span = self.current_span_or_eof();
+        self.bump();
+        let name = self.parse_required_identifier("expected method name after 'fn'");
+        if !self.consume_if(TokenKind::LeftParen) {
+            self.push_error("expected '(' after method name", self.current_span_or_eof());
+            return self.invalid_node(fn_span);
+        }
+        let params = self.parse_fn_params(true);
+        if !self.consume_if(TokenKind::RightParen) {
+            self.push_error("expected ')' after method parameters", self.current_span_or_eof());
+        }
+        if !self.consume_if(TokenKind::Arrow) {
+            self.push_error("expected '->' after method parameters", self.current_span_or_eof());
+        }
+        let return_ty = self.parse_type_ref();
+        let empty_body = self.insert_node(AstNode::BlockStmt {
+            statements: Vec::new(),
+            span: self.previous_span_or(fn_span),
+        });
+        self.insert_node(AstNode::FnDecl {
+            name,
+            params,
+            return_ty,
+            body: empty_body,
+            span: merge_span(fn_span, self.node_span(return_ty)),
+        })
+    }
+
+    fn parse_fn_params(&mut self, allow_self: bool) -> Vec<(ArenaId, ArenaId)> {
+        let mut params = Vec::new();
+        if self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+            return params;
+        }
+        loop {
+            if allow_self && self.current().is_some_and(|t| t.kind == TokenKind::SelfKw) {
+                let self_span = self.current_span_or_eof();
+                self.bump();
+                let self_name = self.insert_node(AstNode::Identifier {
+                    name: "self".to_string(),
+                    span: self_span,
+                });
+                let self_ty = self.insert_node(AstNode::SelfTypeRef { span: self_span });
+                params.push((self_name, self_ty));
+            } else {
+                let param_name = self.parse_required_identifier("expected parameter name");
+                if !self.consume_if(TokenKind::Colon) {
+                    self.push_error("expected ':' after parameter name", self.current_span_or_eof());
+                    break;
+                }
+                let param_ty = self.parse_type_ref();
+                params.push((param_name, param_ty));
+            }
+            if self.consume_if(TokenKind::Comma) {
+                continue;
+            }
+            break;
+        }
+        params
+    }
+
+    fn parse_required_identifier(&mut self, message: &str) -> ArenaId {
+        let token = match self.current() {
+            Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+            _ => {
+                let span = self.current_span_or_eof();
+                self.push_error(message, span);
+                return self.invalid_node(span);
+            }
+        };
+        self.bump();
+        self.insert_node(AstNode::Identifier {
+            name: token.lexeme,
+            span: token.span,
         })
     }
 
@@ -1311,5 +1472,29 @@ mod tests {
             panic!("expected let");
         };
         assert!(matches!(ast.get(*value), Some(AstNode::NullLiteral { .. })));
+    }
+
+    #[test]
+    fn parses_struct_trait_impl_and_method_calls() {
+        let source = r#"
+            struct Point { x: i32, y: i32 }
+            trait Show { fn show(self) -> str }
+            impl Point {
+                fn sum(self) -> i32 { return self.x + self.y }
+                fn origin() -> Point { return Point { x: 0, y: 0 } }
+            }
+            impl Show for Point {
+                fn show(self) -> str { return "ok" }
+            }
+            p: Point = Point { x: 1, y: 2 }
+            s := p.sum()
+            o := Point::origin()
+        "#;
+        let lex_out = lex(FileId::from_u32(57), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(57), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::StructDecl { .. }))));
+        assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::TraitDecl { .. }))));
+        assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::ImplBlock { .. }))));
     }
 }

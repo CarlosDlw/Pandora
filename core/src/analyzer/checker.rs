@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::Type as AnalyzerType,
-    hir::{BinOp, Hir, HirExpr, HirId, HirStmt, SymbolTable, UnaryOp},
+    hir::{BinOp, Hir, HirExpr, HirId, HirStmt, ScopeId, SymbolId, SymbolTable, UnaryOp},
     integer_lit::{literal_f64, literal_u128},
 };
 use foundation::{
@@ -23,6 +23,10 @@ pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnost
         model: SemanticModel::default(),
         loop_depth: 0,
         fn_return_stack: Vec::new(),
+        self_type_stack: Vec::new(),
+        struct_fields: HashMap::new(),
+        trait_methods: HashMap::new(),
+        impl_methods: HashMap::new(),
     };
     checker.check_program();
     (checker.model, checker.diagnostics)
@@ -35,6 +39,10 @@ struct Checker<'a> {
     model: SemanticModel,
     loop_depth: usize,
     fn_return_stack: Vec<AnalyzerType>,
+    self_type_stack: Vec<AnalyzerType>,
+    struct_fields: HashMap<SymbolId, Vec<(String, AnalyzerType)>>,
+    trait_methods: HashMap<SymbolId, Vec<(String, Vec<AnalyzerType>, AnalyzerType, bool)>>,
+    impl_methods: HashMap<(SymbolId, Option<SymbolId>, String, bool), (Vec<AnalyzerType>, AnalyzerType)>,
 }
 
 impl<'a> Checker<'a> {
@@ -102,6 +110,110 @@ impl<'a> Checker<'a> {
                         .collect(),
                     ret: Box::new(return_ty.clone()),
                 }
+            }
+            HirStmt::StructDecl { symbol, fields, .. } => {
+                self.struct_fields.insert(*symbol, fields.clone());
+                AnalyzerType::Struct(*symbol)
+            }
+            HirStmt::TraitDecl { symbol, methods, .. } => {
+                self.trait_methods.insert(*symbol, methods.clone());
+                AnalyzerType::Trait(*symbol)
+            }
+            HirStmt::ImplBlock {
+                target,
+                trait_target,
+                methods,
+                span,
+            } => {
+                let resolved_target = resolve_self_type(target.clone(), target.clone());
+                self.self_type_stack.push(resolved_target.clone());
+                for method_stmt in methods {
+                    if let HirStmt::FnDecl { params, .. } = method_stmt {
+                        for param in params {
+                            if let Some(sym) = self.symbols.symbol_mut(*param) {
+                                if matches!(sym.ty, AnalyzerType::SelfType) {
+                                    sym.ty = resolved_target.clone();
+                                }
+                            }
+                        }
+                    }
+                    let _ = self.check_stmt(method_stmt);
+                    if let HirStmt::FnDecl {
+                        symbol,
+                        params,
+                        return_ty,
+                        ..
+                    } = method_stmt
+                    {
+                        let (name, param_tys) = {
+                            let sym = self.symbols.symbol(*symbol);
+                            let name = sym.map(|s| s.name.clone()).unwrap_or_else(|| "<invalid>".to_string());
+                            let ptys = params
+                                .iter()
+                                .map(|id| {
+                                    self.symbols
+                                        .symbol(*id)
+                                        .map(|s| resolve_self_type(s.ty.clone(), resolved_target.clone()))
+                                        .unwrap_or(AnalyzerType::Unknown)
+                                })
+                                .collect::<Vec<_>>();
+                            (name, ptys)
+                        };
+                        let is_instance = matches!(param_tys.first(), Some(AnalyzerType::SelfType))
+                            || matches!(param_tys.first(), Some(t) if *t == resolved_target);
+                        let target_sym = match resolved_target {
+                            AnalyzerType::Struct(id) => Some(id),
+                            _ => None,
+                        };
+                        let trait_sym = match trait_target {
+                            Some(AnalyzerType::Trait(id)) => Some(*id),
+                            _ => None,
+                        };
+                        if let Some(target_sym) = target_sym {
+                            self.impl_methods.insert(
+                                (target_sym, trait_sym, name, is_instance),
+                                (
+                                    param_tys
+                                        .into_iter()
+                                        .map(|t| resolve_self_type(t, resolved_target.clone()))
+                                        .collect(),
+                                    resolve_self_type(return_ty.clone(), resolved_target.clone()),
+                                ),
+                            );
+                        }
+                    }
+                }
+                let _ = self.self_type_stack.pop();
+
+                if let (AnalyzerType::Struct(sid), Some(AnalyzerType::Trait(tid))) =
+                    (resolved_target.clone(), trait_target.clone())
+                {
+                    if let Some(required_methods) = self.trait_methods.get(&tid).cloned() {
+                        for (name, params, ret, is_instance) in required_methods {
+                            let Some((impl_params, impl_ret)) =
+                                self.impl_methods.get(&(sid, Some(tid), name.clone(), is_instance))
+                            else {
+                                self.push_error(
+                                    format!("trait impl missing required method '{name}'"),
+                                    *span,
+                                );
+                                continue;
+                            };
+                            let expected_params = params
+                                .into_iter()
+                                .map(|t| resolve_self_type(t, AnalyzerType::Struct(sid)))
+                                .collect::<Vec<_>>();
+                            let expected_ret = resolve_self_type(ret, AnalyzerType::Struct(sid));
+                            if *impl_params != expected_params || *impl_ret != expected_ret {
+                                self.push_error(
+                                    format!("trait method '{name}' signature mismatch"),
+                                    *span,
+                                );
+                            }
+                        }
+                    }
+                }
+                AnalyzerType::Unknown
             }
             HirStmt::TupleDestructure { names, ty, value, span } => {
                 let value_ty = self.check_expr(*value, *span);
@@ -308,6 +420,154 @@ impl<'a> Checker<'a> {
                 .symbol(*symbol_id)
                 .map(|s| s.ty.clone())
                 .unwrap_or(AnalyzerType::Unknown),
+            Some(HirExpr::StructLiteral { type_name, fields }) => {
+                let struct_ty = self.resolve_named_type(type_name);
+                let AnalyzerType::Struct(symbol) = struct_ty.clone() else {
+                    self.push_error(format!("unknown struct type '{type_name}'"), span);
+                    return AnalyzerType::Unknown;
+                };
+                let Some(declared_fields) = self.struct_fields.get(&symbol).cloned() else {
+                    self.push_error(format!("unknown struct '{}'", type_name), span);
+                    return AnalyzerType::Unknown;
+                };
+                for (name, expr) in fields {
+                    let expected = declared_fields
+                        .iter()
+                        .find(|(fname, _)| fname == name)
+                        .map(|(_, t)| t.clone());
+                    let Some(expected_ty) = expected else {
+                        self.push_error(format!("unknown field '{name}' for struct '{type_name}'"), span);
+                        continue;
+                    };
+                    let actual = self.check_expr_expected(*expr, span, Some(&expected_ty));
+                    if !is_assignable(&expected_ty, &actual) {
+                        self.push_error(
+                            format!("field '{name}' expects {expected_ty:?}, got {actual:?}"),
+                            span,
+                        );
+                    }
+                }
+                for (decl_name, _) in &declared_fields {
+                    if !fields.iter().any(|(name, _)| name == decl_name) {
+                        self.push_error(
+                            format!("missing field '{decl_name}' in struct literal '{type_name}'"),
+                            span,
+                        );
+                    }
+                }
+                AnalyzerType::Struct(symbol)
+            }
+            Some(HirExpr::FieldAccess { base, field }) => {
+                let base_ty = self.check_expr(*base, span);
+                let AnalyzerType::Struct(symbol) = base_ty else {
+                    self.push_error("field access requires struct value", span);
+                    return AnalyzerType::Unknown;
+                };
+                let Some(fields) = self.struct_fields.get(&symbol) else {
+                    self.push_error("unknown struct for field access", span);
+                    return AnalyzerType::Unknown;
+                };
+                fields
+                    .iter()
+                    .find(|(name, _)| name == field)
+                    .map(|(_, ty)| ty.clone())
+                    .unwrap_or_else(|| {
+                        self.push_error(format!("unknown field '{field}'"), span);
+                        AnalyzerType::Unknown
+                    })
+            }
+            Some(HirExpr::MethodCall {
+                receiver,
+                method,
+                args,
+            }) => {
+                let recv_ty = self.check_expr(*receiver, span);
+                let AnalyzerType::Struct(struct_id) = recv_ty.clone() else {
+                    self.push_error("instance method call requires struct receiver", span);
+                    return AnalyzerType::Unknown;
+                };
+                let candidates = self
+                    .impl_methods
+                    .iter()
+                    .filter(|((sid, _, name, is_instance), _)| {
+                        *sid == struct_id && *name == *method && *is_instance
+                    })
+                    .map(|(_, sig)| sig.clone())
+                    .collect::<Vec<_>>();
+                let Some((param_tys, ret_ty)) = candidates.first().cloned() else {
+                    self.push_error(format!("unknown method '{}'", method), span);
+                    return AnalyzerType::Unknown;
+                };
+                let expected_args = &param_tys[1..];
+                if expected_args.len() != args.len() {
+                    self.push_error(
+                        format!(
+                            "invalid argument count for method '{}': expected {}, got {}",
+                            method,
+                            expected_args.len(),
+                            args.len()
+                        ),
+                        span,
+                    );
+                }
+                for (idx, arg) in args.iter().enumerate() {
+                    let expected = expected_args.get(idx).cloned().unwrap_or(AnalyzerType::Unknown);
+                    let actual = self.check_expr_expected(*arg, span, Some(&expected));
+                    if !is_assignable(&expected, &actual) {
+                        self.push_error(
+                            format!("invalid argument type at position {idx}: expected {expected:?}, got {actual:?}"),
+                            span,
+                        );
+                    }
+                }
+                ret_ty
+            }
+            Some(HirExpr::StaticMethodCall {
+                type_name,
+                method,
+                args,
+            }) => {
+                let ty = self.resolve_named_type(type_name);
+                let AnalyzerType::Struct(struct_id) = ty else {
+                    self.push_error(format!("unknown struct type '{type_name}'"), span);
+                    return AnalyzerType::Unknown;
+                };
+                let candidates = self
+                    .impl_methods
+                    .iter()
+                    .filter(|((sid, _, name, is_instance), _)| {
+                        *sid == struct_id && *name == *method && !*is_instance
+                    })
+                    .map(|(_, sig)| sig.clone())
+                    .collect::<Vec<_>>();
+                let Some((param_tys, ret_ty)) = candidates.first().cloned() else {
+                    self.push_error(format!("unknown static method '{}::{}'", type_name, method), span);
+                    return AnalyzerType::Unknown;
+                };
+                if param_tys.len() != args.len() {
+                    self.push_error(
+                        format!(
+                            "invalid argument count for static method '{}::{}': expected {}, got {}",
+                            type_name,
+                            method,
+                            param_tys.len(),
+                            args.len()
+                        ),
+                        span,
+                    );
+                }
+                for (idx, arg) in args.iter().enumerate() {
+                    let expected = param_tys.get(idx).cloned().unwrap_or(AnalyzerType::Unknown);
+                    let actual = self.check_expr_expected(*arg, span, Some(&expected));
+                    if !is_assignable(&expected, &actual) {
+                        self.push_error(
+                            format!("invalid argument type at position {idx}: expected {expected:?}, got {actual:?}"),
+                            span,
+                        );
+                    }
+                }
+                ret_ty
+            }
             Some(HirExpr::Unary {
                 op: UnaryOp::Neg,
                 operand,
@@ -702,6 +962,14 @@ impl<'a> Checker<'a> {
         self.diagnostics
             .push(Diagnostic::new(message, span, Severity::Error));
     }
+
+    fn resolve_named_type(&self, name: &str) -> AnalyzerType {
+        self.symbols
+            .resolve(ScopeId(0), name)
+            .and_then(|id| self.symbols.symbol(id))
+            .map(|s| s.ty.clone())
+            .unwrap_or(AnalyzerType::Unknown)
+    }
 }
 
 fn integer_fits(value: u128, signed: bool, bits: u16) -> bool {
@@ -762,6 +1030,26 @@ fn all_paths_return(stmts: &[HirStmt]) -> bool {
             ..
         } => all_paths_return(then_branch) && all_paths_return(else_branch),
         _ => false,
+    }
+}
+
+fn resolve_self_type(ty: AnalyzerType, concrete: AnalyzerType) -> AnalyzerType {
+    match ty {
+        AnalyzerType::SelfType => concrete,
+        AnalyzerType::Function { params, ret } => AnalyzerType::Function {
+            params: params
+                .into_iter()
+                .map(|p| resolve_self_type(p, concrete.clone()))
+                .collect(),
+            ret: Box::new(resolve_self_type(*ret, concrete)),
+        },
+        AnalyzerType::Tuple(items) => AnalyzerType::Tuple(
+            items
+                .into_iter()
+                .map(|i| resolve_self_type(i, concrete.clone()))
+                .collect(),
+        ),
+        other => other,
     }
 }
 

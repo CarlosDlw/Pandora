@@ -65,6 +65,24 @@ pub enum HirExpr {
         position: IncDecPosition,
     },
     Call { callee: HirId, args: Vec<HirId> },
+    MethodCall {
+        receiver: HirId,
+        method: String,
+        args: Vec<HirId>,
+    },
+    StaticMethodCall {
+        type_name: String,
+        method: String,
+        args: Vec<HirId>,
+    },
+    StructLiteral {
+        type_name: String,
+        fields: Vec<(String, HirId)>,
+    },
+    FieldAccess {
+        base: HirId,
+        field: String,
+    },
     Tuple(Vec<HirId>),
     TupleAccess { tuple: HirId, index: usize },
     Invalid,
@@ -84,8 +102,28 @@ pub enum HirStmt {
         value: HirId,
         span: Span,
     },
+    StructDecl {
+        symbol: SymbolId,
+        name: String,
+        fields: Vec<(String, crate::analyzer::Type)>,
+        span: Span,
+    },
+    TraitDecl {
+        symbol: SymbolId,
+        name: String,
+        methods: Vec<(String, Vec<crate::analyzer::Type>, crate::analyzer::Type, bool)>,
+        span: Span,
+    },
+    ImplBlock {
+        target: crate::analyzer::Type,
+        trait_target: Option<crate::analyzer::Type>,
+        methods: Vec<HirStmt>,
+        span: Span,
+    },
     FnDecl {
         symbol: SymbolId,
+        name: String,
+        is_instance: bool,
         params: Vec<SymbolId>,
         return_ty: crate::analyzer::Type,
         body: Vec<HirStmt>,

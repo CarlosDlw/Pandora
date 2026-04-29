@@ -1,3 +1,5 @@
+use crate::hir::SymbolId;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int { signed: bool, bits: u16 },
@@ -14,4 +16,7 @@ pub enum Type {
         ret: Box<Type>,
     },
     Tuple(Vec<Type>),
+    Struct(SymbolId),
+    Trait(SymbolId),
+    SelfType,
 }

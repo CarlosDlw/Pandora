@@ -142,6 +142,38 @@ impl<'a> Vm<'a> {
                     }
                 }
             }
+            Op::MakeStruct(type_name, field_names) => {
+                let mut fields = HashMap::new();
+                for field in field_names.iter().rev() {
+                    fields.insert(field.clone(), self.pop_one(span)?);
+                }
+                self.stack.push(Value::StructInstance {
+                    type_name: type_name.clone(),
+                    fields,
+                });
+            }
+            Op::StructGet(field) => {
+                let base = self.pop_one(span)?;
+                match base {
+                    Value::StructInstance { fields, .. } => {
+                        let value = fields.get(field).cloned().ok_or_else(|| {
+                            Diagnostic::new(
+                                format!("unknown struct field '{field}'"),
+                                span,
+                                Severity::Error,
+                            )
+                        })?;
+                        self.stack.push(value);
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("field access on non-struct value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                }
+            }
 
             Op::Load(sym) => {
                 let v = self
@@ -807,6 +839,7 @@ fn builtin_type_name(v: &Value) -> &'static str {
         Value::Builtin(_) => "function",
         Value::Function { .. } => "function",
         Value::Tuple(_) => "tuple",
+        Value::StructInstance { .. } => "struct",
     }
 }
 
@@ -822,6 +855,7 @@ fn is_truthy(v: &Value) -> bool {
         Value::Null => false,
         Value::Builtin(_) | Value::Function { .. } => true,
         Value::Tuple(items) => !items.is_empty(),
+        Value::StructInstance { .. } => true,
     }
 }
 

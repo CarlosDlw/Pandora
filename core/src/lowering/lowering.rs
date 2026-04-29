@@ -118,6 +118,94 @@ impl<'a> Lowering<'a> {
                 let symbol = self.predeclared_fns.get(&id).copied();
                 self.lower_fn_decl(*name, params, *return_ty, *body, *span, symbol)
             }
+            AstNode::StructDecl { name, fields, span } => {
+                let struct_name = match self.ast.get(*name) {
+                    Some(AstNode::Identifier { name, .. }) => name.clone(),
+                    _ => "<invalid>".to_string(),
+                };
+                let symbol = self.bind_symbol(*name, Type::Unknown, true);
+                if let Some(sym) = self.symbols.symbol_mut(symbol) {
+                    sym.ty = Type::Struct(symbol);
+                }
+                let fields = fields
+                    .iter()
+                    .filter_map(|(field_name_id, field_ty_id)| {
+                        let field_name = match self.ast.get(*field_name_id) {
+                            Some(AstNode::Identifier { name, .. }) => name.clone(),
+                            _ => return None,
+                        };
+                        Some((field_name, self.resolve_decl_type(Some(*field_ty_id))))
+                    })
+                    .collect::<Vec<_>>();
+                HirStmt::StructDecl {
+                    symbol,
+                    name: struct_name,
+                    fields,
+                    span: *span,
+                }
+            }
+            AstNode::TraitDecl {
+                name,
+                methods,
+                span,
+            } => {
+                let symbol = self.bind_symbol(*name, Type::Unknown, true);
+                let trait_name = match self.ast.get(*name) {
+                    Some(AstNode::Identifier { name, .. }) => name.clone(),
+                    _ => "<invalid>".to_string(),
+                };
+                if let Some(sym) = self.symbols.symbol_mut(symbol) {
+                    sym.ty = Type::Trait(symbol);
+                }
+                let mut sigs = Vec::new();
+                for method_id in methods {
+                    if let Some(AstNode::FnDecl {
+                        name,
+                        params,
+                        return_ty,
+                        ..
+                    }) = self.ast.get(*method_id)
+                    {
+                        let method_name = match self.ast.get(*name) {
+                            Some(AstNode::Identifier { name, .. }) => name.clone(),
+                            _ => "<invalid>".to_string(),
+                        };
+                        let mut ptys = Vec::new();
+                        let mut is_instance = false;
+                        for (idx, (_, pty)) in params.iter().enumerate() {
+                            let ty = self.resolve_decl_type(Some(*pty));
+                            if idx == 0 && matches!(ty, Type::SelfType) {
+                                is_instance = true;
+                            }
+                            ptys.push(ty);
+                        }
+                        let ret = self.resolve_decl_type(Some(*return_ty));
+                        sigs.push((method_name, ptys, ret, is_instance));
+                    }
+                }
+                HirStmt::TraitDecl {
+                    symbol,
+                    name: trait_name,
+                    methods: sigs,
+                    span: *span,
+                }
+            }
+            AstNode::ImplBlock {
+                target_ty,
+                trait_ty,
+                methods,
+                span,
+            } => {
+                let target = self.resolve_decl_type(Some(*target_ty));
+                let trait_target = trait_ty.map(|id| self.resolve_decl_type(Some(id)));
+                let methods = methods.iter().map(|id| self.lower_stmt(*id)).collect();
+                HirStmt::ImplBlock {
+                    target,
+                    trait_target,
+                    methods,
+                    span: *span,
+                }
+            }
             AstNode::TupleDestructureDecl {
                 names,
                 ty,
@@ -357,6 +445,64 @@ impl<'a> Lowering<'a> {
                     self.node_span(id),
                 )
             }
+            AstNode::MethodCallExpr {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                let receiver = self.lower_expr(*receiver);
+                let args = args.iter().map(|arg| self.lower_expr(*arg)).collect();
+                self.insert_hir_expr(
+                    HirExpr::MethodCall {
+                        receiver,
+                        method: method.clone(),
+                        args,
+                    },
+                    self.node_span(id),
+                )
+            }
+            AstNode::StaticMethodCallExpr {
+                type_name,
+                method,
+                args,
+                ..
+            } => {
+                let args = args.iter().map(|arg| self.lower_expr(*arg)).collect();
+                self.insert_hir_expr(
+                    HirExpr::StaticMethodCall {
+                        type_name: type_name.clone(),
+                        method: method.clone(),
+                        args,
+                    },
+                    self.node_span(id),
+                )
+            }
+            AstNode::StructLiteralExpr {
+                type_name, fields, ..
+            } => {
+                let fields = fields
+                    .iter()
+                    .map(|(name, expr)| (name.clone(), self.lower_expr(*expr)))
+                    .collect();
+                self.insert_hir_expr(
+                    HirExpr::StructLiteral {
+                        type_name: type_name.clone(),
+                        fields,
+                    },
+                    self.node_span(id),
+                )
+            }
+            AstNode::FieldAccessExpr { base, field, .. } => {
+                let base = self.lower_expr(*base);
+                self.insert_hir_expr(
+                    HirExpr::FieldAccess {
+                        base,
+                        field: field.clone(),
+                    },
+                    self.node_span(id),
+                )
+            }
             AstNode::TupleLiteral { items, .. } => {
                 let items = items.iter().map(|item| self.lower_expr(*item)).collect::<Vec<_>>();
                 self.insert_hir_expr(HirExpr::Tuple(items), self.node_span(id))
@@ -391,9 +537,16 @@ impl<'a> Lowering<'a> {
                 self.push_error("type name is not an expression", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
+            AstNode::SelfTypeRef { .. } => {
+                self.push_error("Self type is not an expression", self.node_span(id));
+                self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
+            }
             AstNode::LetDecl { .. }
             | AstNode::TupleDestructureDecl { .. }
             | AstNode::FnDecl { .. }
+            | AstNode::StructDecl { .. }
+            | AstNode::TraitDecl { .. }
+            | AstNode::ImplBlock { .. }
             | AstNode::AssignStmt { .. }
             | AstNode::CompoundAssignStmt { .. }
             | AstNode::IfStmt { .. }
@@ -420,6 +573,14 @@ impl<'a> Lowering<'a> {
         span: Span,
         predeclared_symbol: Option<SymbolId>,
     ) -> HirStmt {
+        let fn_name = match self.ast.get(name_id) {
+            Some(AstNode::Identifier { name, .. }) => name.clone(),
+            _ => "<invalid>".to_string(),
+        };
+        let is_instance = params
+            .first()
+            .map(|(_, ty)| matches!(self.ast.get(*ty), Some(AstNode::SelfTypeRef { .. })))
+            .unwrap_or(false);
         let ret_ty = self.resolve_decl_type(Some(return_ty_id));
         let fn_ty = Type::Function {
             params: params
@@ -445,6 +606,8 @@ impl<'a> Lowering<'a> {
         self.current_scope = parent_scope;
         HirStmt::FnDecl {
             symbol,
+            name: fn_name,
+            is_instance,
             params: param_symbols,
             return_ty: ret_ty,
             body,
@@ -479,11 +642,19 @@ impl<'a> Lowering<'a> {
             return Type::Unknown;
         };
         match self.ast.get(ty_id) {
+            Some(AstNode::SelfTypeRef { .. }) => Type::SelfType,
             Some(AstNode::TypeName { name, span }) => match map_type_name(name) {
                 Some(ty) => ty,
                 None => {
-                    self.push_error(format!("unknown type '{name}'"), *span);
-                    Type::Unknown
+                    if let Some(symbol) = self.symbols.resolve(self.current_scope, name) {
+                        self.symbols
+                            .symbol(symbol)
+                            .map(|s| s.ty.clone())
+                            .unwrap_or(Type::Unknown)
+                    } else {
+                        self.push_error(format!("unknown type '{name}'"), *span);
+                        Type::Unknown
+                    }
                 }
             },
             _ => Type::Unknown,
@@ -643,6 +814,7 @@ fn map_type_name(name: &str) -> Option<Type> {
         "char" => Some(Type::Char),
         "unit" | "void" => Some(Type::Unit),
         "null" => Some(Type::Null),
+        "Self" => Some(Type::SelfType),
         _ => None,
     }
 }

@@ -32,6 +32,9 @@ impl Parser {
                 | TokenKind::While
                 | TokenKind::For
                 | TokenKind::Fn
+                | TokenKind::Struct
+                | TokenKind::Trait
+                | TokenKind::Impl
                 | TokenKind::Return
                 | TokenKind::Break
                 | TokenKind::Continue
@@ -40,6 +43,7 @@ impl Parser {
                 | TokenKind::String
                 | TokenKind::Bool
                 | TokenKind::Null
+                | TokenKind::SelfKw
                 | TokenKind::Minus
                 | TokenKind::PlusPlus
                 | TokenKind::MinusMinus

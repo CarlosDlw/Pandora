@@ -79,6 +79,8 @@ pub enum Op {
     MakeClosure(SymbolId),
     MakeTuple(u8),
     TupleGet(usize),
+    MakeStruct(String, Vec<String>),
+    StructGet(String),
 
     Dup,
     Pop,

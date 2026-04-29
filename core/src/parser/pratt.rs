@@ -41,7 +41,7 @@ impl Parser {
             if self.current().is_some_and(|t| t.kind == TokenKind::Dot)
                 && Precedence::Highest >= min_prec
             {
-                left = self.parse_tuple_access_dot_suffix(left);
+                left = self.parse_dot_suffix(left);
                 continue;
             }
             if self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket)
@@ -111,8 +111,22 @@ impl Parser {
         match token.kind {
             TokenKind::Identifier => {
                 self.bump();
-                self.insert_node(AstNode::Identifier {
+                let ident = self.insert_node(AstNode::Identifier {
                     name: token.lexeme,
+                    span: token.span,
+                });
+                if self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+                    return self.parse_struct_literal_suffix(ident);
+                }
+                if self.current().is_some_and(|t| t.kind == TokenKind::DoubleColon) {
+                    return self.parse_static_method_call_suffix(ident);
+                }
+                ident
+            }
+            TokenKind::SelfKw => {
+                self.bump();
+                self.insert_node(AstNode::Identifier {
+                    name: "self".to_string(),
                     span: token.span,
                 })
             }
@@ -310,24 +324,40 @@ impl Parser {
         self.insert_node(AstNode::CallExpr { callee, args, span })
     }
 
-    fn parse_tuple_access_dot_suffix(&mut self, tuple: ArenaId) -> ArenaId {
+    fn parse_dot_suffix(&mut self, base: ArenaId) -> ArenaId {
         let dot_span = self.current_span_or_eof();
         self.bump();
         let Some(token) = self.current().cloned() else {
             self.push_error("expected tuple index after '.'", dot_span);
             return self.invalid_node(dot_span);
         };
-        if token.kind != TokenKind::Integer {
-            self.push_error("tuple index after '.' must be an integer literal", token.span);
-            return self.invalid_node(token.span);
+        match token.kind {
+            TokenKind::Integer => {
+                self.bump();
+                let Ok(index) = token.lexeme.parse::<usize>() else {
+                    self.push_error("invalid tuple index literal", token.span);
+                    return self.invalid_node(token.span);
+                };
+                let span = merge_pair(self.node_span(base), token.span);
+                self.insert_node(AstNode::TupleAccess { tuple: base, index, span })
+            }
+            TokenKind::Identifier => {
+                self.bump();
+                if self.current().is_some_and(|t| t.kind == TokenKind::LeftParen) {
+                    return self.parse_method_call_suffix(base, token.lexeme, token.span);
+                }
+                let span = merge_pair(self.node_span(base), token.span);
+                self.insert_node(AstNode::FieldAccessExpr {
+                    base,
+                    field: token.lexeme,
+                    span,
+                })
+            }
+            _ => {
+                self.push_error("expected field name or tuple index after '.'", token.span);
+                self.invalid_node(token.span)
+            }
         }
-        self.bump();
-        let Ok(index) = token.lexeme.parse::<usize>() else {
-            self.push_error("invalid tuple index literal", token.span);
-            return self.invalid_node(token.span);
-        };
-        let span = merge_pair(self.node_span(tuple), token.span);
-        self.insert_node(AstNode::TupleAccess { tuple, index, span })
     }
 
     fn parse_tuple_access_bracket_suffix(&mut self, tuple: ArenaId) -> ArenaId {
@@ -352,6 +382,110 @@ impl Parser {
         }
         let span = merge_pair(self.node_span(tuple), token.span);
         self.insert_node(AstNode::TupleAccess { tuple, index, span })
+    }
+
+    fn parse_struct_literal_suffix(&mut self, type_ident: ArenaId) -> ArenaId {
+        let type_name = self.identifier_name_from_node(type_ident);
+        let open = self.current_span_or_eof();
+        self.bump();
+        let mut fields = Vec::new();
+        while self.current().is_some() && !self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+            let field_tok = match self.current() {
+                Some(t) if t.kind == TokenKind::Identifier => t.clone(),
+                _ => {
+                    self.push_error("expected field name in struct literal", self.current_span_or_eof());
+                    return self.invalid_node(open);
+                }
+            };
+            self.bump();
+            if !self.consume_if(TokenKind::Colon) {
+                self.push_error("expected ':' after field name in struct literal", self.current_span_or_eof());
+                return self.invalid_node(open);
+            }
+            let expr = self.parse_expression();
+            fields.push((field_tok.lexeme, expr));
+            if self.consume_if(TokenKind::Comma) {
+                continue;
+            }
+            break;
+        }
+        if !self.consume_if(TokenKind::RightBrace) {
+            self.push_error("expected '}' after struct literal fields", self.current_span_or_eof());
+        }
+        let span = merge_pair(self.node_span(type_ident), self.previous_span_or(open));
+        self.insert_node(AstNode::StructLiteralExpr {
+            type_name,
+            fields,
+            span,
+        })
+    }
+
+    fn parse_method_call_suffix(
+        &mut self,
+        receiver: ArenaId,
+        method: String,
+        method_span: foundation::span::Span,
+    ) -> ArenaId {
+        let _open = self.current_span_or_eof();
+        self.bump();
+        let mut args = Vec::new();
+        if !self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+            loop {
+                args.push(self.parse_expression());
+                if self.consume_if(TokenKind::Comma) {
+                    continue;
+                }
+                break;
+            }
+        }
+        if !self.consume_if(TokenKind::RightParen) {
+            self.push_error("expected ')' after method arguments", self.current_span_or_eof());
+        }
+        let span = merge_pair(self.node_span(receiver), self.previous_span_or(method_span));
+        self.insert_node(AstNode::MethodCallExpr {
+            receiver,
+            method,
+            args,
+            span,
+        })
+    }
+
+    fn parse_static_method_call_suffix(&mut self, type_ident: ArenaId) -> ArenaId {
+        self.bump();
+        let method_tok = match self.current() {
+            Some(t) if t.kind == TokenKind::Identifier => t.clone(),
+            _ => {
+                let span = self.current_span_or_eof();
+                self.push_error("expected method name after '::'", span);
+                return self.invalid_node(span);
+            }
+        };
+        self.bump();
+        if !self.consume_if(TokenKind::LeftParen) {
+            self.push_error("expected '(' after static method name", self.current_span_or_eof());
+            return self.invalid_node(method_tok.span);
+        }
+        let mut args = Vec::new();
+        if !self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+            loop {
+                args.push(self.parse_expression());
+                if self.consume_if(TokenKind::Comma) {
+                    continue;
+                }
+                break;
+            }
+        }
+        if !self.consume_if(TokenKind::RightParen) {
+            self.push_error("expected ')' after static method arguments", self.current_span_or_eof());
+        }
+        let type_name = self.identifier_name_from_node(type_ident);
+        let span = merge_pair(self.node_span(type_ident), self.previous_span_or(method_tok.span));
+        self.insert_node(AstNode::StaticMethodCallExpr {
+            type_name,
+            method: method_tok.lexeme,
+            args,
+            span,
+        })
     }
 }
 

@@ -70,6 +70,9 @@ pub enum AstNode {
         name: String,
         span: Span,
     },
+    SelfTypeRef {
+        span: Span,
+    },
     IntegerLiteral {
         value: String,
         span: Span,
@@ -118,6 +121,28 @@ pub enum AstNode {
         index: usize,
         span: Span,
     },
+    FieldAccessExpr {
+        base: ArenaId,
+        field: String,
+        span: Span,
+    },
+    MethodCallExpr {
+        receiver: ArenaId,
+        method: String,
+        args: Vec<ArenaId>,
+        span: Span,
+    },
+    StaticMethodCallExpr {
+        type_name: String,
+        method: String,
+        args: Vec<ArenaId>,
+        span: Span,
+    },
+    StructLiteralExpr {
+        type_name: String,
+        fields: Vec<(String, ArenaId)>,
+        span: Span,
+    },
     IncDecExpr {
         target: ArenaId,
         op: IncDecOp,
@@ -142,6 +167,22 @@ pub enum AstNode {
         params: Vec<(ArenaId, ArenaId)>,
         return_ty: ArenaId,
         body: ArenaId,
+        span: Span,
+    },
+    StructDecl {
+        name: ArenaId,
+        fields: Vec<(ArenaId, ArenaId)>,
+        span: Span,
+    },
+    TraitDecl {
+        name: ArenaId,
+        methods: Vec<ArenaId>,
+        span: Span,
+    },
+    ImplBlock {
+        target_ty: ArenaId,
+        trait_ty: Option<ArenaId>,
+        methods: Vec<ArenaId>,
         span: Span,
     },
     AssignStmt {
@@ -199,6 +240,7 @@ impl AstNode {
             Self::Invalid { span }
             | Self::Identifier { span, .. }
             | Self::TypeName { span, .. }
+            | Self::SelfTypeRef { span, .. }
             | Self::IntegerLiteral { span, .. }
             | Self::FloatLiteral { span, .. }
             | Self::StringLiteral { span, .. }
@@ -210,10 +252,17 @@ impl AstNode {
             | Self::CallExpr { span, .. }
             | Self::TupleLiteral { span, .. }
             | Self::TupleAccess { span, .. }
+            | Self::FieldAccessExpr { span, .. }
+            | Self::MethodCallExpr { span, .. }
+            | Self::StaticMethodCallExpr { span, .. }
+            | Self::StructLiteralExpr { span, .. }
             | Self::IncDecExpr { span, .. }
             | Self::LetDecl { span, .. }
             | Self::TupleDestructureDecl { span, .. }
             | Self::FnDecl { span, .. }
+            | Self::StructDecl { span, .. }
+            | Self::TraitDecl { span, .. }
+            | Self::ImplBlock { span, .. }
             | Self::AssignStmt { span, .. }
             | Self::CompoundAssignStmt { span, .. }
             | Self::IfStmt { span, .. }

@@ -1,0 +1,14 @@
+struct Boxed { pair: (i32, i32), maybe: null }
+
+impl Boxed {
+    fn first(self) -> i32 {
+        return self.pair.0
+    }
+}
+
+b: Boxed = Boxed { pair: (10, 20), maybe: null }
+sum: i32 = 0
+for i: i32 = 0; i < 3; i++ {
+    sum += i
+}
+print(b.first(), sum, b.maybe)

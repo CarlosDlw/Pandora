@@ -1,0 +1,21 @@
+struct Counter { value: i32 }
+
+trait Show {
+    fn show(self) -> str
+}
+
+impl Counter {
+    fn inc(self, amount: i32) -> i32 {
+        return self.value + amount
+    }
+}
+
+impl Show for Counter {
+    fn show(self) -> str {
+        return "counter"
+    }
+}
+
+c: Counter = Counter { value: 5 }
+print(c.show())
+print(c.inc(7))

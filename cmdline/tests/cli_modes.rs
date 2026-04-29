@@ -308,3 +308,37 @@ fn runs_example_014_tuples_nested() {
                 .and(contains("true")),
         );
 }
+
+#[test]
+fn runs_example_015_structs_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/015_structs_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("3 4").and(contains("7")).and(contains("0 0")));
+}
+
+#[test]
+fn runs_example_016_traits_impls() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/016_traits_impls.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("counter").and(contains("12")));
+}
+
+#[test]
+fn runs_example_017_structs_with_existing_features() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/017_structs_with_existing_features.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("10 3 null"));
+}

@@ -314,6 +314,11 @@ impl<'a> Lexer<'a> {
             "for" => TokenKind::For,
             "fn" => TokenKind::Fn,
             "return" => TokenKind::Return,
+            "struct" => TokenKind::Struct,
+            "impl" => TokenKind::Impl,
+            "trait" => TokenKind::Trait,
+            "self" => TokenKind::SelfKw,
+            "Self" => TokenKind::SelfType,
             _ if is_known_type(text) => TokenKind::TypeName,
             _ => TokenKind::Identifier,
         };
@@ -603,6 +608,7 @@ fn is_known_type(text: &str) -> bool {
             | "unit"
             | "void"
             | "null"
+            | "Self"
     )
 }
 
@@ -803,6 +809,16 @@ print(name, age)
         let output = lex(FileId::from_u32(21), "x: i32 = null");
         assert!(!output.diagnostics.has_errors());
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Null));
+    }
+
+    #[test]
+    fn lexes_struct_impl_trait_self_keywords() {
+        let output = lex(FileId::from_u32(56), "struct Point {} trait Show {} impl Point { fn p(self) -> i32 { return 1 } }");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Struct));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Trait));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Impl));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::SelfKw));
     }
 
     #[test]

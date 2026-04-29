@@ -215,3 +215,34 @@ fn check_mode_reports_tuple_destructure_arity_mismatch() {
         .code(1)
         .stderr(contains("error: tuple destructuring arity mismatch"));
 }
+
+#[test]
+fn check_mode_reports_struct_literal_missing_field() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"struct Point { x: i32, y: i32 }\np: Point = Point { x: 1 }\n")
+        .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: missing field 'y' in struct literal 'Point'"));
+}
+
+#[test]
+fn check_mode_reports_incomplete_trait_impl() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"struct Point { x: i32 }\ntrait Show { fn show(self) -> str }\nimpl Show for Point {}\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: trait impl missing required method 'show'"));
+}

@@ -8,7 +8,7 @@ use foundation::{
 use crate::{
     analyzer::{SemanticModel, Type},
     hir::{
-        BinOp, Hir, HirExpr, HirId, HirStmt, IncDecOp as HirIncDecOp, IncDecPosition as HirIncDecPosition,
+        BinOp, Hir, HirExpr, HirId, HirStmt, IncDecOp as HirIncDecOp, IncDecPosition as HirIncDecPosition, SymbolId,
         UnaryOp as HirUnaryOp,
     },
     integer_lit::{bytecode_int_from_checked_literal, literal_f64, literal_u128, IntConst},
@@ -24,6 +24,9 @@ pub fn compile_program(hir: &Hir, model: &SemanticModel) -> (Chunk, Diagnostics)
     let mut diagnostics = Diagnostics::new();
     let mut loop_stack = Vec::new();
     let mut scope_depth = 0usize;
+    let mut method_table: std::collections::HashMap<(SymbolId, String, bool), SymbolId> =
+        std::collections::HashMap::new();
+    collect_method_table(hir, &mut method_table);
 
     for stmt in &hir.stmts {
         emit_stmt(
@@ -34,6 +37,7 @@ pub fn compile_program(hir: &Hir, model: &SemanticModel) -> (Chunk, Diagnostics)
             &mut diagnostics,
             &mut loop_stack,
             &mut scope_depth,
+            &method_table,
         );
     }
 
@@ -51,6 +55,9 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
     match stmt {
         HirStmt::Let { span, .. }
         | HirStmt::FnDecl { span, .. }
+        | HirStmt::StructDecl { span, .. }
+        | HirStmt::TraitDecl { span, .. }
+        | HirStmt::ImplBlock { span, .. }
         | HirStmt::TupleDestructure { span, .. }
         | HirStmt::Assign { span, .. }
         | HirStmt::Expr { span, .. }
@@ -80,12 +87,13 @@ fn emit_stmt(
     diagnostics: &mut Diagnostics,
     loop_stack: &mut Vec<LoopContext>,
     scope_depth: &mut usize,
+    method_table: &std::collections::HashMap<(SymbolId, String, bool), SymbolId>,
 ) {
     match stmt {
         HirStmt::Let {
             symbol, value, span, ..
         } => {
-            emit_expr(hir, model, *value, b, diagnostics);
+            emit_expr(hir, model, *value, b, diagnostics, method_table);
             b.emit(Op::Bind(*symbol), *span);
         }
         HirStmt::FnDecl {
@@ -95,10 +103,26 @@ fn emit_stmt(
             span,
             ..
         } => {
-            let function_chunk = compile_function_chunk(hir, model, params.clone(), body, diagnostics);
+            let function_chunk =
+                compile_function_chunk(hir, model, params.clone(), body, diagnostics, method_table);
             b.define_function(*symbol, function_chunk);
             b.emit(Op::MakeClosure(*symbol), *span);
             b.emit(Op::Bind(*symbol), *span);
+        }
+        HirStmt::StructDecl { .. } | HirStmt::TraitDecl { .. } => {}
+        HirStmt::ImplBlock { methods, .. } => {
+            for method in methods {
+                emit_stmt(
+                    hir,
+                    model,
+                    method,
+                    b,
+                    diagnostics,
+                    loop_stack,
+                    scope_depth,
+                    method_table,
+                );
+            }
         }
         HirStmt::TupleDestructure {
             names,
@@ -106,7 +130,7 @@ fn emit_stmt(
             span,
             ..
         } => {
-            emit_expr(hir, model, *value, b, diagnostics);
+            emit_expr(hir, model, *value, b, diagnostics, method_table);
             for (idx, sym) in names.iter().enumerate() {
                 b.emit(Op::Dup, *span);
                 b.emit(Op::TupleGet(idx), *span);
@@ -117,18 +141,18 @@ fn emit_stmt(
         HirStmt::Assign {
             symbol, value, span, ..
         } => {
-            emit_expr(hir, model, *value, b, diagnostics);
+            emit_expr(hir, model, *value, b, diagnostics, method_table);
             b.emit(Op::Assign(*symbol), *span);
         }
         HirStmt::Expr { expr, span } => {
-            emit_expr(hir, model, *expr, b, diagnostics);
+            emit_expr(hir, model, *expr, b, diagnostics, method_table);
             b.emit(Op::Pop, *span);
         }
         HirStmt::Block { stmts, span } => {
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in stmts {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
@@ -139,12 +163,12 @@ fn emit_stmt(
             else_branch,
             span,
         } => {
-            emit_expr(hir, model, *condition, b, diagnostics);
+            emit_expr(hir, model, *condition, b, diagnostics, method_table);
             let jump_if_false_at = b.emit_placeholder_jump_if_false(*span);
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in then_branch {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
@@ -157,7 +181,7 @@ fn emit_stmt(
                 b.emit(Op::EnterScope, *span);
                 *scope_depth += 1;
                 for stmt in else_stmts {
-                    emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
+                    emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
                 }
                 b.emit(Op::ExitScope, *span);
                 *scope_depth = scope_depth.saturating_sub(1);
@@ -178,7 +202,7 @@ fn emit_stmt(
             span,
         } => {
             let cond_target = b.len();
-            emit_expr(hir, model, *condition, b, diagnostics);
+            emit_expr(hir, model, *condition, b, diagnostics, method_table);
             let jump_out_at = b.emit_placeholder_jump_if_false(*span);
 
             loop_stack.push(LoopContext {
@@ -191,7 +215,7 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in body {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
@@ -228,12 +252,12 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             if let Some(init_stmt) = init {
-                emit_stmt(hir, model, init_stmt, b, diagnostics, loop_stack, scope_depth);
+                emit_stmt(hir, model, init_stmt, b, diagnostics, loop_stack, scope_depth, method_table);
             }
 
             let cond_target = b.len();
             if let Some(condition_expr) = condition {
-                emit_expr(hir, model, *condition_expr, b, diagnostics);
+                emit_expr(hir, model, *condition_expr, b, diagnostics, method_table);
             } else {
                 b.emit(Op::ConstBool(true), *span);
             }
@@ -249,14 +273,14 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in body {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
 
             let continue_target = if let Some(step_expr) = step {
                 let target = b.len();
-                emit_expr(hir, model, *step_expr, b, diagnostics);
+                emit_expr(hir, model, *step_expr, b, diagnostics, method_table);
                 b.emit(Op::Pop, *span);
                 target
             } else {
@@ -308,7 +332,7 @@ fn emit_stmt(
         }
         HirStmt::Return { value, span } => {
             match value {
-                Some(expr) => emit_expr(hir, model, *expr, b, diagnostics),
+                Some(expr) => emit_expr(hir, model, *expr, b, diagnostics, method_table),
                 None => b.emit(Op::ConstUnit, *span),
             }
             b.emit(Op::Return, *span);
@@ -345,6 +369,7 @@ fn emit_expr(
     id: HirId,
     b: &mut ChunkBuilder,
     diagnostics: &mut Diagnostics,
+    method_table: &std::collections::HashMap<(SymbolId, String, bool), SymbolId>,
 ) {
     let span = expr_span(hir, id);
 
@@ -392,21 +417,21 @@ fn emit_expr(
             op: HirUnaryOp::Neg,
             operand,
         } => {
-            emit_expr(hir, model, *operand, b, diagnostics);
+            emit_expr(hir, model, *operand, b, diagnostics, method_table);
             b.emit(Op::Neg, expr_span(hir, id));
         }
         HirExpr::Unary {
             op: HirUnaryOp::Not,
             operand,
         } => {
-            emit_expr(hir, model, *operand, b, diagnostics);
+            emit_expr(hir, model, *operand, b, diagnostics, method_table);
             b.emit(Op::Not, expr_span(hir, id));
         }
         HirExpr::Unary {
             op: HirUnaryOp::BitNot,
             operand,
         } => {
-            emit_expr(hir, model, *operand, b, diagnostics);
+            emit_expr(hir, model, *operand, b, diagnostics, method_table);
             b.emit(Op::BitNot, expr_span(hir, id));
         }
         HirExpr::Binary {
@@ -414,8 +439,8 @@ fn emit_expr(
             lhs,
             rhs,
         } => {
-            emit_expr(hir, model, *lhs, b, diagnostics);
-            emit_expr(hir, model, *rhs, b, diagnostics);
+            emit_expr(hir, model, *lhs, b, diagnostics, method_table);
+            emit_expr(hir, model, *rhs, b, diagnostics, method_table);
             let span_merge = expr_span(hir, id);
             match binop {
                 BinOp::Add => b.emit(Op::Add, span_merge),
@@ -440,9 +465,9 @@ fn emit_expr(
             }
         }
         HirExpr::Call { callee, args } => {
-            emit_expr(hir, model, *callee, b, diagnostics);
+            emit_expr(hir, model, *callee, b, diagnostics, method_table);
             for a in args {
-                emit_expr(hir, model, *a, b, diagnostics);
+                emit_expr(hir, model, *a, b, diagnostics, method_table);
             }
             match u8::try_from(args.len()) {
                 Ok(argc) => b.emit(Op::CallValue(argc), span),
@@ -455,9 +480,86 @@ fn emit_expr(
                 }
             }
         }
+        HirExpr::StructLiteral { type_name, fields } => {
+            for (_, value) in fields {
+                emit_expr(hir, model, *value, b, diagnostics, method_table);
+            }
+            b.emit(
+                Op::MakeStruct(
+                    type_name.clone(),
+                    fields.iter().map(|(n, _)| n.clone()).collect(),
+                ),
+                span,
+            );
+        }
+        HirExpr::FieldAccess { base, field } => {
+            emit_expr(hir, model, *base, b, diagnostics, method_table);
+            b.emit(Op::StructGet(field.clone()), span);
+        }
+        HirExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
+            let recv_ty = model.types.get(receiver).cloned().unwrap_or(Type::Unknown);
+            let Type::Struct(struct_id) = recv_ty else {
+                diagnostics.push(Diagnostic::new("method call receiver is not struct", span, Severity::Error));
+                return;
+            };
+            let Some(method_symbol) = method_table.get(&(struct_id, method.clone(), true)).copied() else {
+                diagnostics.push(Diagnostic::new(format!("unknown method '{}'", method), span, Severity::Error));
+                return;
+            };
+            b.emit(Op::Load(method_symbol), span);
+            emit_expr(hir, model, *receiver, b, diagnostics, method_table);
+            for arg in args {
+                emit_expr(hir, model, *arg, b, diagnostics, method_table);
+            }
+            match u8::try_from(args.len() + 1) {
+                Ok(argc) => b.emit(Op::CallValue(argc), span),
+                Err(_) => diagnostics.push(Diagnostic::new("too many arguments for method call", span, Severity::Error)),
+            }
+        }
+        HirExpr::StaticMethodCall {
+            type_name,
+            method,
+            args,
+        } => {
+            let struct_id = match resolve_struct_symbol_id_from_type_name(hir, model, type_name) {
+                Some(id) => id,
+                None => {
+                    diagnostics.push(Diagnostic::new(
+                        format!("unknown struct type '{}'", type_name),
+                        span,
+                        Severity::Error,
+                    ));
+                    return;
+                }
+            };
+            let Some(method_symbol) = method_table.get(&(struct_id, method.clone(), false)).copied() else {
+                diagnostics.push(Diagnostic::new(
+                    format!("unknown static method '{}::{}'", type_name, method),
+                    span,
+                    Severity::Error,
+                ));
+                return;
+            };
+            b.emit(Op::Load(method_symbol), span);
+            for arg in args {
+                emit_expr(hir, model, *arg, b, diagnostics, method_table);
+            }
+            match u8::try_from(args.len()) {
+                Ok(argc) => b.emit(Op::CallValue(argc), span),
+                Err(_) => diagnostics.push(Diagnostic::new(
+                    "too many arguments for static method call",
+                    span,
+                    Severity::Error,
+                )),
+            }
+        }
         HirExpr::Tuple(items) => {
             for item in items {
-                emit_expr(hir, model, *item, b, diagnostics);
+                emit_expr(hir, model, *item, b, diagnostics, method_table);
             }
             match u8::try_from(items.len()) {
                 Ok(count) => b.emit(Op::MakeTuple(count), span),
@@ -465,7 +567,7 @@ fn emit_expr(
             }
         }
         HirExpr::TupleAccess { tuple, index } => {
-            emit_expr(hir, model, *tuple, b, diagnostics);
+            emit_expr(hir, model, *tuple, b, diagnostics, method_table);
             b.emit(Op::TupleGet(*index), span);
         }
         HirExpr::IncDec {
@@ -509,6 +611,7 @@ fn compile_function_chunk(
     params: Vec<crate::hir::SymbolId>,
     body: &[HirStmt],
     diagnostics: &mut Diagnostics,
+    method_table: &std::collections::HashMap<(SymbolId, String, bool), SymbolId>,
 ) -> FunctionChunk {
     let mut b = ChunkBuilder::new();
     let mut loop_stack = Vec::new();
@@ -522,6 +625,7 @@ fn compile_function_chunk(
             diagnostics,
             &mut loop_stack,
             &mut scope_depth,
+            method_table,
         );
     }
     b.emit(
@@ -533,6 +637,41 @@ fn compile_function_chunk(
         params,
         chunk: b.finish(),
     }
+}
+
+fn collect_method_table(
+    hir: &Hir,
+    table: &mut std::collections::HashMap<(SymbolId, String, bool), SymbolId>,
+) {
+    for stmt in &hir.stmts {
+        if let HirStmt::ImplBlock { target, methods, .. } = stmt {
+            let Type::Struct(struct_id) = target else {
+                continue;
+            };
+            for method_stmt in methods {
+                if let HirStmt::FnDecl {
+                    symbol,
+                    name,
+                    is_instance,
+                    ..
+                } = method_stmt
+                {
+                    table.insert((*struct_id, name.clone(), *is_instance), *symbol);
+                }
+            }
+        }
+    }
+}
+
+fn resolve_struct_symbol_id_from_type_name(hir: &Hir, _model: &SemanticModel, type_name: &str) -> Option<SymbolId> {
+    for stmt in &hir.stmts {
+        if let HirStmt::StructDecl { symbol, name, .. } = stmt {
+            if name == type_name {
+                return Some(*symbol);
+            }
+        }
+    }
+    None
 }
 
 fn emit_numeric_one_const(b: &mut ChunkBuilder, span: Span, ty: &Type, diagnostics: &mut Diagnostics) {
