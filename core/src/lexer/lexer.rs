@@ -608,6 +608,7 @@ fn is_known_type(text: &str) -> bool {
             | "unit"
             | "void"
             | "null"
+            | "err"
             | "Self"
     )
 }

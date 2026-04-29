@@ -9,6 +9,7 @@ pub enum Type {
     Char,
     Unit,
     Null,
+    Err,
     Unknown,
     Any,
     Function {

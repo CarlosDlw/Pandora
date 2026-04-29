@@ -506,22 +506,37 @@ impl<'a> Checker<'a> {
             }
             Some(HirExpr::FieldAccess { base, field }) => {
                 let base_ty = self.check_expr(*base, span);
-                let AnalyzerType::Struct(symbol) = base_ty else {
-                    self.push_error("field access requires struct value", span);
-                    return AnalyzerType::Unknown;
-                };
-                let Some(fields) = self.struct_fields.get(&symbol) else {
-                    self.push_error("unknown struct for field access", span);
-                    return AnalyzerType::Unknown;
-                };
-                fields
-                    .iter()
-                    .find(|(name, _)| name == field)
-                    .map(|(_, ty)| ty.clone())
-                    .unwrap_or_else(|| {
-                        self.push_error(format!("unknown field '{field}'"), span);
+                match base_ty {
+                    AnalyzerType::Err => match field.as_str() {
+                        "message" => AnalyzerType::Str,
+                        "code" => AnalyzerType::Int {
+                            signed: true,
+                            bits: 32,
+                        },
+                        _ => {
+                            self.push_error(format!("unknown err field '{field}'"), span);
+                            AnalyzerType::Unknown
+                        }
+                    },
+                    AnalyzerType::Struct(symbol) => {
+                        let Some(fields) = self.struct_fields.get(&symbol) else {
+                            self.push_error("unknown struct for field access", span);
+                            return AnalyzerType::Unknown;
+                        };
+                        fields
+                            .iter()
+                            .find(|(name, _)| name == field)
+                            .map(|(_, ty)| ty.clone())
+                            .unwrap_or_else(|| {
+                                self.push_error(format!("unknown field '{field}'"), span);
+                                AnalyzerType::Unknown
+                            })
+                    }
+                    _ => {
+                        self.push_error("field access requires struct value", span);
                         AnalyzerType::Unknown
-                    })
+                    }
+                }
             }
             Some(HirExpr::MethodCall {
                 receiver,
@@ -642,6 +657,9 @@ impl<'a> Checker<'a> {
                 self.check_binary(*op, left_ty, right_ty, span)
             }
             Some(HirExpr::Call { callee, args }) => {
+                if let Some(name) = self.builtin_name_for_callee(*callee) {
+                    return self.check_special_builtin_contract(&name, args, span);
+                }
                 let callee_ty = self.check_expr(*callee, span);
                 self.check_call(callee_ty, args, span)
             }
@@ -880,7 +898,7 @@ impl<'a> Checker<'a> {
         right_ty: AnalyzerType,
         span: Span,
     ) -> AnalyzerType {
-        if left_ty == right_ty {
+        if left_ty == right_ty || is_assignable(&left_ty, &right_ty) || is_assignable(&right_ty, &left_ty) {
             AnalyzerType::Bool
         } else {
             self.push_error(
@@ -929,6 +947,91 @@ impl<'a> Checker<'a> {
         }
 
         *ret
+    }
+
+    fn builtin_name_for_callee(&self, callee: HirId) -> Option<String> {
+        let HirExpr::Var(symbol_id) = self.hir.exprs.get(callee)? else {
+            return None;
+        };
+        let sym = self.symbols.symbol(*symbol_id)?;
+        (sym.origin == crate::hir::SymbolOrigin::Builtin).then(|| sym.name.clone())
+    }
+
+    fn check_special_builtin_contract(
+        &mut self,
+        name: &str,
+        args: &[HirId],
+        span: Span,
+    ) -> AnalyzerType {
+        match name {
+            "error" => {
+                if args.len() != 1 && args.len() != 2 {
+                    self.push_error(
+                        format!("error expects 1 or 2 arguments, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(first) = args.first() {
+                    let msg_ty = self.check_expr_expected(*first, span, Some(&AnalyzerType::Str));
+                    if !is_assignable(&AnalyzerType::Str, &msg_ty) {
+                        self.push_error(
+                            format!("error message must be str, got {msg_ty:?}"),
+                            span,
+                        );
+                    }
+                }
+                if let Some(second) = args.get(1) {
+                    let expected_code = AnalyzerType::Int {
+                        signed: true,
+                        bits: 32,
+                    };
+                    let code_ty = self.check_expr_expected(*second, span, Some(&expected_code));
+                    if !is_assignable(&expected_code, &code_ty) {
+                        self.push_error(
+                            format!("error code must be i32, got {code_ty:?}"),
+                            span,
+                        );
+                    }
+                }
+                AnalyzerType::Err
+            }
+            "panic" => {
+                if args.len() != 1 && args.len() != 2 {
+                    self.push_error(
+                        format!("panic expects 1 or 2 arguments, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(first) = args.first() {
+                    let msg_ty = self.check_expr_expected(*first, span, Some(&AnalyzerType::Str));
+                    if !is_assignable(&AnalyzerType::Str, &msg_ty) {
+                        self.push_error(
+                            format!("panic message must be str, got {msg_ty:?}"),
+                            span,
+                        );
+                    }
+                }
+                if let Some(second) = args.get(1) {
+                    let expected_code = AnalyzerType::Int {
+                        signed: true,
+                        bits: 32,
+                    };
+                    let code_ty = self.check_expr_expected(*second, span, Some(&expected_code));
+                    if !is_assignable(&expected_code, &code_ty) {
+                        self.push_error(
+                            format!("panic code must be i32, got {code_ty:?}"),
+                            span,
+                        );
+                    }
+                }
+                AnalyzerType::Unit
+            }
+            _ => {
+                // fall through to generic behavior for other builtins
+                let callee_ty = self.resolve_named_type(name);
+                self.check_call(callee_ty, args, span)
+            }
+        }
     }
 
     fn check_int_literal(
@@ -1560,6 +1663,39 @@ mod tests {
         let src = "fn pair(a: i32, b: bool) -> (i32, bool) { return a, b }; x, _ := pair(1, true)";
         let lex_output = lex(FileId::from_u32(60), src);
         let (ast, _) = parse(FileId::from_u32(60), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_error_builtin_with_default_and_custom_code() {
+        let src = r#"e1: err = error("x"); e2: err = error("x", -1)"#;
+        let lex_output = lex(FileId::from_u32(61), src);
+        let (ast, _) = parse(FileId::from_u32(61), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_error_builtin_invalid_arguments() {
+        let src = r#"a := error(1); b := error("x", true); c := error("x", 1, 2)"#;
+        let lex_output = lex(FileId::from_u32(62), src);
+        let (ast, _) = parse(FileId::from_u32(62), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("error message must be str")));
+        assert!(diagnostics.iter().any(|d| d.message.contains("error code must be i32")));
+        assert!(diagnostics.iter().any(|d| d.message.contains("error expects 1 or 2 arguments")));
+    }
+
+    #[test]
+    fn accepts_err_field_access_types() {
+        let src = r#"e: err = error("x", 7); m: str = e.message; c: i32 = e.code"#;
+        let lex_output = lex(FileId::from_u32(63), src);
+        let (ast, _) = parse(FileId::from_u32(63), src.len() as u32, lex_output.tokens);
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());

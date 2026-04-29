@@ -20,6 +20,22 @@ pub fn default_registry() -> BuiltinRegistry {
                     bits: 64,
                 }),
             },
+        },
+        Builtin {
+            name: "error",
+            ty: Type::Function {
+                // Contract enforced in checker/runtime: (str) or (str, i32)
+                params: vec![Type::Any],
+                ret: Box::new(Type::Err),
+            },
+        },
+        Builtin {
+            name: "panic",
+            ty: Type::Function {
+                // Contract enforced in checker/runtime: (str) or (str, i32), runtime aborts.
+                params: vec![Type::Any],
+                ret: Box::new(Type::Unit),
+            },
         }],
     }
 }

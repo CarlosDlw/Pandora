@@ -1,0 +1,3 @@
+print("before panic")
+panic("unrecoverable", 42)
+print("after panic")

@@ -358,3 +358,33 @@ fn runs_example_018_tuple_return_values() {
                 .and(contains("null true")),
         );
 }
+
+#[test]
+fn runs_example_019_err_error_usage() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/019_err_error_usage.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("err(message=\"test\", code=1)")
+                .and(contains("test"))
+                .and(contains("1"))
+                .and(contains("division by zero"))
+                .and(contains("null")),
+        );
+}
+
+#[test]
+fn runs_example_020_panic_runtime_error() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/020_panic_runtime_error.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .code(1)
+        .stderr(contains("panic: unrecoverable").and(contains("code=42")));
+}

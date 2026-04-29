@@ -24,6 +24,10 @@ pub enum Value {
         self_symbol: Option<SymbolId>,
     },
     Tuple(Vec<Value>),
+    Err {
+        message: String,
+        code: i32,
+    },
     StructInstance {
         type_name: String,
         fields: HashMap<String, Value>,
@@ -47,6 +51,7 @@ impl Value {
                 let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
                 format!("({})", rendered.join(", "))
             }
+            Value::Err { message, code } => format!("err(message=\"{}\", code={})", message, code),
             Value::StructInstance { type_name, .. } => format!("<{}>", type_name),
         }
     }

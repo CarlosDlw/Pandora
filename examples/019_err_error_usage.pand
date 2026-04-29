@@ -1,0 +1,17 @@
+e: err = error("test")
+print(e)
+print(e.message)
+print(e.code)
+
+fn divide(a: i32, b: i32) -> (i32, err) {
+    if b == 0 {
+        return null, error("division by zero")
+    }
+    return a / b, null
+}
+
+result, op_err := divide(10, 0)
+if op_err != null {
+    print(op_err.message, op_err.code)
+}
+print(result)

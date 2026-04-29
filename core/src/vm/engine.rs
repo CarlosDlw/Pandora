@@ -155,6 +155,20 @@ impl<'a> Vm<'a> {
             Op::StructGet(field) => {
                 let base = self.pop_one(span)?;
                 match base {
+                    Value::Err { message, code } => {
+                        let value = match field.as_str() {
+                            "message" => Value::Str(message),
+                            "code" => Value::Int128(i128::from(code)),
+                            _ => {
+                                return Err(Diagnostic::new(
+                                    format!("unknown err field '{field}'"),
+                                    span,
+                                    Severity::Error,
+                                ))
+                            }
+                        };
+                        self.stack.push(value);
+                    }
                     Value::StructInstance { fields, .. } => {
                         let value = fields.get(field).cloned().ok_or_else(|| {
                             Diagnostic::new(
@@ -818,6 +832,60 @@ fn dispatch_builtin(name: &str, args: &[Value], span: Span) -> Result<Value, Dia
                 )),
             }
         }
+        "error" => {
+            if args.len() != 1 && args.len() != 2 {
+                return Err(Diagnostic::new(
+                    format!("error expects 1 or 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let message = match &args[0] {
+                Value::Str(s) => s.clone(),
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("error message must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let code = if let Some(code_value) = args.get(1) {
+                coerce_i32_code(code_value, span, "error")?
+            } else {
+                1
+            };
+            Ok(Value::Err { message, code })
+        }
+        "panic" => {
+            if args.len() != 1 && args.len() != 2 {
+                return Err(Diagnostic::new(
+                    format!("panic expects 1 or 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            }
+            let message = match &args[0] {
+                Value::Str(s) => s.clone(),
+                other => {
+                    return Err(Diagnostic::new(
+                        format!("panic message must be str, got {}", builtin_type_name(other)),
+                        span,
+                        Severity::Error,
+                    ))
+                }
+            };
+            let code = if let Some(code_value) = args.get(1) {
+                coerce_i32_code(code_value, span, "panic")?
+            } else {
+                1
+            };
+            Err(Diagnostic::new(
+                format!("panic: {} (code={})", message, code),
+                span,
+                Severity::Error,
+            ))
+        }
         _ => Err(Diagnostic::new(
             format!("unknown builtin '{name}'"),
             span,
@@ -839,6 +907,7 @@ fn builtin_type_name(v: &Value) -> &'static str {
         Value::Builtin(_) => "function",
         Value::Function { .. } => "function",
         Value::Tuple(_) => "tuple",
+        Value::Err { .. } => "err",
         Value::StructInstance { .. } => "struct",
     }
 }
@@ -855,7 +924,32 @@ fn is_truthy(v: &Value) -> bool {
         Value::Null => false,
         Value::Builtin(_) | Value::Function { .. } => true,
         Value::Tuple(items) => !items.is_empty(),
+        Value::Err { .. } => true,
         Value::StructInstance { .. } => true,
+    }
+}
+
+fn coerce_i32_code(value: &Value, span: Span, fn_name: &str) -> Result<i32, Diagnostic> {
+    match value {
+        Value::Int128(n) => i32::try_from(*n).map_err(|_| {
+            Diagnostic::new(
+                format!("{fn_name} code is out of i32 range"),
+                span,
+                Severity::Error,
+            )
+        }),
+        Value::UInt128(n) => i32::try_from(*n).map_err(|_| {
+            Diagnostic::new(
+                format!("{fn_name} code is out of i32 range"),
+                span,
+                Severity::Error,
+            )
+        }),
+        other => Err(Diagnostic::new(
+            format!("{fn_name} code must be i32-compatible, got {}", builtin_type_name(other)),
+            span,
+            Severity::Error,
+        )),
     }
 }
 
@@ -1130,5 +1224,57 @@ mod tests {
         let chunk = b.finish();
         let symbols = SymbolTable::new();
         execute(&chunk, &symbols).expect("tuple ops should execute");
+    }
+
+    #[test]
+    fn builtin_error_produces_err_value_and_field_access() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::Load(SymbolId(0)), s);
+        b.emit(Op::ConstStr("boom".to_string()), s);
+        b.emit(Op::CallValue(1), s);
+        b.emit(Op::Dup, s);
+        b.emit(Op::StructGet("message".to_string()), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::StructGet("code".to_string()), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        symbols.define(
+            root,
+            "error".to_string(),
+            crate::analyzer::Type::Function {
+                params: vec![crate::analyzer::Type::Any],
+                ret: Box::new(crate::analyzer::Type::Err),
+            },
+            crate::hir::SymbolOrigin::Builtin,
+            true,
+        );
+        execute(&b.finish(), &symbols).expect("error builtin should execute");
+    }
+
+    #[test]
+    fn builtin_panic_aborts_execution() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::Load(SymbolId(0)), s);
+        b.emit(Op::ConstStr("fatal".to_string()), s);
+        b.emit(Op::CallValue(1), s);
+        b.emit(Op::Return, s);
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        symbols.define(
+            root,
+            "panic".to_string(),
+            crate::analyzer::Type::Function {
+                params: vec![crate::analyzer::Type::Any],
+                ret: Box::new(crate::analyzer::Type::Unit),
+            },
+            crate::hir::SymbolOrigin::Builtin,
+            true,
+        );
+        let err = execute(&b.finish(), &symbols).expect_err("panic must abort");
+        assert!(err.iter().any(|d| d.message.contains("panic: fatal")));
     }
 }

@@ -829,6 +829,7 @@ fn map_type_name(name: &str) -> Option<Type> {
         "char" => Some(Type::Char),
         "unit" | "void" => Some(Type::Unit),
         "null" => Some(Type::Null),
+        "err" => Some(Type::Err),
         "Self" => Some(Type::SelfType),
         _ => None,
     }

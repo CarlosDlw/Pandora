@@ -293,3 +293,16 @@ fn check_mode_reports_tuple_return_arity_mismatch() {
         .code(1)
         .stderr(contains("error: tuple return arity mismatch"));
 }
+
+#[test]
+fn check_mode_reports_error_builtin_invalid_args() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"a := error(1); b := error(\"x\", true)\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error message must be str").and(contains("error code must be i32")));
+}
