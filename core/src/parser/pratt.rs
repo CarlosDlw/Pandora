@@ -9,6 +9,7 @@ use super::parser::Parser;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
     Lowest,
+    Range,
     LogicalOr,
     LogicalAnd,
     BitOr,
@@ -77,6 +78,23 @@ impl Parser {
                 self.bump();
                 let span = merge_pair(self.node_span(left), token.span);
                 left = self.insert_node(AstNode::PropagateExpr { expr: left, span });
+                continue;
+            }
+            if self.current().is_some_and(|t| {
+                t.kind == TokenKind::DoubleDot || t.kind == TokenKind::DoubleDotEqual
+            }) && Precedence::Range >= min_prec
+            {
+                let token = self.current().expect("checked above").clone();
+                let inclusive = token.kind == TokenKind::DoubleDotEqual;
+                self.bump();
+                let right = self.parse_expression_bp(next_precedence(Precedence::Range));
+                let span = self.merge_spans(left, right);
+                left = self.insert_node(AstNode::RangeExpr {
+                    start: left,
+                    end: right,
+                    inclusive,
+                    span,
+                });
                 continue;
             }
 
@@ -580,7 +598,8 @@ fn merge_pair(left: foundation::span::Span, right: foundation::span::Span) -> fo
 
 fn next_precedence(prec: Precedence) -> Precedence {
     match prec {
-        Precedence::Lowest => Precedence::LogicalOr,
+        Precedence::Lowest => Precedence::Range,
+        Precedence::Range => Precedence::LogicalOr,
         Precedence::LogicalOr => Precedence::LogicalAnd,
         Precedence::LogicalAnd => Precedence::BitOr,
         Precedence::BitOr => Precedence::BitXor,

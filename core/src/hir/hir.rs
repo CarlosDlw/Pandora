@@ -59,6 +59,7 @@ pub enum HirExpr {
     Var(SymbolId),
     Unary { op: UnaryOp, operand: HirId },
     Binary { op: BinOp, lhs: HirId, rhs: HirId },
+    Range { start: HirId, end: HirId, inclusive: bool },
     IncDec {
         symbol: SymbolId,
         op: IncDecOp,
@@ -179,6 +180,14 @@ pub enum HirStmt {
         init: Option<Box<HirStmt>>,
         condition: Option<HirId>,
         step: Option<HirId>,
+        body: Vec<HirStmt>,
+        span: Span,
+    },
+    ForIn {
+        symbol: SymbolId,
+        iterable_symbol: SymbolId,
+        index_symbol: SymbolId,
+        iterable: HirId,
         body: Vec<HirStmt>,
         span: Span,
     },

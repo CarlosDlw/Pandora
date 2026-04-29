@@ -146,6 +146,41 @@ impl<'a> Vm<'a> {
                 items.reverse();
                 self.stack.push(Value::Array(items));
             }
+            Op::MakeRange(inclusive) => {
+                let end = self.pop_one(span)?;
+                let start = self.pop_one(span)?;
+                let mut items = Vec::new();
+                match (start, end) {
+                    (Value::Int128(s), Value::Int128(e)) => {
+                        let end_bound = if *inclusive { e.saturating_add(1) } else { e };
+                        if s < end_bound {
+                            let mut i = s;
+                            while i < end_bound {
+                                items.push(Value::Int128(i));
+                                i = i.saturating_add(1);
+                            }
+                        }
+                    }
+                    (Value::UInt128(s), Value::UInt128(e)) => {
+                        let end_bound = if *inclusive { e.saturating_add(1) } else { e };
+                        if s < end_bound {
+                            let mut i = s;
+                            while i < end_bound {
+                                items.push(Value::UInt128(i));
+                                i = i.saturating_add(1);
+                            }
+                        }
+                    }
+                    (a, b) => {
+                        return Err(Diagnostic::new(
+                            format!("range bounds must be same integer type, got {:?} and {:?}", a, b),
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                }
+                self.stack.push(Value::Array(items));
+            }
             Op::ArrayExtend => {
                 let rhs = self.pop_one(span)?;
                 let lhs = self.pop_one(span)?;
@@ -211,6 +246,24 @@ impl<'a> Vm<'a> {
                     other => {
                         return Err(Diagnostic::new(
                             format!("index access on non-array value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ))
+                    }
+                }
+            }
+            Op::ArrayLen => {
+                let array_value = self.pop_one(span)?;
+                match array_value {
+                    Value::Array(items) => {
+                        let n = i128::try_from(items.len()).map_err(|_| {
+                            Diagnostic::new("array length exceeds i128 range", span, Severity::Error)
+                        })?;
+                        self.stack.push(Value::Int128(n));
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("array length on non-array value: {:?}", other),
                             span,
                             Severity::Error,
                         ))
@@ -1837,5 +1890,19 @@ mod tests {
             true,
         );
         execute(&b.finish(), &symbols).expect("typeof should execute");
+    }
+
+    #[test]
+    fn make_range_opcode_builds_array() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(0), s);
+        b.emit(Op::ConstI128(3), s);
+        b.emit(Op::MakeRange(false), s);
+        b.emit(Op::ArrayLen, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let symbols = SymbolTable::new();
+        execute(&b.finish(), &symbols).expect("range should execute");
     }
 }

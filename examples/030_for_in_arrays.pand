@@ -1,0 +1,8 @@
+arr: [i32] = [10, 20, 30]
+for item: i32 in arr {
+    print(item)
+}
+
+for x in 0..=3 {
+    print(x)
+}

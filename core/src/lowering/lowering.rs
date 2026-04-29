@@ -341,6 +341,40 @@ impl<'a> Lowering<'a> {
                     span: *span,
                 }
             }
+            AstNode::ForInStmt {
+                name,
+                ty,
+                iterable,
+                body,
+                span,
+            } => {
+                let symbol_ty = self.resolve_decl_type(*ty);
+                let symbol = self.bind_symbol(*name, symbol_ty, false);
+                let iterable_symbol = self.symbols.define(
+                    self.current_scope,
+                    "__forin_iterable".to_string(),
+                    Type::Unknown,
+                    SymbolOrigin::User,
+                    false,
+                );
+                let index_symbol = self.symbols.define(
+                    self.current_scope,
+                    "__forin_index".to_string(),
+                    Type::Int { signed: true, bits: 64 },
+                    SymbolOrigin::User,
+                    false,
+                );
+                let iterable = self.lower_expr(*iterable);
+                let body = self.lower_if_branch(*body);
+                HirStmt::ForIn {
+                    symbol,
+                    iterable_symbol,
+                    index_symbol,
+                    iterable,
+                    body,
+                    span: *span,
+                }
+            }
             AstNode::BreakStmt { span } => HirStmt::Break { span: *span },
             AstNode::ContinueStmt { span } => HirStmt::Continue { span: *span },
             AstNode::ReturnStmt { values, span } => {
@@ -468,6 +502,23 @@ impl<'a> Lowering<'a> {
                         op: map_binary_op(*op),
                         lhs,
                         rhs,
+                    },
+                    self.node_span(id),
+                )
+            }
+            AstNode::RangeExpr {
+                start,
+                end,
+                inclusive,
+                ..
+            } => {
+                let start = self.lower_expr(*start);
+                let end = self.lower_expr(*end);
+                self.insert_hir_expr(
+                    HirExpr::Range {
+                        start,
+                        end,
+                        inclusive: *inclusive,
                     },
                     self.node_span(id),
                 )
@@ -634,6 +685,7 @@ impl<'a> Lowering<'a> {
             | AstNode::IfStmt { .. }
             | AstNode::WhileStmt { .. }
             | AstNode::ForStmt { .. }
+            | AstNode::ForInStmt { .. }
             | AstNode::BreakStmt { .. }
             | AstNode::ContinueStmt { .. }
             | AstNode::ReturnStmt { .. }

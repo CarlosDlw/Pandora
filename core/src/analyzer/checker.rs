@@ -446,6 +446,46 @@ impl<'a> Checker<'a> {
                 self.loop_depth = self.loop_depth.saturating_sub(1);
                 AnalyzerType::Unknown
             }
+            HirStmt::ForIn {
+                symbol,
+                iterable,
+                body,
+                span,
+                ..
+            } => {
+                self.loop_depth += 1;
+                let iterable_ty = self.check_expr(*iterable, *span);
+                let item_ty = match iterable_ty {
+                    AnalyzerType::Array(item) => *item,
+                    AnalyzerType::Unknown => AnalyzerType::Unknown,
+                    other => {
+                        self.push_error(
+                            format!("for-in iterable must be array, got {other:?}"),
+                            *span,
+                        );
+                        AnalyzerType::Unknown
+                    }
+                };
+                if let Some(sym) = self.symbols.symbol(*symbol) {
+                    let declared = sym.ty.clone();
+                    if !matches!(declared, AnalyzerType::Unknown) && !is_assignable(&declared, &item_ty) {
+                        self.push_error(
+                            format!("for-in binding type mismatch: expected {declared:?}, got {item_ty:?}"),
+                            *span,
+                        );
+                    }
+                }
+                if let Some(sym) = self.symbols.symbol_mut(*symbol) {
+                    if matches!(sym.ty, AnalyzerType::Unknown) {
+                        sym.ty = item_ty.clone();
+                    }
+                }
+                for stmt in body {
+                    let _ = self.check_stmt(stmt);
+                }
+                self.loop_depth = self.loop_depth.saturating_sub(1);
+                AnalyzerType::Unknown
+            }
             HirStmt::Break { span } => {
                 if self.loop_depth == 0 {
                     self.push_error("break used outside of loop", *span);
@@ -752,6 +792,28 @@ impl<'a> Checker<'a> {
                 let left_ty = self.check_expr(*lhs, span);
                 let right_ty = self.check_expr(*rhs, span);
                 self.check_binary(*op, left_ty, right_ty, span)
+            }
+            Some(HirExpr::Range {
+                start,
+                end,
+                inclusive: _,
+            }) => {
+                let start_ty = self.check_expr(*start, span);
+                let end_ty = self.check_expr(*end, span);
+                if !matches!(start_ty, AnalyzerType::Int { .. } | AnalyzerType::Unknown) {
+                    self.push_error(format!("range start must be integer, got {start_ty:?}"), span);
+                    return AnalyzerType::Unknown;
+                }
+                if !matches!(end_ty, AnalyzerType::Int { .. } | AnalyzerType::Unknown) {
+                    self.push_error(format!("range end must be integer, got {end_ty:?}"), span);
+                    return AnalyzerType::Unknown;
+                }
+                let item = if matches!(start_ty, AnalyzerType::Unknown) {
+                    end_ty
+                } else {
+                    start_ty
+                };
+                AnalyzerType::Array(Box::new(item))
             }
             Some(HirExpr::Call { callee, args }) => {
                 if let Some(name) = self.builtin_name_for_callee(*callee) {
@@ -1668,7 +1730,11 @@ mod tests {
         let (ast, _) = parse(FileId::from_u32(21), src.len() as u32, lex_output.tokens);
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
-        assert!(!diagnostics.has_errors());
+        assert!(
+            !diagnostics.has_errors(),
+            "{:?}",
+            diagnostics.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1782,6 +1848,38 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn supports_range_and_for_in_over_array() {
+        let src = r#"
+            arr := 0..10
+            sum: i32 = 0
+            for i in arr { sum = sum + i }
+        "#;
+        let lex_output = lex(FileId::from_u32(623), src);
+        let (ast, _) = parse(FileId::from_u32(623), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_for_in_annotation_type_mismatch() {
+        let src = r#"
+            arr := [1, 2, 3]
+            for x: bool in arr { print(x) }
+        "#;
+        let lex_output = lex(FileId::from_u32(624), src);
+        let (ast, _) = parse(FileId::from_u32(624), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("for-in binding type mismatch")),
+            "{:?}",
+            diagnostics.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+        );
     }
 
     #[test]

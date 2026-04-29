@@ -251,11 +251,14 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     if self.peek() == Some('.') {
                         self.bump();
-                        if self.peek() == Some('.') {
+                        if self.peek() == Some('=') {
+                            self.bump();
+                            self.push_token(TokenKind::DoubleDotEqual, start, self.cursor);
+                        } else if self.peek() == Some('.') {
                             self.bump();
                             self.push_token(TokenKind::Ellipsis, start, self.cursor);
                         } else {
-                            self.push_invalid_char_diagnostic(start, self.cursor);
+                            self.push_token(TokenKind::DoubleDot, start, self.cursor);
                         }
                     } else {
                         self.push_token(TokenKind::Dot, start, self.cursor);
@@ -328,6 +331,7 @@ impl<'a> Lexer<'a> {
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,
             "for" => TokenKind::For,
+            "in" => TokenKind::In,
             "fn" => TokenKind::Fn,
             "return" => TokenKind::Return,
             "struct" => TokenKind::Struct,
@@ -416,7 +420,7 @@ impl<'a> Lexer<'a> {
             had_error = true;
         }
 
-        if self.peek() == Some('.') {
+        if self.peek() == Some('.') && self.peek_next() != Some('.') {
             let dot_start = self.cursor;
             self.bump();
             if self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
@@ -709,7 +713,8 @@ print(name, age)
             .map(|t| t.lexeme.as_str())
             .collect();
         assert_eq!(integers, vec!["1", "2"]);
-        assert!(output.diagnostics.has_errors());
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::DoubleDot));
     }
 
     #[test]

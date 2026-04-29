@@ -1,0 +1,4 @@
+exclusive := 0..5
+inclusive := 0..=5
+print(exclusive)
+print(inclusive)

@@ -141,6 +141,10 @@ impl Parser {
         let for_span = self.current_span_or_eof();
         self.bump();
 
+        if self.is_for_in_header() {
+            return self.parse_for_in_stmt(for_span);
+        }
+
         let init = if self.current().is_some_and(|t| t.kind == TokenKind::Semicolon) {
             None
         } else {
@@ -178,6 +182,65 @@ impl Parser {
             body,
             span,
         })
+    }
+
+    fn parse_for_in_stmt(&mut self, for_span: Span) -> ArenaId {
+        let name = self.parse_required_identifier("expected iteration variable name after 'for'");
+        let ty = if self.consume_if(TokenKind::Colon) {
+            Some(self.parse_type_name())
+        } else {
+            None
+        };
+        if !self.consume_if(TokenKind::In) {
+            self.push_error("expected 'in' in for-in loop", self.current_span_or_eof());
+            return self.invalid_node(for_span);
+        }
+        let iterable = if matches!(self.peek_kind(0), Some(TokenKind::Identifier))
+            && matches!(self.peek_kind(1), Some(TokenKind::LeftBrace))
+        {
+            self.parse_required_identifier("expected iterable expression in for-in loop")
+        } else {
+            self.parse_expression()
+        };
+        let prev_depth = self.loop_depth;
+        self.loop_depth += 1;
+        let body = self.parse_if_branch_block("expected '{' after for-in iterable");
+        self.loop_depth = prev_depth;
+        let span = merge_span(for_span, self.node_span(body));
+        self.insert_node(AstNode::ForInStmt {
+            name,
+            ty,
+            iterable,
+            body,
+            span,
+        })
+    }
+
+    fn is_for_in_header(&self) -> bool {
+        if self.peek_kind(0) != Some(TokenKind::Identifier) {
+            return false;
+        }
+        let mut idx = 1usize;
+        if self.peek_kind(idx) == Some(TokenKind::Colon) {
+            idx += 1;
+            let mut depth_paren = 0usize;
+            let mut depth_bracket = 0usize;
+            loop {
+                match self.peek_kind(idx) {
+                    Some(TokenKind::In) if depth_paren == 0 && depth_bracket == 0 => return true,
+                    Some(TokenKind::Semicolon) => return false,
+                    Some(TokenKind::LeftBrace) => return false,
+                    Some(TokenKind::LeftParen) => depth_paren += 1,
+                    Some(TokenKind::RightParen) => depth_paren = depth_paren.saturating_sub(1),
+                    Some(TokenKind::LeftBracket) => depth_bracket += 1,
+                    Some(TokenKind::RightBracket) => depth_bracket = depth_bracket.saturating_sub(1),
+                    Some(_) => {}
+                    None => return false,
+                }
+                idx += 1;
+            }
+        }
+        self.peek_kind(idx) == Some(TokenKind::In)
     }
 
     fn parse_for_init_decl(&mut self) -> ArenaId {
@@ -1608,6 +1671,28 @@ mod tests {
         };
         assert_eq!(items.len(), 2);
         assert!(matches!(items[1], crate::ast::ArrayItem::SpreadExpr(_)));
+    }
+
+    #[test]
+    fn parses_range_and_for_in_forms() {
+        let source = "a := 0..10; b := 0..=10; for i: i32 in a { print(i) }; for j in b { print(j) }";
+        let lex_out = lex(FileId::from_u32(533), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(533), source.len() as u32, lex_out.tokens);
+        assert!(
+            !diagnostics.has_errors(),
+            "{:?}",
+            diagnostics.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+        );
+        assert!(matches!(
+            ast.get(ast.roots[0]),
+            Some(AstNode::LetDecl { value, .. }) if matches!(ast.get(*value), Some(AstNode::RangeExpr { inclusive: false, .. }))
+        ));
+        assert!(matches!(
+            ast.get(ast.roots[1]),
+            Some(AstNode::LetDecl { value, .. }) if matches!(ast.get(*value), Some(AstNode::RangeExpr { inclusive: true, .. }))
+        ));
+        assert!(matches!(ast.get(ast.roots[2]), Some(AstNode::ForInStmt { ty: Some(_), .. })));
+        assert!(matches!(ast.get(ast.roots[3]), Some(AstNode::ForInStmt { ty: None, .. })));
     }
 
     #[test]

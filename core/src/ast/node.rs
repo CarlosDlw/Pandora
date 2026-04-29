@@ -113,6 +113,12 @@ pub enum AstNode {
         right: ArenaId,
         span: Span,
     },
+    RangeExpr {
+        start: ArenaId,
+        end: ArenaId,
+        inclusive: bool,
+        span: Span,
+    },
     CallExpr {
         callee: ArenaId,
         args: Vec<ArenaId>,
@@ -241,6 +247,13 @@ pub enum AstNode {
         body: ArenaId,
         span: Span,
     },
+    ForInStmt {
+        name: ArenaId,
+        ty: Option<ArenaId>,
+        iterable: ArenaId,
+        body: ArenaId,
+        span: Span,
+    },
     BreakStmt {
         span: Span,
     },
@@ -276,6 +289,7 @@ impl AstNode {
             | Self::NullLiteral { span, .. }
             | Self::UnaryExpr { span, .. }
             | Self::BinaryExpr { span, .. }
+            | Self::RangeExpr { span, .. }
             | Self::CallExpr { span, .. }
             | Self::TupleLiteral { span, .. }
             | Self::TupleAccess { span, .. }
@@ -299,6 +313,7 @@ impl AstNode {
             | Self::IfStmt { span, .. }
             | Self::WhileStmt { span, .. }
             | Self::ForStmt { span, .. }
+            | Self::ForInStmt { span, .. }
             | Self::BreakStmt { span, .. }
             | Self::ContinueStmt { span, .. }
             | Self::ReturnStmt { span, .. }

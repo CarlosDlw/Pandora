@@ -66,6 +66,7 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         | HirStmt::If { span, .. }
         | HirStmt::While { span, .. }
         | HirStmt::For { span, .. }
+        | HirStmt::ForIn { span, .. }
         | HirStmt::Break { span, .. }
         | HirStmt::Continue { span, .. }
         | HirStmt::Return { span, .. }
@@ -329,6 +330,56 @@ fn emit_stmt(
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
         }
+        HirStmt::ForIn {
+            symbol,
+            iterable_symbol,
+            index_symbol,
+            iterable,
+            body,
+            span,
+        } => {
+            b.emit(Op::EnterScope, *span);
+            *scope_depth += 1;
+            emit_expr(hir, model, *iterable, b, diagnostics, method_table);
+            b.emit(Op::Bind(*iterable_symbol), *span);
+            b.emit(Op::ConstI128(0), *span);
+            b.emit(Op::Bind(*index_symbol), *span);
+            b.emit(Op::ConstNull, *span);
+            b.emit(Op::Bind(*symbol), *span);
+
+            let loop_start = b.len();
+            b.emit(Op::Load(*index_symbol), *span);
+            b.emit(Op::Load(*iterable_symbol), *span);
+            b.emit(Op::ArrayLen, *span);
+            b.emit(Op::Lt, *span);
+            let jump_out_at = b.emit_placeholder_jump_if_false(*span);
+
+            b.emit(Op::Load(*iterable_symbol), *span);
+            b.emit(Op::Load(*index_symbol), *span);
+            b.emit(Op::ArrayGet, *span);
+            b.emit(Op::Assign(*symbol), *span);
+
+            b.emit(Op::EnterScope, *span);
+            *scope_depth += 1;
+            for stmt in body {
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
+            }
+            b.emit(Op::ExitScope, *span);
+            *scope_depth = scope_depth.saturating_sub(1);
+
+            b.emit(Op::Load(*index_symbol), *span);
+            b.emit(Op::ConstI128(1), *span);
+            b.emit(Op::Add, *span);
+            b.emit(Op::Assign(*index_symbol), *span);
+            b.emit(Op::Jump(loop_start), *span);
+
+            let loop_end = b.len();
+            if !b.patch_jump_target(jump_out_at, loop_end) {
+                diagnostics.push(Diagnostic::new("failed to patch for-in exit jump", *span, Severity::Error));
+            }
+            b.emit(Op::ExitScope, *span);
+            *scope_depth = scope_depth.saturating_sub(1);
+        }
         HirStmt::Break { span } => {
             let Some(loop_ctx) = loop_stack.last_mut() else {
                 diagnostics.push(Diagnostic::new("break used outside of loop", *span, Severity::Error));
@@ -495,6 +546,15 @@ fn emit_expr(
                 BinOp::ShiftLeft => b.emit(Op::Shl, span_merge),
                 BinOp::ShiftRight => b.emit(Op::Shr, span_merge),
             }
+        }
+        HirExpr::Range {
+            start,
+            end,
+            inclusive,
+        } => {
+            emit_expr(hir, model, *start, b, diagnostics, method_table);
+            emit_expr(hir, model, *end, b, diagnostics, method_table);
+            b.emit(Op::MakeRange(*inclusive), span);
         }
         HirExpr::Call { callee, args } => {
             emit_expr(hir, model, *callee, b, diagnostics, method_table);

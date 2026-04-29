@@ -520,3 +520,33 @@ fn runs_example_028_optional_params_typeof() {
                 .and(contains("[i128]")),
         );
 }
+
+#[test]
+fn runs_example_029_range_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/029_range_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(contains("[0, 1, 2, 3, 4]").and(contains("[0, 1, 2, 3, 4, 5]")));
+}
+
+#[test]
+fn runs_example_030_for_in_arrays() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/030_for_in_arrays.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("10")
+                .and(contains("20"))
+                .and(contains("30"))
+                .and(contains("0"))
+                .and(contains("1"))
+                .and(contains("2"))
+                .and(contains("3")),
+        );
+}

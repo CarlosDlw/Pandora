@@ -300,6 +300,32 @@ fn check_mode_reports_array_spread_with_non_array_value() {
 }
 
 #[test]
+fn check_mode_reports_range_with_non_integer_bounds() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"x := \"a\"..10\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("range start must be integer"));
+}
+
+#[test]
+fn check_mode_reports_for_in_binding_mismatch() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"arr := [1, 2, 3]\nfor x: bool in arr { print(x) }\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("for-in binding type mismatch"));
+}
+
+#[test]
 fn check_mode_reports_tuple_fn_returning_single_tuple_symbol() {
     let mut file = NamedTempFile::new().expect("temp file");
     std::io::Write::write_all(

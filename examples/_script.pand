@@ -9,3 +9,9 @@ fn sum(a: i32, b: i32 = 10) -> i32 {
 print(sum(5))
 print(sum(5, 1))
 print(typeof(arr2))
+
+nums := 0..=3
+print(nums)
+for n in nums {
+    print(n)
+}
