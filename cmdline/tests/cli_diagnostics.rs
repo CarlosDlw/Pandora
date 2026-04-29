@@ -872,3 +872,29 @@ fn check_mode_reports_internal_rand_intrinsic_forbidden() {
         .code(1)
         .stderr(contains("internal intrinsic 'rand_next_u64'"));
 }
+
+#[test]
+fn check_mode_reports_encoding_hex_decode_invalid_arg_type() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(hex_decode(10))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("invalid argument type"));
+}
+
+#[test]
+fn check_mode_reports_internal_encoding_intrinsic_forbidden() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(encoding_base64_encode(\"x\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic 'encoding_base64_encode'"));
+}

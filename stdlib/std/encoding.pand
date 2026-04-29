@@ -1,0 +1,15 @@
+# std/encoding
+# Base64, hex and text encoding helpers.
+
+fn base64_encode(input: str) -> str { return encoding_base64_encode(input) }
+fn base64_decode(input: str) -> (str, err) { return encoding_base64_decode(input) }
+
+fn hex_encode(input: str) -> str { return encoding_hex_encode(input) }
+fn hex_decode(input: str) -> (str, err) { return encoding_hex_decode(input) }
+
+fn is_ascii(input: str) -> bool { return encoding_is_ascii(input) }
+fn ascii_upper(input: str) -> str { return encoding_ascii_upper(input) }
+fn ascii_lower(input: str) -> str { return encoding_ascii_lower(input) }
+
+fn utf8_len(input: str) -> u64 { return encoding_utf8_len(input) }
+fn utf8_is_valid(input: str) -> bool { return encoding_utf8_is_valid(input) }

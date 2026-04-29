@@ -2535,6 +2535,138 @@ pub fn default_registry() -> BuiltinRegistry {
             ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
         },
     },
+    BuiltinFunction {
+        name: "encoding_base64_encode",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "base64_encode",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "encoding_base64_decode",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "base64_decode",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "encoding_hex_encode",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "hex_encode",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "encoding_hex_decode",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "hex_decode",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Tuple(vec![Type::Str, Type::Err])),
+        },
+    },
+    BuiltinFunction {
+        name: "encoding_is_ascii",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "is_ascii",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "encoding_ascii_upper",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "ascii_upper",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "encoding_ascii_lower",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "ascii_lower",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Str),
+        },
+    },
+    BuiltinFunction {
+        name: "encoding_utf8_len",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "utf8_len",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Int {
+                signed: false,
+                bits: 64,
+            }),
+        },
+    },
+    BuiltinFunction {
+        name: "encoding_utf8_is_valid",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
+    BuiltinFunction {
+        name: "utf8_is_valid",
+        ty: Type::Function {
+            params: vec![Type::Str],
+            ret: Box::new(Type::Bool),
+        },
+    },
     ];
 
     let mut methods = Vec::new();

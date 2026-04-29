@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 foundation = { path = "../foundation" }
 sha2 = "0.10"
+base64 = "0.22"

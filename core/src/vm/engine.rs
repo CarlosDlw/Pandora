@@ -11,6 +11,8 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use sha2::{Digest, Sha256};
 
 use foundation::{
@@ -3748,6 +3750,149 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 *b = (math_next_u64() & 0xff) as u8;
             }
             Ok(Value::Tuple(vec![Value::Str(hex_encode(&out)), Value::Null]))
+        }
+        "encoding_base64_encode" | "base64_encode" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "base64_encode input", span)?;
+            Ok(Value::Str(BASE64_STD.encode(input.as_bytes())))
+        }
+        "encoding_base64_decode" | "base64_decode" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "base64_decode input", span)?;
+            match BASE64_STD.decode(input.as_bytes()) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(s) => Ok(Value::Tuple(vec![Value::Str(s), Value::Null])),
+                    Err(_) => Ok(Value::Tuple(vec![
+                        Value::Str(String::new()),
+                        Value::Err {
+                            message: "decoded bytes are not valid utf-8".to_string(),
+                            code: 1,
+                            origin: "base64_decode".to_string(),
+                            cause: None,
+                        },
+                    ])),
+                },
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: e.to_string(),
+                        code: 1,
+                        origin: "base64_decode".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "encoding_hex_encode" | "hex_encode" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "hex_encode input", span)?;
+            Ok(Value::Str(hex_encode(input.as_bytes())))
+        }
+        "encoding_hex_decode" | "hex_decode" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "hex_decode input", span)?;
+            match hex_decode(input) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(s) => Ok(Value::Tuple(vec![Value::Str(s), Value::Null])),
+                    Err(_) => Ok(Value::Tuple(vec![
+                        Value::Str(String::new()),
+                        Value::Err {
+                            message: "decoded bytes are not valid utf-8".to_string(),
+                            code: 1,
+                            origin: "hex_decode".to_string(),
+                            cause: None,
+                        },
+                    ])),
+                },
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    Value::Err {
+                        message: e,
+                        code: 1,
+                        origin: "hex_decode".to_string(),
+                        cause: None,
+                    },
+                ])),
+            }
+        }
+        "encoding_is_ascii" | "is_ascii" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "is_ascii input", span)?;
+            Ok(Value::Bool(input.is_ascii()))
+        }
+        "encoding_ascii_upper" | "ascii_upper" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "ascii_upper input", span)?;
+            Ok(Value::Str(input.to_ascii_uppercase()))
+        }
+        "encoding_ascii_lower" | "ascii_lower" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "ascii_lower input", span)?;
+            Ok(Value::Str(input.to_ascii_lowercase()))
+        }
+        "encoding_utf8_len" | "utf8_len" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "utf8_len input", span)?;
+            Ok(Value::UInt128(input.chars().count() as u128))
+        }
+        "encoding_utf8_is_valid" | "utf8_is_valid" => {
+            let [input] = args else {
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let input = expect_str_arg(input, "utf8_is_valid input", span)?;
+            Ok(Value::Bool(std::str::from_utf8(input.as_bytes()).is_ok()))
         }
         name if name.starts_with("__meth_is_") || name.starts_with("__meth_iu_") => {
             dispatch_integer_method(name, args, span)

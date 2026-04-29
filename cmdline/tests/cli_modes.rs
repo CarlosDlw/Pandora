@@ -990,3 +990,19 @@ fn runs_example_058_std_rand_basics() {
                 .and(contains("true true")),
         );
 }
+
+#[test]
+fn runs_example_059_std_encoding_basics() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/059_std_encoding_basics.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("true true true")
+                .and(contains("true true true"))
+                .and(contains("true true true"))
+                .and(contains("true true")),
+        );
+}

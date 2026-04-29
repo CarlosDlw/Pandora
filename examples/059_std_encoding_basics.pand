@@ -1,0 +1,12 @@
+from "std/encoding" import base64_encode, base64_decode, hex_encode, hex_decode, is_ascii, ascii_upper, ascii_lower, utf8_len, utf8_is_valid
+
+b64: str = base64_encode("hello")
+b64_dec, b64_err := base64_decode(b64)
+
+hx: str = hex_encode("hello")
+hx_dec, hx_err := hex_decode(hx)
+
+print(b64 == "aGVsbG8=", b64_err == null, b64_dec == "hello")
+print(hx == "68656c6c6f", hx_err == null, hx_dec == "hello")
+print(is_ascii("abcXYZ123"), ascii_upper("abC!") == "ABC!", ascii_lower("AbC!") == "abc!")
+print(utf8_len("ação").eq((4).to_u32()), utf8_is_valid("ação"))

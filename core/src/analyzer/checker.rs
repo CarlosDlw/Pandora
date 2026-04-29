@@ -1602,6 +1602,7 @@ impl<'a> Checker<'a> {
             || name.starts_with("http_")
             || name.starts_with("crypto_")
             || name.starts_with("rand_")
+            || name.starts_with("encoding_")
         {
             self.push_error(
                 format!("internal intrinsic '{name}' is not part of the public stdlib API"),
