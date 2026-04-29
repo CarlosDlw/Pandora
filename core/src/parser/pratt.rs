@@ -1,5 +1,5 @@
 use crate::{
-    ast::{AstNode, BinaryOp, UnaryOp},
+    ast::{AstNode, BinaryOp, IncDecOp, IncDecPosition, UnaryOp},
     lexer::TokenKind,
 };
 use foundation::ids::ArenaId;
@@ -36,6 +36,26 @@ impl Parser {
                 && Precedence::Highest >= min_prec
             {
                 left = self.parse_call_suffix(left);
+                continue;
+            }
+
+            if self.current().is_some_and(|t| t.kind == TokenKind::PlusPlus || t.kind == TokenKind::MinusMinus)
+                && Precedence::Highest >= min_prec
+            {
+                let token = self.current().expect("checked above").clone();
+                self.bump();
+                let op = if token.kind == TokenKind::PlusPlus {
+                    IncDecOp::Increment
+                } else {
+                    IncDecOp::Decrement
+                };
+                let span = merge_pair(self.node_span(left), token.span);
+                left = self.insert_node(AstNode::IncDecExpr {
+                    target: left,
+                    op,
+                    position: IncDecPosition::Postfix,
+                    span,
+                });
                 continue;
             }
 
@@ -141,6 +161,23 @@ impl Parser {
                 self.insert_node(AstNode::UnaryExpr {
                     op: UnaryOp::Neg,
                     operand,
+                    span,
+                })
+            }
+            TokenKind::PlusPlus | TokenKind::MinusMinus => {
+                let op_span = token.span;
+                let op = if token.kind == TokenKind::PlusPlus {
+                    IncDecOp::Increment
+                } else {
+                    IncDecOp::Decrement
+                };
+                self.bump();
+                let target = self.parse_expression_bp(Precedence::Highest);
+                let span = merge_pair(op_span, self.node_span(target));
+                self.insert_node(AstNode::IncDecExpr {
+                    target,
+                    op,
+                    position: IncDecPosition::Prefix,
                     span,
                 })
             }

@@ -30,6 +30,7 @@ impl Parser {
             TokenKind::If
                 | TokenKind::Else
                 | TokenKind::While
+                | TokenKind::For
                 | TokenKind::Break
                 | TokenKind::Continue
                 | TokenKind::Integer
@@ -37,6 +38,8 @@ impl Parser {
                 | TokenKind::String
                 | TokenKind::Bool
                 | TokenKind::Minus
+                | TokenKind::PlusPlus
+                | TokenKind::MinusMinus
                 | TokenKind::Bang
                 | TokenKind::Tilde
                 | TokenKind::LeftParen

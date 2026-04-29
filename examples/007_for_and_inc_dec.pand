@@ -1,0 +1,25 @@
+sum: i32 = 0
+
+for i: i32 = 0; i < 10; i++ {
+    if i == 2 {
+        continue
+    }
+    if i == 6 {
+        break
+    }
+    sum += i
+}
+
+print("sum:", sum)
+
+x: i32 = 1
+a := ++x
+b := x++
+c := --x
+d := x--
+print(a, b, c, d, x)
+
+j: i32 = 0
+for ; j < 3; j++ {
+    print("loop", j)
+}

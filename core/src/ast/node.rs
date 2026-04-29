@@ -31,6 +31,18 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncDecOp {
+    Increment,
+    Decrement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncDecPosition {
+    Prefix,
+    Postfix,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompoundOp {
     Add,
     Subtract,
@@ -94,6 +106,12 @@ pub enum AstNode {
         args: Vec<ArenaId>,
         span: Span,
     },
+    IncDecExpr {
+        target: ArenaId,
+        op: IncDecOp,
+        position: IncDecPosition,
+        span: Span,
+    },
     LetDecl {
         name: ArenaId,
         ty: Option<ArenaId>,
@@ -120,6 +138,13 @@ pub enum AstNode {
     },
     WhileStmt {
         condition: ArenaId,
+        body: ArenaId,
+        span: Span,
+    },
+    ForStmt {
+        init: Option<ArenaId>,
+        condition: Option<ArenaId>,
+        step: Option<ArenaId>,
         body: ArenaId,
         span: Span,
     },
@@ -153,11 +178,13 @@ impl AstNode {
             | Self::UnaryExpr { span, .. }
             | Self::BinaryExpr { span, .. }
             | Self::CallExpr { span, .. }
+            | Self::IncDecExpr { span, .. }
             | Self::LetDecl { span, .. }
             | Self::AssignStmt { span, .. }
             | Self::CompoundAssignStmt { span, .. }
             | Self::IfStmt { span, .. }
             | Self::WhileStmt { span, .. }
+            | Self::ForStmt { span, .. }
             | Self::BreakStmt { span, .. }
             | Self::ContinueStmt { span, .. }
             | Self::BlockStmt { span, .. }

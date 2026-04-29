@@ -64,6 +64,9 @@ impl Parser {
         if self.current().is_some_and(|token| token.kind == TokenKind::While) {
             return self.parse_while_stmt();
         }
+        if self.current().is_some_and(|token| token.kind == TokenKind::For) {
+            return self.parse_for_stmt();
+        }
         if self.current().is_some_and(|token| token.kind == TokenKind::Break) {
             return self.parse_break_stmt();
         }
@@ -112,6 +115,86 @@ impl Parser {
         self.insert_node(AstNode::WhileStmt {
             condition,
             body,
+            span,
+        })
+    }
+
+    fn parse_for_stmt(&mut self) -> ArenaId {
+        let for_span = self.current_span_or_eof();
+        self.bump();
+
+        let init = if self.current().is_some_and(|t| t.kind == TokenKind::Semicolon) {
+            None
+        } else {
+            Some(self.parse_for_init_decl())
+        };
+        if !self.consume_if(TokenKind::Semicolon) {
+            self.push_error("expected ';' after for init", self.current_span_or_eof());
+        }
+
+        let condition = if self.current().is_some_and(|t| t.kind == TokenKind::Semicolon) {
+            None
+        } else {
+            Some(self.parse_expression())
+        };
+        if !self.consume_if(TokenKind::Semicolon) {
+            self.push_error("expected ';' after for condition", self.current_span_or_eof());
+        }
+
+        let step = if self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+            None
+        } else {
+            Some(self.parse_expression())
+        };
+
+        let prev_depth = self.loop_depth;
+        self.loop_depth += 1;
+        let body = self.parse_if_branch_block("expected '{' after for header");
+        self.loop_depth = prev_depth;
+
+        let span = merge_span(for_span, self.node_span(body));
+        self.insert_node(AstNode::ForStmt {
+            init,
+            condition,
+            step,
+            body,
+            span,
+        })
+    }
+
+    fn parse_for_init_decl(&mut self) -> ArenaId {
+        let name_token = match self.current() {
+            Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+            _ => {
+                let span = self.current_span_or_eof();
+                self.push_error("expected identifier in for init declaration", span);
+                return self.invalid_node(span);
+            }
+        };
+        self.bump();
+
+        let name = self.insert_node(AstNode::Identifier {
+            name: name_token.lexeme,
+            span: name_token.span,
+        });
+
+        if !self.consume_if(TokenKind::Colon) {
+            self.push_error("for init must use typed declaration 'name: type = value'", self.current_span_or_eof());
+            return self.invalid_node(name_token.span);
+        }
+        let ty = self.parse_type_name();
+
+        if !self.consume_if(TokenKind::Assign) {
+            self.push_error("expected '=' in for init declaration", self.current_span_or_eof());
+            return self.invalid_node(name_token.span);
+        }
+        let value = self.parse_expression();
+        let span = merge_span(name_token.span, self.node_span(value));
+        self.insert_node(AstNode::LetDecl {
+            name,
+            ty: Some(ty),
+            value,
+            is_const: false,
             span,
         })
     }
@@ -764,6 +847,68 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|d| d.message.contains("continue used outside of loop")));
+    }
+
+    #[test]
+    fn parses_for_stmt_with_all_fields() {
+        let source = "for i: i32 = 0; i < 3; i++ { print(i) }";
+        let lex_out = lex(FileId::from_u32(43), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(43), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(ast.get(ast.roots[0]), Some(AstNode::ForStmt { .. })));
+    }
+
+    #[test]
+    fn parses_for_stmt_with_empty_fields() {
+        let source = "for ; ; { break }";
+        let lex_out = lex(FileId::from_u32(44), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(44), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let Some(AstNode::ForStmt { init, condition, step, .. }) = ast.get(ast.roots[0]) else {
+            panic!("expected for stmt");
+        };
+        assert!(init.is_none());
+        assert!(condition.is_none());
+        assert!(step.is_none());
+    }
+
+    #[test]
+    fn for_init_requires_typed_declaration() {
+        let source = "for i := 0; i < 3; i++ { }";
+        let lex_out = lex(FileId::from_u32(45), source);
+        let (_ast, diagnostics) = parse(FileId::from_u32(45), source.len() as u32, lex_out.tokens);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("for init must use typed declaration")));
+    }
+
+    #[test]
+    fn parses_prefix_and_postfix_incdec() {
+        let source = "x: i32 = 1; y := ++x; z := x--";
+        let lex_out = lex(FileId::from_u32(46), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(46), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let AstNode::LetDecl { value: y_value, .. } = ast.get(ast.roots[1]).expect("y let") else {
+            panic!("expected let decl");
+        };
+        assert!(matches!(
+            ast.get(*y_value),
+            Some(AstNode::IncDecExpr {
+                position: crate::ast::IncDecPosition::Prefix,
+                ..
+            })
+        ));
+        let AstNode::LetDecl { value: z_value, .. } = ast.get(ast.roots[2]).expect("z let") else {
+            panic!("expected let decl");
+        };
+        assert!(matches!(
+            ast.get(*z_value),
+            Some(AstNode::IncDecExpr {
+                position: crate::ast::IncDecPosition::Postfix,
+                ..
+            })
+        ));
     }
 
     #[test]

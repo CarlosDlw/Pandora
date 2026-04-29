@@ -8,7 +8,8 @@ use foundation::{
 use crate::{
     analyzer::{SemanticModel, Type},
     hir::{
-        BinOp, Hir, HirExpr, HirId, HirStmt, UnaryOp as HirUnaryOp,
+        BinOp, Hir, HirExpr, HirId, HirStmt, IncDecOp as HirIncDecOp, IncDecPosition as HirIncDecPosition,
+        UnaryOp as HirUnaryOp,
     },
     integer_lit::{bytecode_int_from_checked_literal, literal_f64, literal_u128, IntConst},
 };
@@ -54,6 +55,7 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         | HirStmt::Block { span, .. }
         | HirStmt::If { span, .. }
         | HirStmt::While { span, .. }
+        | HirStmt::For { span, .. }
         | HirStmt::Break { span, .. }
         | HirStmt::Continue { span, .. }
         | HirStmt::Invalid { span } => *span,
@@ -151,8 +153,9 @@ fn emit_stmt(
             let jump_out_at = b.emit_placeholder_jump_if_false(*span);
 
             loop_stack.push(LoopContext {
-                cond_target,
+                continue_target: Some(cond_target),
                 break_sites: Vec::new(),
+                continue_sites: Vec::new(),
                 scope_depth_at_loop: *scope_depth,
             });
 
@@ -175,9 +178,84 @@ fn emit_stmt(
                         diagnostics.push(Diagnostic::new("failed to patch break jump", *span, Severity::Error));
                     }
                 }
+                if let Some(continue_target) = ctx.continue_target {
+                    for site in ctx.continue_sites {
+                        if !b.patch_jump_target(site, continue_target) {
+                            diagnostics.push(Diagnostic::new("failed to patch continue jump", *span, Severity::Error));
+                        }
+                    }
+                }
             } else {
                 diagnostics.push(Diagnostic::new("internal loop stack underflow in emitter", *span, Severity::Error));
             }
+        }
+        HirStmt::For {
+            init,
+            condition,
+            step,
+            body,
+            span,
+        } => {
+            b.emit(Op::EnterScope, *span);
+            *scope_depth += 1;
+            if let Some(init_stmt) = init {
+                emit_stmt(hir, model, init_stmt, b, diagnostics, loop_stack, scope_depth);
+            }
+
+            let cond_target = b.len();
+            if let Some(condition_expr) = condition {
+                emit_expr(hir, model, *condition_expr, b, diagnostics);
+            } else {
+                b.emit(Op::ConstBool(true), *span);
+            }
+            let jump_out_at = b.emit_placeholder_jump_if_false(*span);
+
+            loop_stack.push(LoopContext {
+                continue_target: None,
+                break_sites: Vec::new(),
+                continue_sites: Vec::new(),
+                scope_depth_at_loop: *scope_depth,
+            });
+
+            b.emit(Op::EnterScope, *span);
+            *scope_depth += 1;
+            for stmt in body {
+                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth);
+            }
+            b.emit(Op::ExitScope, *span);
+            *scope_depth = scope_depth.saturating_sub(1);
+
+            let continue_target = if let Some(step_expr) = step {
+                let target = b.len();
+                emit_expr(hir, model, *step_expr, b, diagnostics);
+                b.emit(Op::Pop, *span);
+                target
+            } else {
+                cond_target
+            };
+            b.emit(Op::Jump(cond_target), *span);
+            let loop_end = b.len();
+
+            if !b.patch_jump_target(jump_out_at, loop_end) {
+                diagnostics.push(Diagnostic::new("failed to patch for exit jump", *span, Severity::Error));
+            }
+            if let Some(ctx) = loop_stack.pop() {
+                for site in ctx.break_sites {
+                    if !b.patch_jump_target(site, loop_end) {
+                        diagnostics.push(Diagnostic::new("failed to patch break jump", *span, Severity::Error));
+                    }
+                }
+                for site in ctx.continue_sites {
+                    if !b.patch_jump_target(site, continue_target) {
+                        diagnostics.push(Diagnostic::new("failed to patch continue jump", *span, Severity::Error));
+                    }
+                }
+            } else {
+                diagnostics.push(Diagnostic::new("internal loop stack underflow in emitter", *span, Severity::Error));
+            }
+
+            b.emit(Op::ExitScope, *span);
+            *scope_depth = scope_depth.saturating_sub(1);
         }
         HirStmt::Break { span } => {
             let Some(loop_ctx) = loop_stack.last_mut() else {
@@ -194,7 +272,10 @@ fn emit_stmt(
                 return;
             };
             emit_scope_unwind_for_loop_exit(b, *span, *scope_depth, loop_ctx.scope_depth_at_loop);
-            b.emit(Op::Jump(loop_ctx.cond_target), *span);
+            let continue_jump = b.emit_placeholder_jump(*span);
+            if let Some(loop_ctx_mut) = loop_stack.last_mut() {
+                loop_ctx_mut.continue_sites.push(continue_jump);
+            }
         }
         HirStmt::Invalid { span } => {
             diagnostics.push(Diagnostic::new("invalid statement skipped in bytecode", *span, Severity::Error));
@@ -204,8 +285,9 @@ fn emit_stmt(
 
 #[derive(Debug, Clone)]
 struct LoopContext {
-    cond_target: usize,
+    continue_target: Option<usize>,
     break_sites: Vec<usize>,
+    continue_sites: Vec<usize>,
     scope_depth_at_loop: usize,
 }
 
@@ -335,9 +417,51 @@ fn emit_expr(
                 }
             }
         }
+        HirExpr::IncDec {
+            symbol,
+            op,
+            position,
+        } => {
+            let ty = model.types.get(&id).cloned().unwrap_or(Type::Unknown);
+            match position {
+                HirIncDecPosition::Prefix => {
+                    b.emit(Op::Load(*symbol), span);
+                    emit_numeric_one_const(b, span, &ty, diagnostics);
+                    match op {
+                        HirIncDecOp::Increment => b.emit(Op::Add, span),
+                        HirIncDecOp::Decrement => b.emit(Op::Sub, span),
+                    }
+                    b.emit(Op::Assign(*symbol), span);
+                    b.emit(Op::Load(*symbol), span);
+                }
+                HirIncDecPosition::Postfix => {
+                    b.emit(Op::Load(*symbol), span);
+                    b.emit(Op::Load(*symbol), span);
+                    emit_numeric_one_const(b, span, &ty, diagnostics);
+                    match op {
+                        HirIncDecOp::Increment => b.emit(Op::Add, span),
+                        HirIncDecOp::Decrement => b.emit(Op::Sub, span),
+                    }
+                    b.emit(Op::Assign(*symbol), span);
+                }
+            }
+        }
         HirExpr::Invalid => {
             diagnostics.push(Diagnostic::new("invalid expression in bytecode", span, Severity::Error));
         }
+    }
+}
+
+fn emit_numeric_one_const(b: &mut ChunkBuilder, span: Span, ty: &Type, diagnostics: &mut Diagnostics) {
+    match ty {
+        Type::Int { signed: true, .. } => b.emit(Op::ConstI128(1), span),
+        Type::Int { signed: false, .. } => b.emit(Op::ConstU128(1), span),
+        Type::Float { .. } => b.emit(Op::ConstFloat(1.0), span),
+        _ => diagnostics.push(Diagnostic::new(
+            "increment/decrement requires numeric type in emitter",
+            span,
+            Severity::Error,
+        )),
     }
 }
 

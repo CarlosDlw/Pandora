@@ -36,6 +36,18 @@ pub enum UnaryOp {
     BitNot,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncDecOp {
+    Increment,
+    Decrement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncDecPosition {
+    Prefix,
+    Postfix,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum HirExpr {
     Int(String),
@@ -46,6 +58,11 @@ pub enum HirExpr {
     Var(SymbolId),
     Unary { op: UnaryOp, operand: HirId },
     Binary { op: BinOp, lhs: HirId, rhs: HirId },
+    IncDec {
+        symbol: SymbolId,
+        op: IncDecOp,
+        position: IncDecPosition,
+    },
     Call { callee: SymbolId, args: Vec<HirId> },
     Invalid,
 }
@@ -79,6 +96,13 @@ pub enum HirStmt {
     },
     While {
         condition: HirId,
+        body: Vec<HirStmt>,
+        span: Span,
+    },
+    For {
+        init: Option<Box<HirStmt>>,
+        condition: Option<HirId>,
+        step: Option<HirId>,
         body: Vec<HirStmt>,
         span: Span,
     },

@@ -122,3 +122,21 @@ fn runs_example_006_compound_assign_and_string_concat() {
                 .and(contains("value is 42")),
         );
 }
+
+#[test]
+fn runs_example_007_for_and_inc_dec() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/007_for_and_inc_dec.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("sum: 13")
+                .and(contains("2 2 2 2 1"))
+                .and(contains("loop 0"))
+                .and(contains("loop 1"))
+                .and(contains("loop 2")),
+        );
+}

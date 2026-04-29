@@ -144,6 +144,35 @@ impl<'a> Checker<'a> {
                 self.loop_depth = self.loop_depth.saturating_sub(1);
                 AnalyzerType::Unknown
             }
+            HirStmt::For {
+                init,
+                condition,
+                step,
+                body,
+                span,
+            } => {
+                if let Some(init_stmt) = init {
+                    let _ = self.check_stmt(init_stmt);
+                }
+                if let Some(condition_expr) = condition {
+                    let cond_ty = self.check_expr(*condition_expr, *span);
+                    if !is_truthy_falsy_compatible(&cond_ty) && cond_ty != AnalyzerType::Unknown {
+                        self.push_error(
+                            format!("for condition is not truthy/falsy-compatible: {cond_ty:?}"),
+                            *span,
+                        );
+                    }
+                }
+                self.loop_depth += 1;
+                for stmt in body {
+                    let _ = self.check_stmt(stmt);
+                }
+                if let Some(step_expr) = step {
+                    let _ = self.check_expr(*step_expr, *span);
+                }
+                self.loop_depth = self.loop_depth.saturating_sub(1);
+                AnalyzerType::Unknown
+            }
             HirStmt::Break { span } => {
                 if self.loop_depth == 0 {
                     self.push_error("break used outside of loop", *span);
@@ -221,6 +250,29 @@ impl<'a> Checker<'a> {
                     .map(|s| s.ty.clone())
                     .unwrap_or(AnalyzerType::Unknown);
                 self.check_call(callee_ty, args, span)
+            }
+            Some(HirExpr::IncDec {
+                symbol,
+                op: _,
+                position: _,
+            }) => {
+                let Some(sym) = self.symbols.symbol(*symbol) else {
+                    self.push_error("invalid increment/decrement target", span);
+                    return AnalyzerType::Unknown;
+                };
+                if sym.is_const {
+                    self.push_error("cannot assign to constant", span);
+                    return AnalyzerType::Unknown;
+                }
+                if is_numeric_type(&sym.ty) {
+                    sym.ty.clone()
+                } else {
+                    self.push_error(
+                        format!("increment/decrement requires numeric variable, got {:?}", sym.ty),
+                        span,
+                    );
+                    AnalyzerType::Unknown
+                }
             }
             Some(HirExpr::Invalid) | None => AnalyzerType::Unknown,
         };
@@ -574,6 +626,10 @@ fn is_truthy_falsy_compatible(ty: &AnalyzerType) -> bool {
     )
 }
 
+fn is_numeric_type(ty: &AnalyzerType) -> bool {
+    matches!(ty, AnalyzerType::Int { .. } | AnalyzerType::Float { .. })
+}
+
 #[cfg(test)]
 mod tests {
     use foundation::ids::FileId;
@@ -815,6 +871,40 @@ mod tests {
         let src = "x :: i32 = 1; x += 1";
         let lex_output = lex(FileId::from_u32(42), src);
         let (ast, _) = parse(FileId::from_u32(42), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("cannot assign to constant")));
+    }
+
+    #[test]
+    fn accepts_for_loop_with_incdec_step() {
+        let src = "for i: i32 = 0; i < 3; i++ { print(i) }";
+        let lex_output = lex(FileId::from_u32(43), src);
+        let (ast, _) = parse(FileId::from_u32(43), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_incdec_on_non_numeric_type() {
+        let src = r#"s: str = "a"; s++"#;
+        let lex_output = lex(FileId::from_u32(44), src);
+        let (ast, _) = parse(FileId::from_u32(44), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("increment/decrement requires numeric variable")));
+    }
+
+    #[test]
+    fn rejects_incdec_on_const() {
+        let src = "x:: i32 = 1; ++x";
+        let lex_output = lex(FileId::from_u32(45), src);
+        let (ast, _) = parse(FileId::from_u32(45), src.len() as u32, lex_output.tokens);
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());

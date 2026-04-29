@@ -150,3 +150,16 @@ fn check_mode_reports_continue_outside_loop() {
                 .and(contains("use `continue` only inside a loop body")),
         );
 }
+
+#[test]
+fn check_mode_reports_invalid_for_init() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"for i := 0; i < 3; i++ { }\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("error: for init must use typed declaration"));
+}

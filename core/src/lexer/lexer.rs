@@ -79,7 +79,10 @@ impl<'a> Lexer<'a> {
             match ch {
                 '+' => {
                     self.bump();
-                    if self.peek() == Some('=') {
+                    if self.peek() == Some('+') {
+                        self.bump();
+                        self.push_token(TokenKind::PlusPlus, start, self.cursor);
+                    } else if self.peek() == Some('=') {
                         self.bump();
                         self.push_token(TokenKind::PlusAssign, start, self.cursor);
                     } else {
@@ -88,7 +91,10 @@ impl<'a> Lexer<'a> {
                 }
                 '-' => {
                     self.bump();
-                    if self.peek() == Some('=') {
+                    if self.peek() == Some('-') {
+                        self.bump();
+                        self.push_token(TokenKind::MinusMinus, start, self.cursor);
+                    } else if self.peek() == Some('=') {
                         self.bump();
                         self.push_token(TokenKind::MinusAssign, start, self.cursor);
                     } else {
@@ -289,6 +295,7 @@ impl<'a> Lexer<'a> {
             "while" => TokenKind::While,
             "break" => TokenKind::Break,
             "continue" => TokenKind::Continue,
+            "for" => TokenKind::For,
             _ if is_known_type(text) => TokenKind::TypeName,
             _ => TokenKind::Identifier,
         };
@@ -730,6 +737,25 @@ print(name, age)
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::While));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Break));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Continue));
+    }
+
+    #[test]
+    fn lexes_for_and_incdec_tokens() {
+        let output = lex(FileId::from_u32(17), "for i: i32 = 0; i < 10; i++ { --i }");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::For));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusPlus));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusMinus));
+    }
+
+    #[test]
+    fn distinguishes_incdec_from_plus_minus_variants() {
+        let output = lex(FileId::from_u32(18), "x++ + ++x; y-- - --y; z += 1; w -= 1");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusPlus));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusMinus));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusAssign));
     }
 
     #[test]

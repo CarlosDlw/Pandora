@@ -2,9 +2,12 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::Type,
-    ast::{Ast, AstNode, BinaryOp, CompoundOp, UnaryOp},
+    ast::{Ast, AstNode, BinaryOp, CompoundOp, IncDecOp as AstIncDecOp, IncDecPosition as AstIncDecPosition, UnaryOp},
     builtins::default_registry,
-    hir::{BinOp, Hir, HirExpr, HirStmt, ScopeId, SymbolId, SymbolOrigin, SymbolTable, UnaryOp as HirUnaryOp},
+    hir::{
+        BinOp, Hir, HirExpr, HirStmt, IncDecOp as HirIncDecOp, IncDecPosition as HirIncDecPosition, ScopeId,
+        SymbolId, SymbolOrigin, SymbolTable, UnaryOp as HirUnaryOp,
+    },
 };
 use foundation::{
     arena::Arena,
@@ -147,6 +150,25 @@ impl<'a> Lowering<'a> {
                     span: *span,
                 }
             }
+            AstNode::ForStmt {
+                init,
+                condition,
+                step,
+                body,
+                span,
+            } => {
+                let init = init.map(|id| Box::new(self.lower_stmt(id)));
+                let condition = condition.map(|id| self.lower_expr(id));
+                let step = step.map(|id| self.lower_expr(id));
+                let body = self.lower_if_branch(*body);
+                HirStmt::For {
+                    init,
+                    condition,
+                    step,
+                    body,
+                    span: *span,
+                }
+            }
             AstNode::BreakStmt { span } => HirStmt::Break { span: *span },
             AstNode::ContinueStmt { span } => HirStmt::Continue { span: *span },
             AstNode::Invalid { span } => HirStmt::Invalid { span: *span },
@@ -281,6 +303,22 @@ impl<'a> Lowering<'a> {
                     }
                 }
             }
+            AstNode::IncDecExpr {
+                target,
+                op,
+                position,
+                span,
+            } => {
+                let symbol = self.resolve_assignment_target(*target);
+                self.insert_hir_expr(
+                    HirExpr::IncDec {
+                        symbol,
+                        op: map_inc_dec_op(*op),
+                        position: map_inc_dec_position(*position),
+                    },
+                    *span,
+                )
+            }
             AstNode::TypeName { .. } => {
                 self.push_error("type name is not an expression", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
@@ -290,6 +328,7 @@ impl<'a> Lowering<'a> {
             | AstNode::CompoundAssignStmt { .. }
             | AstNode::IfStmt { .. }
             | AstNode::WhileStmt { .. }
+            | AstNode::ForStmt { .. }
             | AstNode::BreakStmt { .. }
             | AstNode::ContinueStmt { .. }
             | AstNode::ExprStmt { .. }
@@ -366,6 +405,20 @@ impl<'a> Lowering<'a> {
                 }]
             }
         }
+    }
+}
+
+fn map_inc_dec_op(op: AstIncDecOp) -> HirIncDecOp {
+    match op {
+        AstIncDecOp::Increment => HirIncDecOp::Increment,
+        AstIncDecOp::Decrement => HirIncDecOp::Decrement,
+    }
+}
+
+fn map_inc_dec_position(position: AstIncDecPosition) -> HirIncDecPosition {
+    match position {
+        AstIncDecPosition::Prefix => HirIncDecPosition::Prefix,
+        AstIncDecPosition::Postfix => HirIncDecPosition::Postfix,
     }
 }
 
@@ -669,5 +722,28 @@ mod tests {
             hir.exprs.get(*value),
             Some(HirExpr::Binary { op: BinOp::Add, .. })
         ));
+    }
+
+    #[test]
+    fn lowers_for_stmt_into_hir_for() {
+        let src = "for i: i32 = 0; i < 2; i++ { print(i) }";
+        let lex_output = lex(FileId::from_u32(13), src);
+        let (ast, _) = parse(FileId::from_u32(13), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(hir.stmts.first(), Some(HirStmt::For { .. })));
+    }
+
+    #[test]
+    fn lowers_incdec_expr_into_hir_incdec() {
+        let src = "x: i32 = 1; y := x++";
+        let lex_output = lex(FileId::from_u32(14), src);
+        let (ast, _) = parse(FileId::from_u32(14), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        let Some(HirStmt::Let { value, .. }) = hir.stmts.get(1) else {
+            panic!("expected second let");
+        };
+        assert!(matches!(hir.exprs.get(*value), Some(HirExpr::IncDec { .. })));
     }
 }
