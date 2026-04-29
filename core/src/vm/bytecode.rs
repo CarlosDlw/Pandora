@@ -8,6 +8,7 @@
 //! | [`Op::Load`]     | push value bound to [`crate::hir::symbols::SymbolId`] |
 //! | [`Op::Bind`]     | pop one value → initialize binding (let) |
 //! | [`Op::Assign`]   | pop one value → update an existing binding (`id = expr`) |
+//! | [`Op::EnterScope`] / [`Op::ExitScope`] | open/close lexical runtime frame for block locals |
 //! | [`Op::Neg`]      | pop one numeric value → push unary negation (`-`) |
 //! | [`Op::Add`] [`Op::Sub`] [`Op::Mul`] [`Op::Div`] | pop b, pop a → push result (see docs on [`Op::Div`] for integers) |
 //! | [`Op::Call`]     | pop `n` arguments, push return value |
@@ -37,6 +38,8 @@ pub enum Op {
     Bind(SymbolId),
     /// Reassignment: rejects builtin names and `::` declarations.
     Assign(SymbolId),
+    EnterScope,
+    ExitScope,
 
     Neg,
 

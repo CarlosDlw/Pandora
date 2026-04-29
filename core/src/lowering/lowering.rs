@@ -91,6 +91,10 @@ impl<'a> Lowering<'a> {
                 let expr = self.lower_expr(*expr);
                 HirStmt::Expr { expr, span: *span }
             }
+            AstNode::BlockStmt { statements, span } => {
+                let stmts = self.lower_block_stmts(statements);
+                HirStmt::Block { stmts, span: *span }
+            }
             AstNode::Invalid { span } => HirStmt::Invalid { span: *span },
             other => {
                 let expr = self.lower_expr(id);
@@ -225,7 +229,10 @@ impl<'a> Lowering<'a> {
                 self.push_error("type name is not an expression", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
-            AstNode::LetDecl { .. } | AstNode::AssignStmt { .. } | AstNode::ExprStmt { .. } => {
+            AstNode::LetDecl { .. }
+            | AstNode::AssignStmt { .. }
+            | AstNode::ExprStmt { .. }
+            | AstNode::BlockStmt { .. } => {
                 self.push_error("statement used where expression expected", self.node_span(id));
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
@@ -269,6 +276,18 @@ impl<'a> Lowering<'a> {
             },
             _ => Type::Unknown,
         }
+    }
+
+    fn lower_block_stmts(&mut self, statements: &[ArenaId]) -> Vec<HirStmt> {
+        let parent_scope = self.current_scope;
+        let block_scope = self.symbols.create_scope(Some(parent_scope));
+        self.current_scope = block_scope;
+        let lowered = statements
+            .iter()
+            .map(|stmt_id| self.lower_stmt(*stmt_id))
+            .collect::<Vec<_>>();
+        self.current_scope = parent_scope;
+        lowered
     }
 }
 
@@ -440,5 +459,24 @@ mod tests {
             }
         }
         assert!(has_call);
+    }
+
+    #[test]
+    fn block_scope_allows_shadowing_without_leaking() {
+        let src = "x := 1; { x := 2; y := x }; z := x";
+        let lex_output = lex(FileId::from_u32(6), src);
+        let (ast, _) = parse(FileId::from_u32(6), src.len() as u32, lex_output.tokens);
+        let (_hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn block_local_is_not_visible_outside() {
+        let src = "{ local := 1 }; print(local)";
+        let lex_output = lex(FileId::from_u32(7), src);
+        let (ast, _) = parse(FileId::from_u32(7), src.len() as u32, lex_output.tokens);
+        let (_hir, _symbols, diagnostics) = lower(&ast);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("undefined symbol 'local'")));
     }
 }

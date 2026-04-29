@@ -97,8 +97,10 @@ fn caret_line(loc: &Location) -> String {
 fn suggest_fix(message: &str) -> Option<&'static str> {
     if message.contains("expected ')'") {
         Some("close the missing ')' at the end of the expression or call.")
+    } else if message.contains("expected '}'") {
+        Some("close the block with '}' to end its local scope.")
     } else if message.contains("undefined symbol") {
-        Some("declare the variable before use with ':=' or ': type = value'.")
+        Some("declare the variable before use with ':=' or ': type = value'; symbols from a block are not visible outside it.")
     } else if message.contains("cannot assign to constant") {
         Some("use ':' instead of '::' for mutable bindings, or assign to a new name.")
     } else if message.contains("invalid argument type") || message.contains("cannot assign value of type") {
@@ -166,5 +168,14 @@ mod tests {
         let d = Diagnostic::new("custom unknown message", span, foundation::diagnostics::Severity::Error);
         let text = render("main.pand", source, &d);
         assert!(!text.contains("= help:"));
+    }
+
+    #[test]
+    fn suggests_fix_for_missing_right_brace() {
+        let source = "{ x := 1";
+        let span = Span::new_unchecked(FileId::from_u32(0), 0, source.len() as u32);
+        let d = Diagnostic::new("expected '}'", span, foundation::diagnostics::Severity::Error);
+        let text = render("main.pand", source, &d);
+        assert!(text.contains("close the block with '}'"));
     }
 }

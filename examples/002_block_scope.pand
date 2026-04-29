@@ -1,0 +1,15 @@
+# Block scope example:
+# - inner block can read names from parent scope
+# - names declared inside the block do not exist outside it
+
+username: str = "salo"
+
+{
+    print(username)
+    name: str = "carlos"
+    print(name)
+}
+
+# Uncommenting the next line should produce an "undefined symbol" error,
+# because `name` is local to the block above.
+# print(name)

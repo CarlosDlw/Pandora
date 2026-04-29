@@ -21,6 +21,7 @@ pub struct Vm<'a> {
     ip: usize,
     stack: Vec<Value>,
     env: HashMap<SymbolId, Value>,
+    scope_frames: Vec<Vec<SymbolId>>,
     symbols: &'a SymbolTable,
 }
 
@@ -31,6 +32,7 @@ impl<'a> Vm<'a> {
             ip: 0,
             stack: Vec::new(),
             env: initial_env,
+            scope_frames: vec![Vec::new()],
             symbols,
         }
     }
@@ -103,6 +105,9 @@ impl<'a> Vm<'a> {
             Op::Bind(sym) => {
                 let v = self.pop_one(span)?;
                 self.env.insert(*sym, v);
+                if let Some(frame) = self.scope_frames.last_mut() {
+                    frame.push(*sym);
+                }
             }
 
             Op::Assign(sym) => {
@@ -175,6 +180,24 @@ impl<'a> Vm<'a> {
 
             Op::Pop => {
                 let _ = self.pop_one(span)?;
+            }
+
+            Op::EnterScope => {
+                self.scope_frames.push(Vec::new());
+            }
+
+            Op::ExitScope => {
+                if self.scope_frames.len() <= 1 {
+                    return Err(Diagnostic::new(
+                        "scope stack underflow (internal bytecode error)",
+                        span,
+                        Severity::Error,
+                    ));
+                }
+                let frame = self.scope_frames.pop().expect("checked len");
+                for sym in frame.into_iter().rev() {
+                    self.env.remove(&sym);
+                }
             }
 
             Op::Return => {}
@@ -393,5 +416,65 @@ mod tests {
         let symbols = SymbolTable::new();
         let err = execute(&chunk, &symbols).expect_err("div0");
         assert!(err.iter().any(|d| d.message.contains("division by zero")));
+    }
+
+    #[test]
+    fn exit_scope_removes_local_binding() {
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        let local = symbols.define(
+            root,
+            "local".to_string(),
+            crate::analyzer::Type::Int { signed: true, bits: 32 },
+            crate::hir::SymbolOrigin::User,
+            false,
+        );
+
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::EnterScope, s);
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::Bind(local), s);
+        b.emit(Op::ExitScope, s);
+        b.emit(Op::Load(local), s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let err = execute(&chunk, &symbols).expect_err("missing local after exit");
+        assert!(err.iter().any(|d| d.message.contains("load of uninitialized or missing symbol")));
+    }
+
+    #[test]
+    fn exit_scope_keeps_outer_binding_alive() {
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        let outer = symbols.define(
+            root,
+            "outer".to_string(),
+            crate::analyzer::Type::Int { signed: true, bits: 32 },
+            crate::hir::SymbolOrigin::User,
+            false,
+        );
+        let inner_scope = symbols.create_scope(Some(root));
+        let inner = symbols.define(
+            inner_scope,
+            "outer".to_string(),
+            crate::analyzer::Type::Int { signed: true, bits: 32 },
+            crate::hir::SymbolOrigin::User,
+            false,
+        );
+
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(10), s);
+        b.emit(Op::Bind(outer), s);
+        b.emit(Op::EnterScope, s);
+        b.emit(Op::ConstI128(20), s);
+        b.emit(Op::Bind(inner), s);
+        b.emit(Op::ExitScope, s);
+        b.emit(Op::Load(outer), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        execute(&chunk, &symbols).expect("outer binding should remain");
     }
 }

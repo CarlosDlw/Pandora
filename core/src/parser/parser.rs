@@ -59,6 +59,9 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> ArenaId {
+        if self.current().is_some_and(|token| token.kind == TokenKind::LeftBrace) {
+            return self.parse_block_stmt();
+        }
         if self.is_declaration_start() {
             return self.parse_let_decl();
         }
@@ -69,6 +72,27 @@ impl Parser {
         let expr = self.parse_expression();
         let span = self.node_span(expr);
         self.insert_node(AstNode::ExprStmt { expr, span })
+    }
+
+    fn parse_block_stmt(&mut self) -> ArenaId {
+        let open = self.current_span_or_eof();
+        self.bump();
+
+        let mut statements = Vec::new();
+        while self.current().is_some() {
+            if self.consume_if(TokenKind::RightBrace) {
+                let span = merge_span(open, self.previous_span_or(open));
+                return self.insert_node(AstNode::BlockStmt { statements, span });
+            }
+            let stmt = self.parse_statement();
+            statements.push(stmt);
+            self.consume_if(TokenKind::Semicolon);
+        }
+
+        let eof = self.eof_span();
+        let span = merge_span(open, eof);
+        self.push_error("expected '}'", span);
+        self.insert_node(AstNode::BlockStmt { statements, span })
     }
 
     fn parse_let_decl(&mut self) -> ArenaId {
@@ -227,6 +251,14 @@ impl Parser {
         }
     }
 
+    pub(super) fn previous_span_or(&self, fallback: Span) -> Span {
+        if self.pos == 0 {
+            fallback
+        } else {
+            self.tokens.get(self.pos - 1).map(|t| t.span).unwrap_or(fallback)
+        }
+    }
+
     pub(super) fn insert_node(&mut self, node: AstNode) -> ArenaId {
         match self.arena.insert(node) {
             Ok(id) => id,
@@ -372,5 +404,43 @@ mod tests {
             ast.get(expr_id),
             Some(AstNode::CallExpr { args, .. }) if args.len() == 2
         ));
+    }
+
+    #[test]
+    fn parses_block_statement_and_inner_declaration() {
+        let source = "{ x := 1; print(x) }";
+        let lex_out = lex(FileId::from_u32(7), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(7), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert_eq!(ast.roots.len(), 1);
+        let root = ast.roots[0];
+        let AstNode::BlockStmt { statements, .. } = ast.get(root).expect("block stmt") else {
+            panic!("expected block statement");
+        };
+        assert_eq!(statements.len(), 2);
+        assert!(matches!(ast.get(statements[0]), Some(AstNode::LetDecl { .. })));
+        assert!(matches!(ast.get(statements[1]), Some(AstNode::ExprStmt { .. })));
+    }
+
+    #[test]
+    fn reports_missing_block_closing_brace() {
+        let source = "{ x := 1";
+        let lex_out = lex(FileId::from_u32(8), source);
+        let (_ast, diagnostics) = parse(FileId::from_u32(8), source.len() as u32, lex_out.tokens);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("expected '}'")));
+    }
+
+    #[test]
+    fn block_supports_optional_semicolons() {
+        let source = "{ x := 1 y := 2 print(x, y) }";
+        let lex_out = lex(FileId::from_u32(9), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(9), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let root = ast.roots[0];
+        let AstNode::BlockStmt { statements, .. } = ast.get(root).expect("block stmt") else {
+            panic!("expected block statement");
+        };
+        assert_eq!(statements.len(), 3);
     }
 }

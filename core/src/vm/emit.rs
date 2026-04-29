@@ -41,6 +41,7 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         HirStmt::Let { span, .. }
         | HirStmt::Assign { span, .. }
         | HirStmt::Expr { span, .. }
+        | HirStmt::Block { span, .. }
         | HirStmt::Invalid { span } => *span,
     }
 }
@@ -75,6 +76,13 @@ fn emit_stmt(
         HirStmt::Expr { expr, span } => {
             emit_expr(hir, model, *expr, b, diagnostics);
             b.emit(Op::Pop, *span);
+        }
+        HirStmt::Block { stmts, span } => {
+            b.emit(Op::EnterScope, *span);
+            for stmt in stmts {
+                emit_stmt(hir, model, stmt, b, diagnostics);
+            }
+            b.emit(Op::ExitScope, *span);
         }
         HirStmt::Invalid { span } => {
             diagnostics.push(Diagnostic::new("invalid statement skipped in bytecode", *span, Severity::Error));
@@ -189,5 +197,31 @@ fn fallback_inference_int(raw: &str) -> Result<IntConst, &'static str> {
         Ok(IntConst::Signed(parsed as i128))
     } else {
         Ok(IntConst::Unsigned(parsed))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use foundation::ids::FileId;
+
+    use crate::{analyzer::analyze, lexer::lex, lowering::lower, parser::parse, vm::bytecode::Op};
+
+    use super::compile_program;
+
+    #[test]
+    fn emits_scope_ops_for_block_stmt() {
+        let src = "{ x := 1; print(x) }";
+        let lex_output = lex(FileId::from_u32(31), src);
+        let (ast, parser_diagnostics) = parse(FileId::from_u32(31), src.len() as u32, lex_output.tokens);
+        assert!(!parser_diagnostics.has_errors());
+        let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
+        assert!(!lowering_diagnostics.has_errors());
+        let (model, analysis_diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!analysis_diagnostics.has_errors());
+
+        let (chunk, compile_diagnostics) = compile_program(&hir, &model);
+        assert!(!compile_diagnostics.has_errors());
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::EnterScope)));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::ExitScope)));
     }
 }

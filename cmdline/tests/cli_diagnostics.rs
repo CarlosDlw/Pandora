@@ -54,3 +54,35 @@ fn ast_mode_returns_error_for_parser_diagnostic() {
                 .and(contains("= help:")),
         );
 }
+
+#[test]
+fn check_mode_reports_block_scope_violation() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"{ name: str = \"carlos\" }\nprint(name)\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(
+            contains("error: undefined symbol 'name'")
+                .and(contains("symbols from a block are not visible outside it")),
+        );
+}
+
+#[test]
+fn ast_mode_reports_missing_block_closer() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"{ value := 1\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--ast")
+        .assert()
+        .code(1)
+        .stderr(
+            contains("error: expected '}'")
+                .and(contains("close the block with '}'")),
+        );
+}

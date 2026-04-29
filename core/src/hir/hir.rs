@@ -50,6 +50,10 @@ pub enum HirStmt {
         expr: HirId,
         span: Span,
     },
+    Block {
+        stmts: Vec<HirStmt>,
+        span: Span,
+    },
     Invalid {
         span: Span,
     },

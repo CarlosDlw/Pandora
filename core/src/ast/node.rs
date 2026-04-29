@@ -74,6 +74,10 @@ pub enum AstNode {
         value: ArenaId,
         span: Span,
     },
+    BlockStmt {
+        statements: Vec<ArenaId>,
+        span: Span,
+    },
     ExprStmt {
         expr: ArenaId,
         span: Span,
@@ -96,6 +100,7 @@ impl AstNode {
             | Self::CallExpr { span, .. }
             | Self::LetDecl { span, .. }
             | Self::AssignStmt { span, .. }
+            | Self::BlockStmt { span, .. }
             | Self::ExprStmt { span, .. } => *span,
         }
     }

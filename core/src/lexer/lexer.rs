@@ -101,6 +101,14 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     self.push_token(TokenKind::RightParen, start, self.cursor);
                 }
+                '{' => {
+                    self.bump();
+                    self.push_token(TokenKind::LeftBrace, start, self.cursor);
+                }
+                '}' => {
+                    self.bump();
+                    self.push_token(TokenKind::RightBrace, start, self.cursor);
+                }
                 ',' => {
                     self.bump();
                     self.push_token(TokenKind::Comma, start, self.cursor);
@@ -341,6 +349,14 @@ print(name, age)
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Float));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::String));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Comma));
+    }
+
+    #[test]
+    fn lexes_block_braces() {
+        let output = lex(FileId::from_u32(6), "{ x := 1 }");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::LeftBrace));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::RightBrace));
     }
 
     #[test]

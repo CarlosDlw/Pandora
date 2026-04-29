@@ -93,6 +93,12 @@ impl<'a> Checker<'a> {
                 }
                 expected.0
             }
+            HirStmt::Block { stmts, .. } => {
+                for stmt in stmts {
+                    let _ = self.check_stmt(stmt);
+                }
+                AnalyzerType::Unknown
+            }
             HirStmt::Invalid { span } => {
                 self.push_error("invalid statement", *span);
                 AnalyzerType::Unknown
@@ -446,5 +452,16 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_assignment_to_const_inside_block() {
+        let src = "pi:: f32 = 3.14; { pi = 1.0 }";
+        let lex_output = lex(FileId::from_u32(27), src);
+        let (ast, _) = parse(FileId::from_u32(27), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("cannot assign to constant")));
     }
 }
