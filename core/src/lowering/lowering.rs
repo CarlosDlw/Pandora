@@ -180,6 +180,8 @@ impl<'a> Lowering<'a> {
                 let operand = self.lower_expr(*operand);
                 let op = match op {
                     UnaryOp::Neg => HirUnaryOp::Neg,
+                    UnaryOp::Not => HirUnaryOp::Not,
+                    UnaryOp::BitNot => HirUnaryOp::BitNot,
                 };
                 self.insert_hir_expr(HirExpr::Unary { op, operand }, self.node_span(id))
             }
@@ -297,6 +299,21 @@ fn map_binary_op(op: BinaryOp) -> BinOp {
         BinaryOp::Subtract => BinOp::Subtract,
         BinaryOp::Multiply => BinOp::Multiply,
         BinaryOp::Divide => BinOp::Divide,
+        BinaryOp::Modulo => BinOp::Modulo,
+        BinaryOp::Power => BinOp::Power,
+        BinaryOp::Equal => BinOp::Equal,
+        BinaryOp::NotEqual => BinOp::NotEqual,
+        BinaryOp::Less => BinOp::Less,
+        BinaryOp::LessEqual => BinOp::LessEqual,
+        BinaryOp::Greater => BinOp::Greater,
+        BinaryOp::GreaterEqual => BinOp::GreaterEqual,
+        BinaryOp::LogicalAnd => BinOp::LogicalAnd,
+        BinaryOp::LogicalOr => BinOp::LogicalOr,
+        BinaryOp::BitAnd => BinOp::BitAnd,
+        BinaryOp::BitOr => BinOp::BitOr,
+        BinaryOp::BitXor => BinOp::BitXor,
+        BinaryOp::ShiftLeft => BinOp::ShiftLeft,
+        BinaryOp::ShiftRight => BinOp::ShiftRight,
     }
 }
 
@@ -370,7 +387,7 @@ mod tests {
     use foundation::ids::FileId;
 
     use crate::{
-        hir::{HirExpr, ScopeId, SymbolOrigin},
+        hir::{BinOp, HirExpr, ScopeId, SymbolOrigin},
         lexer::lex,
         parser::parse,
     };
@@ -478,5 +495,47 @@ mod tests {
         let (_hir, _symbols, diagnostics) = lower(&ast);
         assert!(diagnostics.has_errors());
         assert!(diagnostics.iter().any(|d| d.message.contains("undefined symbol 'local'")));
+    }
+
+    #[test]
+    fn lowers_new_binary_ops_into_hir() {
+        let src = "x := (1 % 2) == 1 && true || false";
+        let lex_output = lex(FileId::from_u32(8), src);
+        let (ast, _) = parse(FileId::from_u32(8), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        let mut has_mod = false;
+        let mut has_eq = false;
+        let mut has_and = false;
+        let mut has_or = false;
+        for idx in 0..hir.exprs.len() {
+            let id = foundation::ids::ArenaId::from_u32(idx as u32);
+            if let Some(HirExpr::Binary { op, .. }) = hir.exprs.get(id) {
+                has_mod |= matches!(op, BinOp::Modulo);
+                has_eq |= matches!(op, BinOp::Equal);
+                has_and |= matches!(op, BinOp::LogicalAnd);
+                has_or |= matches!(op, BinOp::LogicalOr);
+            }
+        }
+        assert!(has_mod && has_eq && has_and && has_or);
+    }
+
+    #[test]
+    fn lowers_new_unary_ops_into_hir() {
+        let src = "x := !false; y := ~1";
+        let lex_output = lex(FileId::from_u32(9), src);
+        let (ast, _) = parse(FileId::from_u32(9), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        let mut has_not = false;
+        let mut has_bit_not = false;
+        for idx in 0..hir.exprs.len() {
+            let id = foundation::ids::ArenaId::from_u32(idx as u32);
+            if let Some(HirExpr::Unary { op, .. }) = hir.exprs.get(id) {
+                has_not |= matches!(op, crate::hir::UnaryOp::Not);
+                has_bit_not |= matches!(op, crate::hir::UnaryOp::BitNot);
+            }
+        }
+        assert!(has_not && has_bit_not);
     }
 }

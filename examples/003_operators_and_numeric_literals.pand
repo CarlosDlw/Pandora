@@ -1,0 +1,39 @@
+# Example 003: operators and numeric literals
+# This example shows arithmetic, comparison, logical, bitwise and power operators.
+# It also demonstrates binary/octal/hex literals, scientific notation and digit separators.
+
+dec_value: i32 = 1_000
+bin_value: i32 = 0b1010
+oct_value: i32 = 0o17
+hex_value: i32 = 0xFF
+pi: f64 = 3.14159
+sci: f64 = 6.02e3
+
+sum: i32 = dec_value + 24
+diff: i32 = sum - 10
+prod: i32 = diff * 2
+quot: i32 = prod / 3
+rem: i32 = prod % 5
+pow_i: i32 = 2 ** 5
+
+eq_ok: bool = hex_value == 255
+ne_ok: bool = bin_value != oct_value
+lt_ok: bool = bin_value < hex_value
+ge_ok: bool = hex_value >= oct_value
+
+logic_ok: bool = eq_ok && !false || lt_ok
+bit_and: i32 = hex_value & 0x0F
+bit_or: i32 = hex_value | 0x0F
+bit_xor: i32 = hex_value ^ 0x0F
+bit_not: i32 = ~0x0F
+shl_val: i32 = bin_value << 2
+shr_val: i32 = shl_val >> 1
+
+pow_f: f64 = 2.0 ** 3.0
+
+print(dec_value, bin_value, oct_value, hex_value)
+print(pi, sci)
+print(sum, diff, prod, quot, rem, pow_i)
+print(eq_ok, ne_ok, lt_ok, ge_ok, logic_ok)
+print(bit_and, bit_or, bit_xor, bit_not, shl_val, shr_val)
+print(pow_f)

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::{
     analyzer::Type as AnalyzerType,
     hir::{BinOp, Hir, HirExpr, HirId, HirStmt, SymbolTable, UnaryOp},
+    integer_lit::{literal_f64, literal_u128},
 };
 use foundation::{
     diagnostics::{Diagnostic, Diagnostics, Severity},
@@ -138,6 +139,20 @@ impl<'a> Checker<'a> {
                 let operand_ty = self.check_expr(*operand, span);
                 self.check_unary_neg(operand_ty, span)
             }
+            Some(HirExpr::Unary {
+                op: UnaryOp::Not,
+                operand,
+            }) => {
+                let operand_ty = self.check_expr(*operand, span);
+                self.check_unary_not(operand_ty, span)
+            }
+            Some(HirExpr::Unary {
+                op: UnaryOp::BitNot,
+                operand,
+            }) => {
+                let operand_ty = self.check_expr(*operand, span);
+                self.check_unary_bit_not(operand_ty, span)
+            }
             Some(HirExpr::Binary { op, lhs, rhs }) => {
                 let left_ty = self.check_expr(*lhs, span);
                 let right_ty = self.check_expr(*rhs, span);
@@ -182,7 +197,98 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn check_unary_not(&mut self, operand_ty: AnalyzerType, span: Span) -> AnalyzerType {
+        match operand_ty {
+            AnalyzerType::Bool => AnalyzerType::Bool,
+            other => {
+                self.push_error(
+                    format!("logical '!' expects bool operand, got {other:?}"),
+                    span,
+                );
+                AnalyzerType::Unknown
+            }
+        }
+    }
+
+    fn check_unary_bit_not(&mut self, operand_ty: AnalyzerType, span: Span) -> AnalyzerType {
+        match operand_ty {
+            AnalyzerType::Int { signed, bits } => AnalyzerType::Int { signed, bits },
+            other => {
+                self.push_error(
+                    format!("bitwise '~' expects integer operand, got {other:?}"),
+                    span,
+                );
+                AnalyzerType::Unknown
+            }
+        }
+    }
+
     fn check_binary(
+        &mut self,
+        op: BinOp,
+        left_ty: AnalyzerType,
+        right_ty: AnalyzerType,
+        span: Span,
+    ) -> AnalyzerType {
+        match op {
+            BinOp::Add | BinOp::Subtract | BinOp::Multiply | BinOp::Divide | BinOp::Modulo | BinOp::Power => {
+                self.check_numeric_pair(op, left_ty, right_ty, span)
+            }
+            BinOp::Equal | BinOp::NotEqual => self.check_equality_pair(op, left_ty, right_ty, span),
+            BinOp::Less | BinOp::LessEqual | BinOp::Greater | BinOp::GreaterEqual => {
+                let ty = self.check_numeric_pair(op, left_ty, right_ty, span);
+                if matches!(ty, AnalyzerType::Unknown) {
+                    AnalyzerType::Unknown
+                } else {
+                    AnalyzerType::Bool
+                }
+            }
+            BinOp::LogicalAnd | BinOp::LogicalOr => {
+                if left_ty == AnalyzerType::Bool && right_ty == AnalyzerType::Bool {
+                    AnalyzerType::Bool
+                } else {
+                    self.push_error(
+                        format!("logical operator {:?} expects bool operands, got left={left_ty:?}, right={right_ty:?}", op),
+                        span,
+                    );
+                    AnalyzerType::Unknown
+                }
+            }
+            BinOp::ShiftLeft | BinOp::ShiftRight => match (&left_ty, &right_ty) {
+                (AnalyzerType::Int { .. }, AnalyzerType::Int { .. }) => left_ty,
+                _ => {
+                    self.push_error(
+                        format!("shift operator {:?} expects integer operands, got left={left_ty:?}, right={right_ty:?}", op),
+                        span,
+                    );
+                    AnalyzerType::Unknown
+                }
+            },
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                match (&left_ty, &right_ty) {
+                    (
+                        AnalyzerType::Int {
+                            signed: ls,
+                            bits: lb,
+                        },
+                        AnalyzerType::Int {
+                            signed: rs,
+                            bits: rb,
+                        },
+                    ) if ls == rs && lb == rb => left_ty,
+                    _ => {
+                        self.push_error(
+                            format!("bitwise operator {:?} expects matching integer operands, got left={left_ty:?}, right={right_ty:?}", op),
+                            span,
+                        );
+                        AnalyzerType::Unknown
+                    }
+                }
+            }
+        }
+    }
+
+    fn check_numeric_pair(
         &mut self,
         op: BinOp,
         left_ty: AnalyzerType,
@@ -226,6 +332,24 @@ impl<'a> Checker<'a> {
             span,
         );
         AnalyzerType::Unknown
+    }
+
+    fn check_equality_pair(
+        &mut self,
+        op: BinOp,
+        left_ty: AnalyzerType,
+        right_ty: AnalyzerType,
+        span: Span,
+    ) -> AnalyzerType {
+        if left_ty == right_ty {
+            AnalyzerType::Bool
+        } else {
+            self.push_error(
+                format!("invalid operands for {:?}: left={left_ty:?}, right={right_ty:?}", op),
+                span,
+            );
+            AnalyzerType::Unknown
+        }
     }
 
     fn check_call(&mut self, callee_ty: AnalyzerType, args: &[HirId], span: Span) -> AnalyzerType {
@@ -274,7 +398,7 @@ impl<'a> Checker<'a> {
         expected: Option<&AnalyzerType>,
         span: Span,
     ) -> AnalyzerType {
-        let parsed = match raw.parse::<u128>() {
+        let parsed = match literal_u128(raw) {
             Ok(value) => value,
             Err(_) => {
                 self.push_error(format!("invalid integer literal '{raw}'"), span);
@@ -323,7 +447,7 @@ impl<'a> Checker<'a> {
         expected: Option<&AnalyzerType>,
         span: Span,
     ) -> AnalyzerType {
-        let parsed = match raw.parse::<f64>() {
+        let parsed = match literal_f64(raw) {
             Ok(value) => value,
             Err(_) => {
                 self.push_error(format!("invalid float literal '{raw}'"), span);
@@ -463,5 +587,57 @@ mod tests {
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
         assert!(diagnostics.iter().any(|d| d.message.contains("cannot assign to constant")));
+    }
+
+    #[test]
+    fn accepts_boolean_logical_ops() {
+        let src = "a: bool = true; b: bool = false; c: bool = a && !b || a";
+        let lex_output = lex(FileId::from_u32(28), src);
+        let (ast, _) = parse(FileId::from_u32(28), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_logical_ops_on_integers() {
+        let src = "x: i32 = 1; y: i32 = 2; z := x && y";
+        let lex_output = lex(FileId::from_u32(29), src);
+        let (ast, _) = parse(FileId::from_u32(29), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("logical operator")));
+    }
+
+    #[test]
+    fn accepts_comparison_and_equality_ops() {
+        let src = "a: i32 = 2; b: i32 = 3; lt: bool = a < b; eq: bool = a == b";
+        let lex_output = lex(FileId::from_u32(30), src);
+        let (ast, _) = parse(FileId::from_u32(30), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_bitwise_and_shift_integer_ops() {
+        let src = "a: u32 = 0xF0; b: u32 = 0x0F; c: u32 = (a & b) | (a ^ b); d: u32 = c << 2; e: u32 = d >> 1";
+        let lex_output = lex(FileId::from_u32(31), src);
+        let (ast, _) = parse(FileId::from_u32(31), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn based_literal_range_is_validated() {
+        let src = "x: u8 = 0x1FF";
+        let lex_output = lex(FileId::from_u32(32), src);
+        let (ast, _) = parse(FileId::from_u32(32), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("out of range")));
     }
 }

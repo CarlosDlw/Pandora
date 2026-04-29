@@ -32,6 +32,8 @@ impl Parser {
                 | TokenKind::String
                 | TokenKind::Bool
                 | TokenKind::Minus
+                | TokenKind::Bang
+                | TokenKind::Tilde
                 | TokenKind::LeftParen
                 | TokenKind::LeftBrace
                 | TokenKind::RightBrace

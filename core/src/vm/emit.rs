@@ -10,7 +10,7 @@ use crate::{
     hir::{
         BinOp, Hir, HirExpr, HirId, HirStmt, UnaryOp as HirUnaryOp,
     },
-    integer_lit::{bytecode_int_from_checked_literal, literal_u128, IntConst},
+    integer_lit::{bytecode_int_from_checked_literal, literal_f64, literal_u128, IntConst},
 };
 
 use super::{
@@ -124,7 +124,7 @@ fn emit_expr(
                 }
             }
         }
-        HirExpr::Float(raw) => match raw.parse::<f64>() {
+        HirExpr::Float(raw) => match literal_f64(raw) {
             Ok(v) => b.emit(Op::ConstFloat(v), span),
             Err(_) => {
                 diagnostics.push(Diagnostic::new(
@@ -145,6 +145,20 @@ fn emit_expr(
             emit_expr(hir, model, *operand, b, diagnostics);
             b.emit(Op::Neg, expr_span(hir, id));
         }
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            operand,
+        } => {
+            emit_expr(hir, model, *operand, b, diagnostics);
+            b.emit(Op::Not, expr_span(hir, id));
+        }
+        HirExpr::Unary {
+            op: HirUnaryOp::BitNot,
+            operand,
+        } => {
+            emit_expr(hir, model, *operand, b, diagnostics);
+            b.emit(Op::BitNot, expr_span(hir, id));
+        }
         HirExpr::Binary {
             op: binop,
             lhs,
@@ -158,6 +172,21 @@ fn emit_expr(
                 BinOp::Subtract => b.emit(Op::Sub, span_merge),
                 BinOp::Multiply => b.emit(Op::Mul, span_merge),
                 BinOp::Divide => b.emit(Op::Div, span_merge),
+                BinOp::Modulo => b.emit(Op::Mod, span_merge),
+                BinOp::Power => b.emit(Op::Pow, span_merge),
+                BinOp::Equal => b.emit(Op::Eq, span_merge),
+                BinOp::NotEqual => b.emit(Op::Ne, span_merge),
+                BinOp::Less => b.emit(Op::Lt, span_merge),
+                BinOp::LessEqual => b.emit(Op::Le, span_merge),
+                BinOp::Greater => b.emit(Op::Gt, span_merge),
+                BinOp::GreaterEqual => b.emit(Op::Ge, span_merge),
+                BinOp::LogicalAnd => b.emit(Op::LogicalAnd, span_merge),
+                BinOp::LogicalOr => b.emit(Op::LogicalOr, span_merge),
+                BinOp::BitAnd => b.emit(Op::BitAnd, span_merge),
+                BinOp::BitOr => b.emit(Op::BitOr, span_merge),
+                BinOp::BitXor => b.emit(Op::BitXor, span_merge),
+                BinOp::ShiftLeft => b.emit(Op::Shl, span_merge),
+                BinOp::ShiftRight => b.emit(Op::Shr, span_merge),
             }
         }
         HirExpr::Call { callee, args } => {
@@ -223,5 +252,25 @@ mod tests {
         assert!(!compile_diagnostics.has_errors());
         assert!(chunk.code.iter().any(|op| matches!(op, Op::EnterScope)));
         assert!(chunk.code.iter().any(|op| matches!(op, Op::ExitScope)));
+    }
+
+    #[test]
+    fn emits_new_operator_ops() {
+        let src = "x := ((5 % 2) == 1) && !false; y := ~3; z := 2 ** 3";
+        let lex_output = lex(FileId::from_u32(32), src);
+        let (ast, parser_diagnostics) = parse(FileId::from_u32(32), src.len() as u32, lex_output.tokens);
+        assert!(!parser_diagnostics.has_errors());
+        let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
+        assert!(!lowering_diagnostics.has_errors());
+        let (model, analysis_diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!analysis_diagnostics.has_errors());
+        let (chunk, compile_diagnostics) = compile_program(&hir, &model);
+        assert!(!compile_diagnostics.has_errors());
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::Mod)));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::Eq)));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::LogicalAnd)));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::Not)));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::BitNot)));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::Pow)));
     }
 }

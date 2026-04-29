@@ -9,8 +9,17 @@ use super::parser::Parser;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
     Lowest,
+    LogicalOr,
+    LogicalAnd,
+    BitOr,
+    BitXor,
+    BitAnd,
+    Equality,
+    Comparison,
+    Shift,
     Sum,
     Product,
+    Power,
     Highest,
 }
 
@@ -30,13 +39,17 @@ impl Parser {
                 continue;
             }
 
-            if let Some((op, prec)) = self.current_binary_op() {
+            if let Some((op, prec, right_assoc)) = self.current_binary_op() {
                 if prec < min_prec {
                     break;
                 }
 
                 self.bump();
-                let right = self.parse_expression_bp(next_precedence(prec));
+                let right = if right_assoc {
+                    self.parse_expression_bp(prec)
+                } else {
+                    self.parse_expression_bp(next_precedence(prec))
+                };
                 let span = self.merge_spans(left, right);
                 left = self.insert_node(AstNode::BinaryExpr {
                     op,
@@ -131,6 +144,28 @@ impl Parser {
                     span,
                 })
             }
+            TokenKind::Bang => {
+                let op_span = token.span;
+                self.bump();
+                let operand = self.parse_expression_bp(Precedence::Highest);
+                let span = merge_pair(op_span, self.node_span(operand));
+                self.insert_node(AstNode::UnaryExpr {
+                    op: UnaryOp::Not,
+                    operand,
+                    span,
+                })
+            }
+            TokenKind::Tilde => {
+                let op_span = token.span;
+                self.bump();
+                let operand = self.parse_expression_bp(Precedence::Highest);
+                let span = merge_pair(op_span, self.node_span(operand));
+                self.insert_node(AstNode::UnaryExpr {
+                    op: UnaryOp::BitNot,
+                    operand,
+                    span,
+                })
+            }
             TokenKind::LeftParen => {
                 let open_span = token.span;
                 self.bump();
@@ -149,13 +184,28 @@ impl Parser {
         }
     }
 
-    fn current_binary_op(&self) -> Option<(BinaryOp, Precedence)> {
+    fn current_binary_op(&self) -> Option<(BinaryOp, Precedence, bool)> {
         let token = self.current()?;
         match token.kind {
-            TokenKind::Plus => Some((BinaryOp::Add, Precedence::Sum)),
-            TokenKind::Minus => Some((BinaryOp::Subtract, Precedence::Sum)),
-            TokenKind::Star => Some((BinaryOp::Multiply, Precedence::Product)),
-            TokenKind::Slash => Some((BinaryOp::Divide, Precedence::Product)),
+            TokenKind::OrOr => Some((BinaryOp::LogicalOr, Precedence::LogicalOr, false)),
+            TokenKind::AndAnd => Some((BinaryOp::LogicalAnd, Precedence::LogicalAnd, false)),
+            TokenKind::Pipe => Some((BinaryOp::BitOr, Precedence::BitOr, false)),
+            TokenKind::Caret => Some((BinaryOp::BitXor, Precedence::BitXor, false)),
+            TokenKind::Ampersand => Some((BinaryOp::BitAnd, Precedence::BitAnd, false)),
+            TokenKind::EqualEqual => Some((BinaryOp::Equal, Precedence::Equality, false)),
+            TokenKind::BangEqual => Some((BinaryOp::NotEqual, Precedence::Equality, false)),
+            TokenKind::Less => Some((BinaryOp::Less, Precedence::Comparison, false)),
+            TokenKind::LessEqual => Some((BinaryOp::LessEqual, Precedence::Comparison, false)),
+            TokenKind::Greater => Some((BinaryOp::Greater, Precedence::Comparison, false)),
+            TokenKind::GreaterEqual => Some((BinaryOp::GreaterEqual, Precedence::Comparison, false)),
+            TokenKind::ShiftLeft => Some((BinaryOp::ShiftLeft, Precedence::Shift, false)),
+            TokenKind::ShiftRight => Some((BinaryOp::ShiftRight, Precedence::Shift, false)),
+            TokenKind::Plus => Some((BinaryOp::Add, Precedence::Sum, false)),
+            TokenKind::Minus => Some((BinaryOp::Subtract, Precedence::Sum, false)),
+            TokenKind::Star => Some((BinaryOp::Multiply, Precedence::Product, false)),
+            TokenKind::Slash => Some((BinaryOp::Divide, Precedence::Product, false)),
+            TokenKind::Percent => Some((BinaryOp::Modulo, Precedence::Product, false)),
+            TokenKind::DoubleStar => Some((BinaryOp::Power, Precedence::Power, true)),
             _ => None,
         }
     }
@@ -201,9 +251,18 @@ fn merge_pair(left: foundation::span::Span, right: foundation::span::Span) -> fo
 
 fn next_precedence(prec: Precedence) -> Precedence {
     match prec {
-        Precedence::Lowest => Precedence::Sum,
+        Precedence::Lowest => Precedence::LogicalOr,
+        Precedence::LogicalOr => Precedence::LogicalAnd,
+        Precedence::LogicalAnd => Precedence::BitOr,
+        Precedence::BitOr => Precedence::BitXor,
+        Precedence::BitXor => Precedence::BitAnd,
+        Precedence::BitAnd => Precedence::Equality,
+        Precedence::Equality => Precedence::Comparison,
+        Precedence::Comparison => Precedence::Shift,
+        Precedence::Shift => Precedence::Sum,
         Precedence::Sum => Precedence::Product,
-        Precedence::Product => Precedence::Highest,
+        Precedence::Product => Precedence::Power,
+        Precedence::Power => Precedence::Highest,
         Precedence::Highest => Precedence::Highest,
     }
 }

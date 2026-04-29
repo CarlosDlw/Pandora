@@ -111,6 +111,8 @@ fn suggest_fix(message: &str) -> Option<&'static str> {
         Some("use exactly one character in single quotes, for example 'a' or '\\n'.")
     } else if message.contains("division by zero") {
         Some("ensure the divisor is never zero before this operation.")
+    } else if message.contains("invalid numeric literal") || message.contains("invalid integer literal") {
+        Some("check base prefixes (0b/0o/0x), place '_' only between digits, and use valid exponent form like 1.2e-3.")
     } else {
         None
     }

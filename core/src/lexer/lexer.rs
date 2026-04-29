@@ -87,11 +87,79 @@ impl<'a> Lexer<'a> {
                 }
                 '*' => {
                     self.bump();
-                    self.push_token(TokenKind::Star, start, self.cursor);
+                    if self.peek() == Some('*') {
+                        self.bump();
+                        self.push_token(TokenKind::DoubleStar, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Star, start, self.cursor);
+                    }
                 }
                 '/' => {
                     self.bump();
                     self.push_token(TokenKind::Slash, start, self.cursor);
+                }
+                '%' => {
+                    self.bump();
+                    self.push_token(TokenKind::Percent, start, self.cursor);
+                }
+                '!' => {
+                    self.bump();
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::BangEqual, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Bang, start, self.cursor);
+                    }
+                }
+                '~' => {
+                    self.bump();
+                    self.push_token(TokenKind::Tilde, start, self.cursor);
+                }
+                '&' => {
+                    self.bump();
+                    if self.peek() == Some('&') {
+                        self.bump();
+                        self.push_token(TokenKind::AndAnd, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Ampersand, start, self.cursor);
+                    }
+                }
+                '|' => {
+                    self.bump();
+                    if self.peek() == Some('|') {
+                        self.bump();
+                        self.push_token(TokenKind::OrOr, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Pipe, start, self.cursor);
+                    }
+                }
+                '^' => {
+                    self.bump();
+                    self.push_token(TokenKind::Caret, start, self.cursor);
+                }
+                '<' => {
+                    self.bump();
+                    if self.peek() == Some('<') {
+                        self.bump();
+                        self.push_token(TokenKind::ShiftLeft, start, self.cursor);
+                    } else if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::LessEqual, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Less, start, self.cursor);
+                    }
+                }
+                '>' => {
+                    self.bump();
+                    if self.peek() == Some('>') {
+                        self.bump();
+                        self.push_token(TokenKind::ShiftRight, start, self.cursor);
+                    } else if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::GreaterEqual, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Greater, start, self.cursor);
+                    }
                 }
                 '(' => {
                     self.bump();
@@ -131,7 +199,12 @@ impl<'a> Lexer<'a> {
                 }
                 '=' => {
                     self.bump();
-                    self.push_token(TokenKind::Assign, start, self.cursor);
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::EqualEqual, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Assign, start, self.cursor);
+                    }
                 }
                 _ => {
                     self.bump();
@@ -172,35 +245,152 @@ impl<'a> Lexer<'a> {
 
     fn lex_number(&mut self) {
         let start = self.cursor;
-        while let Some(ch) = self.peek() {
-            if ch.is_ascii_digit() {
-                self.bump();
-            } else {
-                break;
+        let mut is_float = false;
+        let mut had_error = false;
+
+        if self.peek() == Some('0') {
+            self.bump();
+            match self.peek() {
+                Some('x' | 'X') => {
+                    self.bump();
+                    let digits_start = self.cursor;
+                    if !self.lex_based_digits(is_hex_digit) {
+                        had_error = true;
+                    }
+                    if self.peek().is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                        had_error = true;
+                        self.consume_number_tail();
+                    }
+                    if self.cursor == digits_start {
+                        had_error = true;
+                    }
+                    self.push_token(TokenKind::Integer, start, self.cursor);
+                    if had_error {
+                        self.push_invalid_number_diagnostic(start, self.cursor);
+                    }
+                    return;
+                }
+                Some('o' | 'O') => {
+                    self.bump();
+                    let digits_start = self.cursor;
+                    if !self.lex_based_digits(is_octal_digit) {
+                        had_error = true;
+                    }
+                    if self.peek().is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                        had_error = true;
+                        self.consume_number_tail();
+                    }
+                    if self.cursor == digits_start {
+                        had_error = true;
+                    }
+                    self.push_token(TokenKind::Integer, start, self.cursor);
+                    if had_error {
+                        self.push_invalid_number_diagnostic(start, self.cursor);
+                    }
+                    return;
+                }
+                Some('b' | 'B') => {
+                    self.bump();
+                    let digits_start = self.cursor;
+                    if !self.lex_based_digits(is_binary_digit) {
+                        had_error = true;
+                    }
+                    if self.peek().is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                        had_error = true;
+                        self.consume_number_tail();
+                    }
+                    if self.cursor == digits_start {
+                        had_error = true;
+                    }
+                    self.push_token(TokenKind::Integer, start, self.cursor);
+                    if had_error {
+                        self.push_invalid_number_diagnostic(start, self.cursor);
+                    }
+                    return;
+                }
+                _ => {}
             }
+        }
+
+        if !self.lex_decimal_digits() {
+            had_error = true;
         }
 
         if self.peek() == Some('.') {
             let dot_start = self.cursor;
             self.bump();
             if self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
-                while let Some(ch) = self.peek() {
-                    if ch.is_ascii_digit() {
-                        self.bump();
-                    } else {
-                        break;
-                    }
+                is_float = true;
+                if !self.lex_decimal_digits() {
+                    had_error = true;
                 }
-                self.push_token(TokenKind::Float, start, self.cursor);
+            } else {
+                self.push_token(TokenKind::Integer, start, dot_start);
+                self.push_invalid_number_diagnostic(start, self.cursor);
                 return;
             }
-
-            self.push_token(TokenKind::Integer, start, dot_start);
-            self.push_invalid_number_diagnostic(start, self.cursor);
-            return;
         }
 
-        self.push_token(TokenKind::Integer, start, self.cursor);
+        if matches!(self.peek(), Some('e' | 'E')) {
+            is_float = true;
+            self.bump();
+            if matches!(self.peek(), Some('+' | '-')) {
+                self.bump();
+            }
+            let exp_start = self.cursor;
+            if !self.lex_decimal_digits() {
+                had_error = true;
+            }
+            if self.cursor == exp_start {
+                had_error = true;
+            }
+        }
+
+        if is_float {
+            self.push_token(TokenKind::Float, start, self.cursor);
+        } else {
+            self.push_token(TokenKind::Integer, start, self.cursor);
+        }
+        if had_error {
+            self.push_invalid_number_diagnostic(start, self.cursor);
+        }
+    }
+
+    fn lex_decimal_digits(&mut self) -> bool {
+        self.lex_based_digits(|ch| ch.is_ascii_digit())
+    }
+
+    fn lex_based_digits(&mut self, is_digit: fn(char) -> bool) -> bool {
+        let mut had_digits = false;
+        let mut last_was_underscore = false;
+        let mut valid = true;
+        while let Some(ch) = self.peek() {
+            if is_digit(ch) {
+                had_digits = true;
+                last_was_underscore = false;
+                self.bump();
+                continue;
+            }
+            if ch == '_' {
+                if !had_digits || last_was_underscore {
+                    valid = false;
+                }
+                last_was_underscore = true;
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        if last_was_underscore {
+            valid = false;
+        }
+        valid && had_digits
+    }
+
+    fn consume_number_tail(&mut self) {
+        while self.peek().is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            self.bump();
+        }
     }
 
     fn lex_string(&mut self) {
@@ -270,7 +460,7 @@ impl<'a> Lexer<'a> {
     fn push_invalid_number_diagnostic(&mut self, start: usize, end: usize) {
         let span = Span::new_unchecked(self.file_id, start as u32, end as u32);
         self.diagnostics.push(Diagnostic::new(
-            format!("invalid float literal: '{}'", &self.source[start..end]),
+            format!("invalid numeric literal: '{}'", &self.source[start..end]),
             span,
             Severity::Error,
         ));
@@ -326,6 +516,18 @@ fn is_known_type(text: &str) -> bool {
             | "bool"
             | "char"
     )
+}
+
+fn is_hex_digit(ch: char) -> bool {
+    ch.is_ascii_hexdigit()
+}
+
+fn is_octal_digit(ch: char) -> bool {
+    ('0'..='7').contains(&ch)
+}
+
+fn is_binary_digit(ch: char) -> bool {
+    ch == '0' || ch == '1'
 }
 
 #[cfg(test)]
@@ -396,5 +598,50 @@ print(name, age)
             .collect();
         assert_eq!(integers, vec!["1", "2"]);
         assert!(output.diagnostics.has_errors());
+    }
+
+    #[test]
+    fn lexes_new_operator_tokens() {
+        let output = lex(
+            FileId::from_u32(7),
+            "a == b != c <= d >= e < f > g && h || i & j | k ^ l << m >> n !o ~p % q ** r",
+        );
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::EqualEqual));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::BangEqual));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::LessEqual));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::GreaterEqual));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::AndAnd));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::OrOr));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Ampersand));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Pipe));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Caret));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::ShiftLeft));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::ShiftRight));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Bang));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Tilde));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Percent));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::DoubleStar));
+    }
+
+    #[test]
+    fn lexes_based_and_scientific_literals() {
+        let output = lex(FileId::from_u32(8), "a := 0xFF; b := 0o755; c := 0b1010; d := 1_000_000; e := 6.02e23");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "0xFF"));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "0o755"));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "0b1010"));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "1_000_000"));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Float && t.lexeme == "6.02e23"));
+    }
+
+    #[test]
+    fn invalid_based_and_scientific_literals_report_errors() {
+        let output = lex(FileId::from_u32(9), "a := 0x; b := 0b102; c := 1__0; d := 1e+");
+        assert!(output.diagnostics.has_errors());
+        assert!(output
+            .diagnostics
+            .iter()
+            .all(|d| d.message.contains("invalid numeric literal")));
     }
 }

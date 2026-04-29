@@ -443,4 +443,74 @@ mod tests {
         };
         assert_eq!(statements.len(), 3);
     }
+
+    #[test]
+    fn parser_parses_logical_precedence() {
+        let source = "x := a + b * c < d && e || f";
+        let lex_out = lex(FileId::from_u32(10), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(10), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let AstNode::LetDecl { value, .. } = ast.get(ast.roots[0]).expect("let") else {
+            panic!("expected let");
+        };
+        let AstNode::BinaryExpr {
+            op: BinaryOp::LogicalOr,
+            ..
+        } = ast.get(*value).expect("logical or root") else {
+            panic!("expected logical or at root");
+        };
+    }
+
+    #[test]
+    fn parser_makes_power_right_associative() {
+        let source = "x := 2 ** 3 ** 2";
+        let lex_out = lex(FileId::from_u32(11), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(11), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let AstNode::LetDecl { value, .. } = ast.get(ast.roots[0]).expect("let") else {
+            panic!("expected let");
+        };
+        let AstNode::BinaryExpr {
+            op: BinaryOp::Power,
+            right,
+            ..
+        } = ast.get(*value).expect("outer pow") else {
+            panic!("expected power expression");
+        };
+        assert!(matches!(
+            ast.get(*right),
+            Some(AstNode::BinaryExpr {
+                op: BinaryOp::Power,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parser_parses_unary_not_and_bit_not() {
+        let source = "x := !flag; y := ~mask";
+        let lex_out = lex(FileId::from_u32(12), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(12), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let AstNode::LetDecl { value, .. } = ast.get(ast.roots[0]).expect("first let") else {
+            panic!("expected let");
+        };
+        assert!(matches!(
+            ast.get(*value),
+            Some(AstNode::UnaryExpr {
+                op: crate::ast::UnaryOp::Not,
+                ..
+            })
+        ));
+        let AstNode::LetDecl { value, .. } = ast.get(ast.roots[1]).expect("second let") else {
+            panic!("expected let");
+        };
+        assert!(matches!(
+            ast.get(*value),
+            Some(AstNode::UnaryExpr {
+                op: crate::ast::UnaryOp::BitNot,
+                ..
+            })
+        ));
+    }
 }

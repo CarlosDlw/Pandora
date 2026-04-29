@@ -133,6 +133,8 @@ impl<'a> Vm<'a> {
             }
 
             Op::Neg => self.apply_neg(span)?,
+            Op::Not => self.apply_not(span)?,
+            Op::BitNot => self.apply_bit_not(span)?,
 
             Op::Add => self.apply_bin_checked(
                 span,
@@ -153,6 +155,21 @@ impl<'a> Vm<'a> {
                 |a, b| Some(a * b),
             )?,
             Op::Div => self.apply_div(span)?,
+            Op::Mod => self.apply_mod(span)?,
+            Op::Pow => self.apply_pow(span)?,
+            Op::Eq => self.apply_cmp(span, |ord| ord == std::cmp::Ordering::Equal)?,
+            Op::Ne => self.apply_cmp(span, |ord| ord != std::cmp::Ordering::Equal)?,
+            Op::Lt => self.apply_cmp(span, |ord| ord == std::cmp::Ordering::Less)?,
+            Op::Le => self.apply_cmp(span, |ord| ord != std::cmp::Ordering::Greater)?,
+            Op::Gt => self.apply_cmp(span, |ord| ord == std::cmp::Ordering::Greater)?,
+            Op::Ge => self.apply_cmp(span, |ord| ord != std::cmp::Ordering::Less)?,
+            Op::LogicalAnd => self.apply_logical(span, |a, b| a && b)?,
+            Op::LogicalOr => self.apply_logical(span, |a, b| a || b)?,
+            Op::BitAnd => self.apply_bitwise(span, |a, b| a & b, |a, b| a & b)?,
+            Op::BitOr => self.apply_bitwise(span, |a, b| a | b, |a, b| a | b)?,
+            Op::BitXor => self.apply_bitwise(span, |a, b| a ^ b, |a, b| a ^ b)?,
+            Op::Shl => self.apply_shift(span, true)?,
+            Op::Shr => self.apply_shift(span, false)?,
 
             Op::Call(sym, argc) => {
                 let argc = *argc as usize;
@@ -231,6 +248,40 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
+    fn apply_not(&mut self, span: Span) -> Result<(), Diagnostic> {
+        let v = self.pop_one(span)?;
+        match v {
+            Value::Bool(b) => {
+                self.stack.push(Value::Bool(!b));
+                Ok(())
+            }
+            other => Err(Diagnostic::new(
+                format!("invalid operand for logical '!': {}", builtin_type_name(&other)),
+                span,
+                Severity::Error,
+            )),
+        }
+    }
+
+    fn apply_bit_not(&mut self, span: Span) -> Result<(), Diagnostic> {
+        let v = self.pop_one(span)?;
+        match v {
+            Value::Int128(i) => {
+                self.stack.push(Value::Int128(!i));
+                Ok(())
+            }
+            Value::UInt128(u) => {
+                self.stack.push(Value::UInt128(!u));
+                Ok(())
+            }
+            other => Err(Diagnostic::new(
+                format!("invalid operand for bitwise '~': {}", builtin_type_name(&other)),
+                span,
+                Severity::Error,
+            )),
+        }
+    }
+
     fn apply_bin_checked(
         &mut self,
         span: Span,
@@ -306,6 +357,178 @@ impl<'a> Vm<'a> {
         };
         self.stack.push(out);
         Ok(())
+    }
+
+    fn apply_mod(&mut self, span: Span) -> Result<(), Diagnostic> {
+        let rhs = self.pop_one(span)?;
+        let lhs = self.pop_one(span)?;
+        let out = match (lhs, rhs) {
+            (Value::Int128(a), Value::Int128(b)) => {
+                if b == 0 {
+                    return Err(Diagnostic::new("modulo by zero", span, Severity::Error));
+                }
+                Value::Int128(a % b)
+            }
+            (Value::UInt128(a), Value::UInt128(b)) => {
+                if b == 0 {
+                    return Err(Diagnostic::new("modulo by zero", span, Severity::Error));
+                }
+                Value::UInt128(a % b)
+            }
+            (l, r) => {
+                return Err(Diagnostic::new(
+                    format!("invalid operands for modulo: {:?} and {:?}", l, r),
+                    span,
+                    Severity::Error,
+                ));
+            }
+        };
+        self.stack.push(out);
+        Ok(())
+    }
+
+    fn apply_pow(&mut self, span: Span) -> Result<(), Diagnostic> {
+        let rhs = self.pop_one(span)?;
+        let lhs = self.pop_one(span)?;
+        let out = match (lhs, rhs) {
+            (Value::Int128(base), Value::Int128(exp)) => {
+                let exp_u32 = u32::try_from(exp).map_err(|_| {
+                    Diagnostic::new("integer exponent out of range", span, Severity::Error)
+                })?;
+                Value::Int128(base.checked_pow(exp_u32).ok_or_else(|| {
+                    Diagnostic::new("integer overflow in pow", span, Severity::Error)
+                })?)
+            }
+            (Value::UInt128(base), Value::UInt128(exp)) => {
+                let exp_u32 = u32::try_from(exp).map_err(|_| {
+                    Diagnostic::new("integer exponent out of range", span, Severity::Error)
+                })?;
+                Value::UInt128(base.checked_pow(exp_u32).ok_or_else(|| {
+                    Diagnostic::new("integer overflow in pow", span, Severity::Error)
+                })?)
+            }
+            (Value::Float(base), Value::Float(exp)) => Value::Float(base.powf(exp)),
+            (l, r) => {
+                return Err(Diagnostic::new(
+                    format!("invalid operands for power: {:?} and {:?}", l, r),
+                    span,
+                    Severity::Error,
+                ));
+            }
+        };
+        self.stack.push(out);
+        Ok(())
+    }
+
+    fn apply_cmp(
+        &mut self,
+        span: Span,
+        predicate: fn(std::cmp::Ordering) -> bool,
+    ) -> Result<(), Diagnostic> {
+        let rhs = self.pop_one(span)?;
+        let lhs = self.pop_one(span)?;
+        let ord = match (lhs, rhs) {
+            (Value::Int128(a), Value::Int128(b)) => a.cmp(&b),
+            (Value::UInt128(a), Value::UInt128(b)) => a.cmp(&b),
+            (Value::Float(a), Value::Float(b)) => a
+                .partial_cmp(&b)
+                .ok_or_else(|| Diagnostic::new("float comparison is invalid", span, Severity::Error))?,
+            (Value::Bool(a), Value::Bool(b)) => a.cmp(&b),
+            (Value::Char(a), Value::Char(b)) => a.cmp(&b),
+            (Value::Str(a), Value::Str(b)) => a.cmp(&b),
+            (l, r) => {
+                return Err(Diagnostic::new(
+                    format!("invalid operands for comparison: {:?} and {:?}", l, r),
+                    span,
+                    Severity::Error,
+                ));
+            }
+        };
+        self.stack.push(Value::Bool(predicate(ord)));
+        Ok(())
+    }
+
+    fn apply_logical(
+        &mut self,
+        span: Span,
+        op: fn(bool, bool) -> bool,
+    ) -> Result<(), Diagnostic> {
+        let rhs = self.pop_one(span)?;
+        let lhs = self.pop_one(span)?;
+        match (lhs, rhs) {
+            (Value::Bool(a), Value::Bool(b)) => {
+                self.stack.push(Value::Bool(op(a, b)));
+                Ok(())
+            }
+            (l, r) => Err(Diagnostic::new(
+                format!("invalid operands for logical op: {:?} and {:?}", l, r),
+                span,
+                Severity::Error,
+            )),
+        }
+    }
+
+    fn apply_bitwise(
+        &mut self,
+        span: Span,
+        signed_op: fn(i128, i128) -> i128,
+        unsigned_op: fn(u128, u128) -> u128,
+    ) -> Result<(), Diagnostic> {
+        let rhs = self.pop_one(span)?;
+        let lhs = self.pop_one(span)?;
+        match (lhs, rhs) {
+            (Value::Int128(a), Value::Int128(b)) => {
+                self.stack.push(Value::Int128(signed_op(a, b)));
+                Ok(())
+            }
+            (Value::UInt128(a), Value::UInt128(b)) => {
+                self.stack.push(Value::UInt128(unsigned_op(a, b)));
+                Ok(())
+            }
+            (l, r) => Err(Diagnostic::new(
+                format!("invalid operands for bitwise op: {:?} and {:?}", l, r),
+                span,
+                Severity::Error,
+            )),
+        }
+    }
+
+    fn apply_shift(&mut self, span: Span, is_left: bool) -> Result<(), Diagnostic> {
+        let rhs = self.pop_one(span)?;
+        let lhs = self.pop_one(span)?;
+        match (lhs, rhs) {
+            (Value::Int128(a), Value::Int128(b)) => {
+                let shift = u32::try_from(b).map_err(|_| {
+                    Diagnostic::new("shift amount must be non-negative", span, Severity::Error)
+                })?;
+                let result = if is_left {
+                    a.checked_shl(shift)
+                } else {
+                    a.checked_shr(shift)
+                }
+                .ok_or_else(|| Diagnostic::new("shift amount out of range", span, Severity::Error))?;
+                self.stack.push(Value::Int128(result));
+                Ok(())
+            }
+            (Value::UInt128(a), Value::UInt128(b)) => {
+                let shift = u32::try_from(b).map_err(|_| {
+                    Diagnostic::new("shift amount out of range", span, Severity::Error)
+                })?;
+                let result = if is_left {
+                    a.checked_shl(shift)
+                } else {
+                    a.checked_shr(shift)
+                }
+                .ok_or_else(|| Diagnostic::new("shift amount out of range", span, Severity::Error))?;
+                self.stack.push(Value::UInt128(result));
+                Ok(())
+            }
+            (l, r) => Err(Diagnostic::new(
+                format!("invalid operands for shift: {:?} and {:?}", l, r),
+                span,
+                Severity::Error,
+            )),
+        }
     }
 
     fn pop_one(&mut self, span: Span) -> Result<Value, Diagnostic> {
@@ -476,5 +699,66 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         execute(&chunk, &symbols).expect("outer binding should remain");
+    }
+
+    #[test]
+    fn executes_mod_and_comparison_ops() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(5), s);
+        b.emit(Op::ConstI128(2), s);
+        b.emit(Op::Mod, s);
+        b.emit(Op::ConstI128(1), s);
+        b.emit(Op::Eq, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("mod/comparison should execute");
+    }
+
+    #[test]
+    fn executes_bitwise_and_shift_ops() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstU128(0b1010), s);
+        b.emit(Op::ConstU128(0b1100), s);
+        b.emit(Op::BitAnd, s);
+        b.emit(Op::ConstU128(1), s);
+        b.emit(Op::Shl, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("bitwise/shift should execute");
+    }
+
+    #[test]
+    fn executes_logical_and_not_ops() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstBool(true), s);
+        b.emit(Op::ConstBool(false), s);
+        b.emit(Op::LogicalOr, s);
+        b.emit(Op::Not, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("logical ops should execute");
+    }
+
+    #[test]
+    fn modulo_by_zero_is_error() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(4), s);
+        b.emit(Op::ConstI128(0), s);
+        b.emit(Op::Mod, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        let err = execute(&chunk, &symbols).expect_err("mod zero");
+        assert!(err.iter().any(|d| d.message.contains("modulo by zero")));
     }
 }

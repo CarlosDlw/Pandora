@@ -58,3 +58,19 @@ fn ast_mode_prints_ast_root() {
         .success()
         .stdout(contains("LetDecl"));
 }
+
+#[test]
+fn runs_example_003_operators_and_literals() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/003_operators_and_numeric_literals.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("1000 10 15 255")
+                .and(contains("3.14159 6020"))
+                .and(contains("true true true true true")),
+        );
+}

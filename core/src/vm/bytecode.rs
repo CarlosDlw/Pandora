@@ -10,7 +10,11 @@
 //! | [`Op::Assign`]   | pop one value → update an existing binding (`id = expr`) |
 //! | [`Op::EnterScope`] / [`Op::ExitScope`] | open/close lexical runtime frame for block locals |
 //! | [`Op::Neg`]      | pop one numeric value → push unary negation (`-`) |
-//! | [`Op::Add`] [`Op::Sub`] [`Op::Mul`] [`Op::Div`] | pop b, pop a → push result (see docs on [`Op::Div`] for integers) |
+//! | [`Op::Not`] [`Op::BitNot`] | unary logical / bitwise negation |
+//! | [`Op::Add`] [`Op::Sub`] [`Op::Mul`] [`Op::Div`] [`Op::Mod`] [`Op::Pow`] | pop b, pop a → push result |
+//! | [`Op::Eq`] [`Op::Ne`] [`Op::Lt`] [`Op::Le`] [`Op::Gt`] [`Op::Ge`] | comparisons (result bool) |
+//! | [`Op::LogicalAnd`] [`Op::LogicalOr`] | boolean binary operators |
+//! | [`Op::BitAnd`] [`Op::BitOr`] [`Op::BitXor`] [`Op::Shl`] [`Op::Shr`] | integer bitwise/shift ops |
 //! | [`Op::Call`]     | pop `n` arguments, push return value |
 //! | [`Op::Pop`]      | discard one stack top |
 //! | [`Op::Return`]   | stop executing this chunk (`ip` advances, then VM exits; stack must be empty afterwards) |
@@ -42,11 +46,28 @@ pub enum Op {
     ExitScope,
 
     Neg,
+    Not,
+    BitNot,
 
     Add,
     Sub,
     Mul,
     Div,
+    Mod,
+    Pow,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    LogicalAnd,
+    LogicalOr,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 
     Call(SymbolId, u8),
 

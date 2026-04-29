@@ -12,11 +12,28 @@ pub enum BinOp {
     Subtract,
     Multiply,
     Divide,
+    Modulo,
+    Power,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    LogicalAnd,
+    LogicalOr,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
+    Not,
+    BitNot,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -86,3 +86,19 @@ fn ast_mode_reports_missing_block_closer() {
                 .and(contains("close the block with '}'")),
         );
 }
+
+#[test]
+fn lexeme_mode_reports_invalid_numeric_literal_with_hint() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"x := 0b102\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--lexeme")
+        .assert()
+        .code(1)
+        .stderr(
+            contains("error: invalid numeric literal")
+                .and(contains("check base prefixes (0b/0o/0x)")),
+        );
+}
