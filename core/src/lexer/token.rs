@@ -8,6 +8,8 @@ pub enum TokenKind {
     String,
     Char,
     Bool,
+    If,
+    Else,
     TypeName,
     Plus,
     Minus,

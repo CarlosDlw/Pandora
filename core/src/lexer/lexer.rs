@@ -233,12 +233,12 @@ impl<'a> Lexer<'a> {
             }
         }
         let text = &self.source[start..self.cursor];
-        let kind = if text == "true" || text == "false" {
-            TokenKind::Bool
-        } else if is_known_type(text) {
-            TokenKind::TypeName
-        } else {
-            TokenKind::Identifier
+        let kind = match text {
+            "true" | "false" => TokenKind::Bool,
+            "if" => TokenKind::If,
+            "else" => TokenKind::Else,
+            _ if is_known_type(text) => TokenKind::TypeName,
+            _ => TokenKind::Identifier,
         };
         self.push_token(kind, start, self.cursor);
     }
@@ -249,9 +249,9 @@ impl<'a> Lexer<'a> {
         let mut had_error = false;
 
         if self.peek() == Some('0') {
-            self.bump();
-            match self.peek() {
+            match self.peek_next() {
                 Some('x' | 'X') => {
+                    self.bump();
                     self.bump();
                     let digits_start = self.cursor;
                     if !self.lex_based_digits(is_hex_digit) {
@@ -272,6 +272,7 @@ impl<'a> Lexer<'a> {
                 }
                 Some('o' | 'O') => {
                     self.bump();
+                    self.bump();
                     let digits_start = self.cursor;
                     if !self.lex_based_digits(is_octal_digit) {
                         had_error = true;
@@ -290,6 +291,7 @@ impl<'a> Lexer<'a> {
                     return;
                 }
                 Some('b' | 'B') => {
+                    self.bump();
                     self.bump();
                     let digits_start = self.cursor;
                     if !self.lex_based_digits(is_binary_digit) {
@@ -488,6 +490,12 @@ impl<'a> Lexer<'a> {
         self.source[self.cursor..].chars().next()
     }
 
+    fn peek_next(&self) -> Option<char> {
+        let mut chars = self.source[self.cursor..].chars();
+        let _ = chars.next();
+        chars.next()
+    }
+
     fn bump(&mut self) {
         if let Some(ch) = self.peek() {
             self.cursor += ch.len_utf8();
@@ -643,5 +651,23 @@ print(name, age)
             .diagnostics
             .iter()
             .all(|d| d.message.contains("invalid numeric literal")));
+    }
+
+    #[test]
+    fn lexes_if_else_keywords() {
+        let output = lex(FileId::from_u32(10), "if true { x := 1 } else { x := 2 }");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::If));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Else));
+    }
+
+    #[test]
+    fn keeps_partial_keyword_as_identifier() {
+        let output = lex(FileId::from_u32(11), "gift := 1");
+        assert!(!output.diagnostics.has_errors());
+        assert!(output
+            .tokens
+            .iter()
+            .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "gift"));
     }
 }

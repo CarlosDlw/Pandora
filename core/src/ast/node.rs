@@ -91,6 +91,12 @@ pub enum AstNode {
         value: ArenaId,
         span: Span,
     },
+    IfStmt {
+        condition: ArenaId,
+        then_branch: ArenaId,
+        else_branch: Option<ArenaId>,
+        span: Span,
+    },
     BlockStmt {
         statements: Vec<ArenaId>,
         span: Span,
@@ -117,6 +123,7 @@ impl AstNode {
             | Self::CallExpr { span, .. }
             | Self::LetDecl { span, .. }
             | Self::AssignStmt { span, .. }
+            | Self::IfStmt { span, .. }
             | Self::BlockStmt { span, .. }
             | Self::ExprStmt { span, .. } => *span,
         }

@@ -74,3 +74,19 @@ fn runs_example_003_operators_and_literals() {
                 .and(contains("true true true true true")),
         );
 }
+
+#[test]
+fn runs_example_004_if_else() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/004_if_else.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("non-zero is truthy")
+                .and(contains("false branch"))
+                .and(contains("else-if branch")),
+        );
+}

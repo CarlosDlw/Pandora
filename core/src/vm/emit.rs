@@ -42,6 +42,7 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         | HirStmt::Assign { span, .. }
         | HirStmt::Expr { span, .. }
         | HirStmt::Block { span, .. }
+        | HirStmt::If { span, .. }
         | HirStmt::Invalid { span } => *span,
     }
 }
@@ -83,6 +84,41 @@ fn emit_stmt(
                 emit_stmt(hir, model, stmt, b, diagnostics);
             }
             b.emit(Op::ExitScope, *span);
+        }
+        HirStmt::If {
+            condition,
+            then_branch,
+            else_branch,
+            span,
+        } => {
+            emit_expr(hir, model, *condition, b, diagnostics);
+            let jump_if_false_at = b.emit_placeholder_jump_if_false(*span);
+            b.emit(Op::EnterScope, *span);
+            for stmt in then_branch {
+                emit_stmt(hir, model, stmt, b, diagnostics);
+            }
+            b.emit(Op::ExitScope, *span);
+            if let Some(else_stmts) = else_branch {
+                let jump_end_at = b.emit_placeholder_jump(*span);
+                let else_start = b.len();
+                if !b.patch_jump_target(jump_if_false_at, else_start) {
+                    diagnostics.push(Diagnostic::new("failed to patch conditional jump", *span, Severity::Error));
+                }
+                b.emit(Op::EnterScope, *span);
+                for stmt in else_stmts {
+                    emit_stmt(hir, model, stmt, b, diagnostics);
+                }
+                b.emit(Op::ExitScope, *span);
+                let end = b.len();
+                if !b.patch_jump_target(jump_end_at, end) {
+                    diagnostics.push(Diagnostic::new("failed to patch end jump", *span, Severity::Error));
+                }
+            } else {
+                let end = b.len();
+                if !b.patch_jump_target(jump_if_false_at, end) {
+                    diagnostics.push(Diagnostic::new("failed to patch conditional jump", *span, Severity::Error));
+                }
+            }
         }
         HirStmt::Invalid { span } => {
             diagnostics.push(Diagnostic::new("invalid statement skipped in bytecode", *span, Severity::Error));
@@ -272,5 +308,21 @@ mod tests {
         assert!(chunk.code.iter().any(|op| matches!(op, Op::Not)));
         assert!(chunk.code.iter().any(|op| matches!(op, Op::BitNot)));
         assert!(chunk.code.iter().any(|op| matches!(op, Op::Pow)));
+    }
+
+    #[test]
+    fn emits_if_jumps() {
+        let src = "if true { x := 1 } else { x := 2 }";
+        let lex_output = lex(FileId::from_u32(33), src);
+        let (ast, parser_diagnostics) = parse(FileId::from_u32(33), src.len() as u32, lex_output.tokens);
+        assert!(!parser_diagnostics.has_errors());
+        let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
+        assert!(!lowering_diagnostics.has_errors());
+        let (model, analysis_diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!analysis_diagnostics.has_errors());
+        let (chunk, compile_diagnostics) = compile_program(&hir, &model);
+        assert!(!compile_diagnostics.has_errors());
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::JumpIfFalse(_))));
+        assert!(chunk.code.iter().any(|op| matches!(op, Op::Jump(_))));
     }
 }

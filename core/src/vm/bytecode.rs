@@ -15,6 +15,7 @@
 //! | [`Op::Eq`] [`Op::Ne`] [`Op::Lt`] [`Op::Le`] [`Op::Gt`] [`Op::Ge`] | comparisons (result bool) |
 //! | [`Op::LogicalAnd`] [`Op::LogicalOr`] | boolean binary operators |
 //! | [`Op::BitAnd`] [`Op::BitOr`] [`Op::BitXor`] [`Op::Shl`] [`Op::Shr`] | integer bitwise/shift ops |
+//! | [`Op::JumpIfFalse`] / [`Op::Jump`] | control-flow jumps |
 //! | [`Op::Call`]     | pop `n` arguments, push return value |
 //! | [`Op::Pop`]      | discard one stack top |
 //! | [`Op::Return`]   | stop executing this chunk (`ip` advances, then VM exits; stack must be empty afterwards) |
@@ -68,6 +69,8 @@ pub enum Op {
     BitXor,
     Shl,
     Shr,
+    JumpIfFalse(usize),
+    Jump(usize),
 
     Call(SymbolId, u8),
 

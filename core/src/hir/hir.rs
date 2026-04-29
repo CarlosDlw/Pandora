@@ -71,6 +71,12 @@ pub enum HirStmt {
         stmts: Vec<HirStmt>,
         span: Span,
     },
+    If {
+        condition: HirId,
+        then_branch: Vec<HirStmt>,
+        else_branch: Option<Vec<HirStmt>>,
+        span: Span,
+    },
     Invalid {
         span: Span,
     },

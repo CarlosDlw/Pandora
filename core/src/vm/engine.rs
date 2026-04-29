@@ -170,6 +170,21 @@ impl<'a> Vm<'a> {
             Op::BitXor => self.apply_bitwise(span, |a, b| a ^ b, |a, b| a ^ b)?,
             Op::Shl => self.apply_shift(span, true)?,
             Op::Shr => self.apply_shift(span, false)?,
+            Op::JumpIfFalse(target) => {
+                if *target > self.chunk.code.len() {
+                    return Err(Diagnostic::new("invalid jump target", span, Severity::Error));
+                }
+                let value = self.pop_one(span)?;
+                if !is_truthy(&value) {
+                    self.ip = *target;
+                }
+            }
+            Op::Jump(target) => {
+                if *target > self.chunk.code.len() {
+                    return Err(Diagnostic::new("invalid jump target", span, Severity::Error));
+                }
+                self.ip = *target;
+            }
 
             Op::Call(sym, argc) => {
                 let argc = *argc as usize;
@@ -592,6 +607,18 @@ fn builtin_type_name(v: &Value) -> &'static str {
     }
 }
 
+fn is_truthy(v: &Value) -> bool {
+    match v {
+        Value::Bool(b) => *b,
+        Value::Int128(i) => *i != 0,
+        Value::UInt128(u) => *u != 0,
+        Value::Float(f) => *f != 0.0,
+        Value::Str(s) => !s.is_empty(),
+        Value::Char(c) => *c != '\0',
+        Value::Unit => false,
+    }
+}
+
 /// Run a full program chunk. Requires `chunk.invariant_holds()` and terminates with [`Op::Return`].
 pub fn execute(chunk: &Chunk, symbols: &SymbolTable) -> Result<(), Diagnostics> {
     debug_assert!(chunk.invariant_holds());
@@ -760,5 +787,31 @@ mod tests {
         let symbols = SymbolTable::new();
         let err = execute(&chunk, &symbols).expect_err("mod zero");
         assert!(err.iter().any(|d| d.message.contains("modulo by zero")));
+    }
+
+    #[test]
+    fn jump_if_false_uses_truthy_semantics() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(0), s);
+        b.emit(Op::JumpIfFalse(4), s);
+        b.emit(Op::ConstI128(99), s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("should jump and finish");
+    }
+
+    #[test]
+    fn invalid_jump_target_is_error() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::Jump(999), s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        let err = execute(&chunk, &symbols).expect_err("invalid jump");
+        assert!(err.iter().any(|d| d.message.contains("invalid jump target")));
     }
 }

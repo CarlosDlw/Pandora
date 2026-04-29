@@ -34,6 +34,35 @@ impl ChunkBuilder {
         debug_assert_eq!(self.code.len(), self.spans.len());
     }
 
+    pub fn emit_placeholder_jump_if_false(&mut self, span: Span) -> usize {
+        let at = self.len();
+        self.emit(Op::JumpIfFalse(usize::MAX), span);
+        at
+    }
+
+    pub fn emit_placeholder_jump(&mut self, span: Span) -> usize {
+        let at = self.len();
+        self.emit(Op::Jump(usize::MAX), span);
+        at
+    }
+
+    pub fn patch_jump_target(&mut self, at: usize, target: usize) -> bool {
+        if at >= self.code.len() {
+            return false;
+        }
+        match self.code[at] {
+            Op::JumpIfFalse(_) => {
+                self.code[at] = Op::JumpIfFalse(target);
+                true
+            }
+            Op::Jump(_) => {
+                self.code[at] = Op::Jump(target);
+                true
+            }
+            _ => false,
+        }
+    }
+
     #[must_use]
     pub fn finish(mut self) -> Chunk {
         debug_assert_eq!(self.code.len(), self.spans.len());
@@ -97,5 +126,19 @@ mod tests {
             chunk.code[1],
             crate::vm::bytecode::Op::Call(SymbolId(42), 0)
         ));
+    }
+
+    #[test]
+    fn patches_jump_targets() {
+        let mut b = ChunkBuilder::new();
+        let s = junk_span();
+        let jf = b.emit_placeholder_jump_if_false(s);
+        let j = b.emit_placeholder_jump(s);
+        b.emit(Op::Return, s);
+        assert!(b.patch_jump_target(jf, 2));
+        assert!(b.patch_jump_target(j, 2));
+        let chunk = b.finish();
+        assert!(matches!(chunk.code[0], Op::JumpIfFalse(2)));
+        assert!(matches!(chunk.code[1], Op::Jump(2)));
     }
 }

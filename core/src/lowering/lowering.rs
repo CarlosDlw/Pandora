@@ -95,6 +95,22 @@ impl<'a> Lowering<'a> {
                 let stmts = self.lower_block_stmts(statements);
                 HirStmt::Block { stmts, span: *span }
             }
+            AstNode::IfStmt {
+                condition,
+                then_branch,
+                else_branch,
+                span,
+            } => {
+                let condition = self.lower_expr(*condition);
+                let then_branch = self.lower_if_branch(*then_branch);
+                let else_branch = else_branch.map(|id| self.lower_if_branch(id));
+                HirStmt::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                    span: *span,
+                }
+            }
             AstNode::Invalid { span } => HirStmt::Invalid { span: *span },
             other => {
                 let expr = self.lower_expr(id);
@@ -233,6 +249,7 @@ impl<'a> Lowering<'a> {
             }
             AstNode::LetDecl { .. }
             | AstNode::AssignStmt { .. }
+            | AstNode::IfStmt { .. }
             | AstNode::ExprStmt { .. }
             | AstNode::BlockStmt { .. } => {
                 self.push_error("statement used where expression expected", self.node_span(id));
@@ -290,6 +307,23 @@ impl<'a> Lowering<'a> {
             .collect::<Vec<_>>();
         self.current_scope = parent_scope;
         lowered
+    }
+
+    fn lower_if_branch(&mut self, branch_id: ArenaId) -> Vec<HirStmt> {
+        match self.ast.get(branch_id) {
+            Some(AstNode::BlockStmt { statements, .. }) => self.lower_block_stmts(statements),
+            Some(AstNode::IfStmt { .. }) => vec![self.lower_stmt(branch_id)],
+            Some(AstNode::Invalid { span }) => {
+                self.push_error("invalid if branch", *span);
+                vec![HirStmt::Invalid { span: *span }]
+            }
+            _ => {
+                self.push_error("invalid if branch", self.node_span(branch_id));
+                vec![HirStmt::Invalid {
+                    span: self.node_span(branch_id),
+                }]
+            }
+        }
     }
 }
 
@@ -387,7 +421,7 @@ mod tests {
     use foundation::ids::FileId;
 
     use crate::{
-        hir::{BinOp, HirExpr, ScopeId, SymbolOrigin},
+        hir::{BinOp, HirExpr, HirStmt, ScopeId, SymbolOrigin},
         lexer::lex,
         parser::parse,
     };
@@ -537,5 +571,15 @@ mod tests {
             }
         }
         assert!(has_not && has_bit_not);
+    }
+
+    #[test]
+    fn lowers_if_else_stmt_into_hir_if() {
+        let src = "if true { x := 1 } else { x := 2 }";
+        let lex_output = lex(FileId::from_u32(10), src);
+        let (ast, _) = parse(FileId::from_u32(10), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(hir.stmts.first(), Some(HirStmt::If { .. })));
     }
 }

@@ -59,6 +59,15 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> ArenaId {
+        if self.current().is_some_and(|token| token.kind == TokenKind::If) {
+            return self.parse_if_stmt();
+        }
+        if self.current().is_some_and(|token| token.kind == TokenKind::Else) {
+            let span = self.current_span_or_eof();
+            self.push_error("unexpected 'else' without matching 'if'", span);
+            self.bump();
+            return self.invalid_node(span);
+        }
         if self.current().is_some_and(|token| token.kind == TokenKind::LeftBrace) {
             return self.parse_block_stmt();
         }
@@ -72,6 +81,46 @@ impl Parser {
         let expr = self.parse_expression();
         let span = self.node_span(expr);
         self.insert_node(AstNode::ExprStmt { expr, span })
+    }
+
+    fn parse_if_stmt(&mut self) -> ArenaId {
+        let if_span = self.current_span_or_eof();
+        self.bump();
+
+        if self.current().is_none() || self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+            self.push_error("expected condition expression after 'if'", self.current_span_or_eof());
+        }
+        let condition = self.parse_expression();
+        let then_branch = self.parse_if_branch_block("expected '{' after if condition");
+
+        let mut else_branch = None;
+        if self.consume_if(TokenKind::Else) {
+            if self.current().is_some_and(|t| t.kind == TokenKind::If) {
+                else_branch = Some(self.parse_if_stmt());
+            } else {
+                else_branch = Some(self.parse_if_branch_block("expected '{' or 'if' after 'else'"));
+            }
+        }
+
+        let end_span = else_branch
+            .map(|id| self.node_span(id))
+            .unwrap_or_else(|| self.node_span(then_branch));
+        let span = merge_span(if_span, end_span);
+        self.insert_node(AstNode::IfStmt {
+            condition,
+            then_branch,
+            else_branch,
+            span,
+        })
+    }
+
+    fn parse_if_branch_block(&mut self, message: &str) -> ArenaId {
+        if self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+            return self.parse_block_stmt();
+        }
+        let span = self.current_span_or_eof();
+        self.push_error(message, span);
+        self.invalid_node(span)
     }
 
     fn parse_block_stmt(&mut self) -> ArenaId {
@@ -512,5 +561,49 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn parses_if_else_chain_as_statements() {
+        let source = "if true { x := 1 } else if false { x := 2 } else { x := 3 }";
+        let lex_out = lex(FileId::from_u32(13), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(13), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        let root = ast.roots[0];
+        let AstNode::IfStmt {
+            then_branch,
+            else_branch,
+            ..
+        } = ast.get(root).expect("if stmt") else {
+            panic!("expected if statement");
+        };
+        assert!(matches!(ast.get(*then_branch), Some(AstNode::BlockStmt { .. })));
+        let else_id = else_branch.expect("else branch");
+        assert!(matches!(
+            ast.get(else_id),
+            Some(AstNode::IfStmt { .. }) | Some(AstNode::BlockStmt { .. })
+        ));
+    }
+
+    #[test]
+    fn reports_missing_if_block() {
+        let source = "if true x := 1";
+        let lex_out = lex(FileId::from_u32(14), source);
+        let (_ast, diagnostics) = parse(FileId::from_u32(14), source.len() as u32, lex_out.tokens);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("expected '{' after if condition")));
+    }
+
+    #[test]
+    fn reports_unexpected_else_without_if() {
+        let source = "else { x := 1 }";
+        let lex_out = lex(FileId::from_u32(15), source);
+        let (_ast, diagnostics) = parse(FileId::from_u32(15), source.len() as u32, lex_out.tokens);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("unexpected 'else' without matching 'if'")));
     }
 }

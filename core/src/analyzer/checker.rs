@@ -100,6 +100,29 @@ impl<'a> Checker<'a> {
                 }
                 AnalyzerType::Unknown
             }
+            HirStmt::If {
+                condition,
+                then_branch,
+                else_branch,
+                span,
+            } => {
+                let cond_ty = self.check_expr(*condition, *span);
+                if !is_truthy_falsy_compatible(&cond_ty) && cond_ty != AnalyzerType::Unknown {
+                    self.push_error(
+                        format!("if condition is not truthy/falsy-compatible: {cond_ty:?}"),
+                        *span,
+                    );
+                }
+                for stmt in then_branch {
+                    let _ = self.check_stmt(stmt);
+                }
+                if let Some(else_stmts) = else_branch {
+                    for stmt in else_stmts {
+                        let _ = self.check_stmt(stmt);
+                    }
+                }
+                AnalyzerType::Unknown
+            }
             HirStmt::Invalid { span } => {
                 self.push_error("invalid statement", *span);
                 AnalyzerType::Unknown
@@ -500,6 +523,17 @@ fn is_assignable(expected: &AnalyzerType, actual: &AnalyzerType) -> bool {
     expected == actual || matches!(expected, AnalyzerType::Unknown | AnalyzerType::Any) || matches!(actual, AnalyzerType::Unknown)
 }
 
+fn is_truthy_falsy_compatible(ty: &AnalyzerType) -> bool {
+    matches!(
+        ty,
+        AnalyzerType::Bool
+            | AnalyzerType::Int { .. }
+            | AnalyzerType::Float { .. }
+            | AnalyzerType::Str
+            | AnalyzerType::Char
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use foundation::ids::FileId;
@@ -639,5 +673,28 @@ mod tests {
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
         assert!(diagnostics.iter().any(|d| d.message.contains("out of range")));
+    }
+
+    #[test]
+    fn allows_truthy_numeric_if_condition() {
+        let src = "if 1 { x := 1 } else { x := 2 }";
+        let lex_output = lex(FileId::from_u32(33), src);
+        let (ast, _) = parse(FileId::from_u32(33), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_unit_if_condition() {
+        let src = "if print(1) { x := 1 }";
+        let lex_output = lex(FileId::from_u32(34), src);
+        let (ast, _) = parse(FileId::from_u32(34), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics
+            .iter()
+            .any(|d| d.message.contains("if condition is not truthy/falsy-compatible")));
     }
 }

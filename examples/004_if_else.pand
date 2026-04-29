@@ -1,0 +1,24 @@
+# Example 004: if / else if / else statements
+# Conditions follow truthy/falsy semantics:
+# - false, 0, 0.0, empty string and '\0' are falsy
+# - other supported values are truthy
+
+if 1 {
+    print("non-zero is truthy")
+} else {
+    print("should not print")
+}
+
+if false {
+    print("should not print")
+} else {
+    print("false branch")
+}
+
+if 0 {
+    print("should not print")
+} else if "x" {
+    print("else-if branch")
+} else {
+    print("should not print")
+}

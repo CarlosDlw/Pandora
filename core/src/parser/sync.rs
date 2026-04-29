@@ -27,7 +27,9 @@ impl Parser {
 
         matches!(
             current.kind,
-            TokenKind::Integer
+            TokenKind::If
+                | TokenKind::Else
+                | TokenKind::Integer
                 | TokenKind::Float
                 | TokenKind::String
                 | TokenKind::Bool
