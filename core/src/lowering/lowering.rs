@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::Type,
-    ast::{Ast, AstNode, BinaryOp, UnaryOp},
+    ast::{Ast, AstNode, BinaryOp, CompoundOp, UnaryOp},
     builtins::default_registry,
     hir::{BinOp, Hir, HirExpr, HirStmt, ScopeId, SymbolId, SymbolOrigin, SymbolTable, UnaryOp as HirUnaryOp},
 };
@@ -84,6 +84,29 @@ impl<'a> Lowering<'a> {
                 HirStmt::Assign {
                     symbol,
                     value,
+                    span: *span,
+                }
+            }
+            AstNode::CompoundAssignStmt {
+                target,
+                op,
+                value,
+                span,
+            } => {
+                let symbol = self.resolve_assignment_target(*target);
+                let rhs = self.lower_expr(*value);
+                let lhs = self.insert_hir_expr(HirExpr::Var(symbol), self.node_span(*target));
+                let binary = self.insert_hir_expr(
+                    HirExpr::Binary {
+                        op: map_compound_op(*op),
+                        lhs,
+                        rhs,
+                    },
+                    *span,
+                );
+                HirStmt::Assign {
+                    symbol,
+                    value: binary,
                     span: *span,
                 }
             }
@@ -264,6 +287,7 @@ impl<'a> Lowering<'a> {
             }
             AstNode::LetDecl { .. }
             | AstNode::AssignStmt { .. }
+            | AstNode::CompoundAssignStmt { .. }
             | AstNode::IfStmt { .. }
             | AstNode::WhileStmt { .. }
             | AstNode::BreakStmt { .. }
@@ -366,6 +390,22 @@ fn map_binary_op(op: BinaryOp) -> BinOp {
         BinaryOp::BitXor => BinOp::BitXor,
         BinaryOp::ShiftLeft => BinOp::ShiftLeft,
         BinaryOp::ShiftRight => BinOp::ShiftRight,
+    }
+}
+
+fn map_compound_op(op: CompoundOp) -> BinOp {
+    match op {
+        CompoundOp::Add => BinOp::Add,
+        CompoundOp::Subtract => BinOp::Subtract,
+        CompoundOp::Multiply => BinOp::Multiply,
+        CompoundOp::Divide => BinOp::Divide,
+        CompoundOp::Modulo => BinOp::Modulo,
+        CompoundOp::Power => BinOp::Power,
+        CompoundOp::BitAnd => BinOp::BitAnd,
+        CompoundOp::BitOr => BinOp::BitOr,
+        CompoundOp::BitXor => BinOp::BitXor,
+        CompoundOp::ShiftLeft => BinOp::ShiftLeft,
+        CompoundOp::ShiftRight => BinOp::ShiftRight,
     }
 }
 
@@ -613,5 +653,21 @@ mod tests {
         };
         assert!(body.iter().any(|s| matches!(s, HirStmt::Continue { .. })));
         assert!(body.iter().any(|s| matches!(s, HirStmt::Break { .. })));
+    }
+
+    #[test]
+    fn lowers_compound_assign_to_binary_assign() {
+        let src = "x := 1; x += 2";
+        let lex_output = lex(FileId::from_u32(12), src);
+        let (ast, _) = parse(FileId::from_u32(12), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        let Some(HirStmt::Assign { value, .. }) = hir.stmts.get(1) else {
+            panic!("expected assign stmt");
+        };
+        assert!(matches!(
+            hir.exprs.get(*value),
+            Some(HirExpr::Binary { op: BinOp::Add, .. })
+        ));
     }
 }

@@ -1,0 +1,16 @@
+x: i32 = 10
+x += 5
+x -= 3
+x *= 2
+x /= 4
+x %= 3
+print(x)
+
+msg: str = "result: "
+msg += x
+print(msg)
+
+greeting := "hello " + "world"
+info := "value is " + 42
+print(greeting)
+print(info)

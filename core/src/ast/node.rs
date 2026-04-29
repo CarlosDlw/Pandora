@@ -30,6 +30,21 @@ pub enum UnaryOp {
     BitNot,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompoundOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Power,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AstNode {
     Invalid {
@@ -91,6 +106,12 @@ pub enum AstNode {
         value: ArenaId,
         span: Span,
     },
+    CompoundAssignStmt {
+        target: ArenaId,
+        op: CompoundOp,
+        value: ArenaId,
+        span: Span,
+    },
     IfStmt {
         condition: ArenaId,
         then_branch: ArenaId,
@@ -134,6 +155,7 @@ impl AstNode {
             | Self::CallExpr { span, .. }
             | Self::LetDecl { span, .. }
             | Self::AssignStmt { span, .. }
+            | Self::CompoundAssignStmt { span, .. }
             | Self::IfStmt { span, .. }
             | Self::WhileStmt { span, .. }
             | Self::BreakStmt { span, .. }

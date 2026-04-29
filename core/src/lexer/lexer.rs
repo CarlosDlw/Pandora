@@ -79,28 +79,56 @@ impl<'a> Lexer<'a> {
             match ch {
                 '+' => {
                     self.bump();
-                    self.push_token(TokenKind::Plus, start, self.cursor);
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::PlusAssign, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Plus, start, self.cursor);
+                    }
                 }
                 '-' => {
                     self.bump();
-                    self.push_token(TokenKind::Minus, start, self.cursor);
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::MinusAssign, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Minus, start, self.cursor);
+                    }
                 }
                 '*' => {
                     self.bump();
                     if self.peek() == Some('*') {
                         self.bump();
-                        self.push_token(TokenKind::DoubleStar, start, self.cursor);
+                        if self.peek() == Some('=') {
+                            self.bump();
+                            self.push_token(TokenKind::DoubleStarAssign, start, self.cursor);
+                        } else {
+                            self.push_token(TokenKind::DoubleStar, start, self.cursor);
+                        }
+                    } else if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::StarAssign, start, self.cursor);
                     } else {
                         self.push_token(TokenKind::Star, start, self.cursor);
                     }
                 }
                 '/' => {
                     self.bump();
-                    self.push_token(TokenKind::Slash, start, self.cursor);
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::SlashAssign, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Slash, start, self.cursor);
+                    }
                 }
                 '%' => {
                     self.bump();
-                    self.push_token(TokenKind::Percent, start, self.cursor);
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::PercentAssign, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Percent, start, self.cursor);
+                    }
                 }
                 '!' => {
                     self.bump();
@@ -120,6 +148,9 @@ impl<'a> Lexer<'a> {
                     if self.peek() == Some('&') {
                         self.bump();
                         self.push_token(TokenKind::AndAnd, start, self.cursor);
+                    } else if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::AmpersandAssign, start, self.cursor);
                     } else {
                         self.push_token(TokenKind::Ampersand, start, self.cursor);
                     }
@@ -129,19 +160,32 @@ impl<'a> Lexer<'a> {
                     if self.peek() == Some('|') {
                         self.bump();
                         self.push_token(TokenKind::OrOr, start, self.cursor);
+                    } else if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::PipeAssign, start, self.cursor);
                     } else {
                         self.push_token(TokenKind::Pipe, start, self.cursor);
                     }
                 }
                 '^' => {
                     self.bump();
-                    self.push_token(TokenKind::Caret, start, self.cursor);
+                    if self.peek() == Some('=') {
+                        self.bump();
+                        self.push_token(TokenKind::CaretAssign, start, self.cursor);
+                    } else {
+                        self.push_token(TokenKind::Caret, start, self.cursor);
+                    }
                 }
                 '<' => {
                     self.bump();
                     if self.peek() == Some('<') {
                         self.bump();
-                        self.push_token(TokenKind::ShiftLeft, start, self.cursor);
+                        if self.peek() == Some('=') {
+                            self.bump();
+                            self.push_token(TokenKind::ShiftLeftAssign, start, self.cursor);
+                        } else {
+                            self.push_token(TokenKind::ShiftLeft, start, self.cursor);
+                        }
                     } else if self.peek() == Some('=') {
                         self.bump();
                         self.push_token(TokenKind::LessEqual, start, self.cursor);
@@ -153,7 +197,12 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     if self.peek() == Some('>') {
                         self.bump();
-                        self.push_token(TokenKind::ShiftRight, start, self.cursor);
+                        if self.peek() == Some('=') {
+                            self.bump();
+                            self.push_token(TokenKind::ShiftRightAssign, start, self.cursor);
+                        } else {
+                            self.push_token(TokenKind::ShiftRight, start, self.cursor);
+                        }
                     } else if self.peek() == Some('=') {
                         self.bump();
                         self.push_token(TokenKind::GreaterEqual, start, self.cursor);
@@ -699,5 +748,36 @@ print(name, age)
             .tokens
             .iter()
             .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "meanwhile"));
+    }
+
+    #[test]
+    fn lexes_compound_assignment_tokens() {
+        let output = lex(
+            FileId::from_u32(14),
+            "a += 1; b -= 1; c *= 1; d /= 1; e %= 1; f **= 2; g &= 1; h |= 1; i ^= 1; j <<= 1; k >>= 1",
+        );
+        assert!(!output.diagnostics.has_errors());
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::StarAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::SlashAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PercentAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::DoubleStarAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::AmpersandAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PipeAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::CaretAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::ShiftLeftAssign));
+        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::ShiftRightAssign));
+    }
+
+    #[test]
+    fn distinguishes_compound_from_simple() {
+        let compound = lex(FileId::from_u32(15), "x += 1");
+        assert!(compound.tokens.iter().any(|t| t.kind == TokenKind::PlusAssign));
+
+        let split = lex(FileId::from_u32(16), "x + = 1");
+        assert!(split.tokens.iter().any(|t| t.kind == TokenKind::Plus));
+        assert!(split.tokens.iter().any(|t| t.kind == TokenKind::Assign));
+        assert!(!split.tokens.iter().any(|t| t.kind == TokenKind::PlusAssign));
     }
 }

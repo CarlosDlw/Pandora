@@ -105,3 +105,20 @@ fn runs_example_005_while_break_continue() {
                 .and(contains("done")),
         );
 }
+
+#[test]
+fn runs_example_006_compound_assign_and_string_concat() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/006_compound_assign_and_string_concat.pand");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(
+            contains("0")
+                .and(contains("result: 0"))
+                .and(contains("hello world"))
+                .and(contains("value is 42")),
+        );
+}

@@ -136,12 +136,26 @@ impl<'a> Vm<'a> {
             Op::Not => self.apply_not(span)?,
             Op::BitNot => self.apply_bit_not(span)?,
 
-            Op::Add => self.apply_bin_checked(
-                span,
-                |a, b| a.checked_add(b),
-                |a, b| a.checked_add(b),
-                |a, b| Some(a + b),
-            )?,
+            Op::Add => {
+                let rhs = self.pop_one(span)?;
+                let lhs = self.pop_one(span)?;
+                match (&lhs, &rhs) {
+                    (Value::Str(_), _) | (_, Value::Str(_)) => {
+                        let result = format!("{}{}", lhs.display_for_print(), rhs.display_for_print());
+                        self.stack.push(Value::Str(result));
+                    }
+                    _ => {
+                        self.stack.push(lhs);
+                        self.stack.push(rhs);
+                        self.apply_bin_checked(
+                            span,
+                            |a, b| a.checked_add(b),
+                            |a, b| a.checked_add(b),
+                            |a, b| Some(a + b),
+                        )?;
+                    }
+                }
+            }
             Op::Sub => self.apply_bin_checked(
                 span,
                 |a, b| a.checked_sub(b),
@@ -813,5 +827,61 @@ mod tests {
         let symbols = SymbolTable::new();
         let err = execute(&chunk, &symbols).expect_err("invalid jump");
         assert!(err.iter().any(|d| d.message.contains("invalid jump target")));
+    }
+
+    #[test]
+    fn string_concat_two_strings() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstStr("hello".to_string()), s);
+        b.emit(Op::ConstStr(" world".to_string()), s);
+        b.emit(Op::Add, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("concat should execute");
+    }
+
+    #[test]
+    fn string_concat_string_and_int() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstStr("count: ".to_string()), s);
+        b.emit(Op::ConstI128(42), s);
+        b.emit(Op::Add, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("concat should execute");
+    }
+
+    #[test]
+    fn string_concat_int_and_string() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstI128(42), s);
+        b.emit(Op::ConstStr(" items".to_string()), s);
+        b.emit(Op::Add, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("concat should execute");
+    }
+
+    #[test]
+    fn string_concat_string_and_bool() {
+        let mut b = ChunkBuilder::new();
+        let s = span();
+        b.emit(Op::ConstStr("flag: ".to_string()), s);
+        b.emit(Op::ConstBool(true), s);
+        b.emit(Op::Add, s);
+        b.emit(Op::Pop, s);
+        b.emit(Op::Return, s);
+        let chunk = b.finish();
+        let symbols = SymbolTable::new();
+        execute(&chunk, &symbols).expect("concat should execute");
     }
 }

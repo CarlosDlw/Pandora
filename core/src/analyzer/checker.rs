@@ -287,7 +287,14 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> AnalyzerType {
         match op {
-            BinOp::Add | BinOp::Subtract | BinOp::Multiply | BinOp::Divide | BinOp::Modulo | BinOp::Power => {
+            BinOp::Add => {
+                if matches!(left_ty, AnalyzerType::Str) || matches!(right_ty, AnalyzerType::Str) {
+                    AnalyzerType::Str
+                } else {
+                    self.check_numeric_pair(op, left_ty, right_ty, span)
+                }
+            }
+            BinOp::Subtract | BinOp::Multiply | BinOp::Divide | BinOp::Modulo | BinOp::Power => {
                 self.check_numeric_pair(op, left_ty, right_ty, span)
             }
             BinOp::Equal | BinOp::NotEqual => self.check_equality_pair(op, left_ty, right_ty, span),
@@ -761,5 +768,56 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|d| d.message.contains("continue used outside of loop")));
+    }
+
+    #[test]
+    fn accepts_string_plus_int_concatenation() {
+        let src = r#"s := "hello"; r := s + 42"#;
+        let lex_output = lex(FileId::from_u32(38), src);
+        let (ast, _) = parse(FileId::from_u32(38), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_int_plus_string_concatenation() {
+        let src = r#"r := 42 + "hello""#;
+        let lex_output = lex(FileId::from_u32(39), src);
+        let (ast, _) = parse(FileId::from_u32(39), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_string_compound_assign() {
+        let src = r#"s := "hello"; s += " world""#;
+        let lex_output = lex(FileId::from_u32(40), src);
+        let (ast, _) = parse(FileId::from_u32(40), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_string_plus_bool_concatenation() {
+        let src = r#"r := "value: " + true"#;
+        let lex_output = lex(FileId::from_u32(41), src);
+        let (ast, _) = parse(FileId::from_u32(41), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_compound_assign_to_const() {
+        let src = "x :: i32 = 1; x += 1";
+        let lex_output = lex(FileId::from_u32(42), src);
+        let (ast, _) = parse(FileId::from_u32(42), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| d.message.contains("cannot assign to constant")));
     }
 }

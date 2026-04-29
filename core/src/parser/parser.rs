@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Ast, AstNode},
+    ast::{Ast, AstNode, CompoundOp},
     lexer::{Token, TokenKind},
 };
 use foundation::{
@@ -84,6 +84,9 @@ impl Parser {
         }
         if self.is_declaration_start() {
             return self.parse_let_decl();
+        }
+        if self.is_compound_assign_start() {
+            return self.parse_compound_assign_stmt();
         }
         if self.is_assignment_start() {
             return self.parse_assign_stmt();
@@ -302,6 +305,54 @@ impl Parser {
         })
     }
 
+    fn parse_compound_assign_stmt(&mut self) -> ArenaId {
+        let name_token = match self.current() {
+            Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+            _ => {
+                let span = self.current_span_or_eof();
+                self.push_error("expected identifier in compound assignment", span);
+                self.synchronize();
+                return self.invalid_node(span);
+            }
+        };
+        self.bump();
+
+        let target = self.insert_node(AstNode::Identifier {
+            name: name_token.lexeme,
+            span: name_token.span,
+        });
+
+        let op = match self.current().map(|t| t.kind.clone()) {
+            Some(TokenKind::PlusAssign) => CompoundOp::Add,
+            Some(TokenKind::MinusAssign) => CompoundOp::Subtract,
+            Some(TokenKind::StarAssign) => CompoundOp::Multiply,
+            Some(TokenKind::SlashAssign) => CompoundOp::Divide,
+            Some(TokenKind::PercentAssign) => CompoundOp::Modulo,
+            Some(TokenKind::DoubleStarAssign) => CompoundOp::Power,
+            Some(TokenKind::AmpersandAssign) => CompoundOp::BitAnd,
+            Some(TokenKind::PipeAssign) => CompoundOp::BitOr,
+            Some(TokenKind::CaretAssign) => CompoundOp::BitXor,
+            Some(TokenKind::ShiftLeftAssign) => CompoundOp::ShiftLeft,
+            Some(TokenKind::ShiftRightAssign) => CompoundOp::ShiftRight,
+            _ => {
+                let span = self.current_span_or_eof();
+                self.push_error("expected compound assignment operator", span);
+                self.synchronize();
+                return self.invalid_node(name_token.span);
+            }
+        };
+        self.bump();
+
+        let value = self.parse_expression();
+        let span = merge_span(name_token.span, self.node_span(value));
+        self.insert_node(AstNode::CompoundAssignStmt {
+            target,
+            op,
+            value,
+            span,
+        })
+    }
+
     fn is_declaration_start(&self) -> bool {
         matches!(
             (self.peek_kind(0), self.peek_kind(1)),
@@ -316,6 +367,28 @@ impl Parser {
         matches!(
             (self.peek_kind(0), self.peek_kind(1)),
             (Some(TokenKind::Identifier), Some(TokenKind::Assign))
+        )
+    }
+
+    fn is_compound_assign_start(&self) -> bool {
+        matches!(
+            (self.peek_kind(0), self.peek_kind(1)),
+            (
+                Some(TokenKind::Identifier),
+                Some(
+                    TokenKind::PlusAssign
+                        | TokenKind::MinusAssign
+                        | TokenKind::StarAssign
+                        | TokenKind::DoubleStarAssign
+                        | TokenKind::SlashAssign
+                        | TokenKind::PercentAssign
+                        | TokenKind::AmpersandAssign
+                        | TokenKind::PipeAssign
+                        | TokenKind::CaretAssign
+                        | TokenKind::ShiftLeftAssign
+                        | TokenKind::ShiftRightAssign
+                )
+            )
         )
     }
 
@@ -691,5 +764,41 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|d| d.message.contains("continue used outside of loop")));
+    }
+
+    #[test]
+    fn parses_compound_assign_stmt() {
+        let source = "x += 1";
+        let lex_out = lex(FileId::from_u32(40), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(40), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(
+            ast.get(ast.roots[0]),
+            Some(AstNode::CompoundAssignStmt {
+                op: crate::ast::CompoundOp::Add,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_all_compound_operators() {
+        let source = "a += 1; b -= 1; c *= 1; d /= 1; e %= 1; f **= 1; g &= 1; h |= 1; i ^= 1; j <<= 1; k >>= 1";
+        let lex_out = lex(FileId::from_u32(41), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(41), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert_eq!(ast.roots.len(), 11);
+        assert!(ast
+            .roots
+            .iter()
+            .all(|id| matches!(ast.get(*id), Some(AstNode::CompoundAssignStmt { .. }))));
+    }
+
+    #[test]
+    fn compound_assign_requires_identifier() {
+        let source = "1 += 2";
+        let lex_out = lex(FileId::from_u32(42), source);
+        let (_ast, diagnostics) = parse(FileId::from_u32(42), source.len() as u32, lex_out.tokens);
+        assert!(diagnostics.has_errors());
     }
 }
