@@ -1736,6 +1736,15 @@ mod tests {
     }
 
     #[test]
+    fn parses_if_identifier_comparison_condition_with_block() {
+        let source = "x := 1; y := 2; if x == y { print(\"eq\") }";
+        let lex_out = lex(FileId::from_u32(311), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(311), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(ast.get(ast.roots[2]), Some(AstNode::IfStmt { .. })));
+    }
+
+    #[test]
     fn reports_missing_if_block() {
         let source = "if true x := 1";
         let lex_out = lex(FileId::from_u32(14), source);

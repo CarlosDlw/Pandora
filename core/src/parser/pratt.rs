@@ -160,6 +160,7 @@ impl Parser {
                 if self
                     .current()
                     .is_some_and(|t| t.kind == TokenKind::LeftBrace)
+                    && self.looks_like_struct_literal_suffix()
                 {
                     return self.parse_struct_literal_suffix(ident);
                 }
@@ -661,6 +662,17 @@ impl Parser {
             fields,
             span,
         })
+    }
+
+    fn looks_like_struct_literal_suffix(&self) -> bool {
+        if self.peek_kind(0) != Some(TokenKind::LeftBrace) {
+            return false;
+        }
+        if self.peek_kind(1) == Some(TokenKind::RightBrace) {
+            return true;
+        }
+        self.peek_kind(1) == Some(TokenKind::Identifier)
+            && self.peek_kind(2) == Some(TokenKind::Colon)
     }
 
     fn parse_method_call_suffix(
