@@ -953,6 +953,27 @@ impl<'a> Lowering<'a> {
             Some(AstNode::TypeName { name, span }) => match map_type_name(name) {
                 Some(ty) => ty,
                 None => {
+                    if name.starts_with('[') && name.ends_with(']') {
+                        let inner = name[1..name.len() - 1].trim();
+                        if !inner.is_empty() {
+                            let inner_ty = match map_type_name(inner) {
+                                Some(ty) => ty,
+                                None => {
+                                    if let Some(symbol) = self.symbols.resolve(self.current_scope, inner)
+                                    {
+                                        self.symbols
+                                            .symbol(symbol)
+                                            .map(|s| s.ty.clone())
+                                            .unwrap_or(Type::Unknown)
+                                    } else {
+                                        self.push_error(format!("unknown type '{name}'"), *span);
+                                        Type::Unknown
+                                    }
+                                }
+                            };
+                            return Type::Array(Box::new(inner_ty));
+                        }
+                    }
                     if let Some(symbol) = self.symbols.resolve(self.current_scope, name) {
                         self.symbols
                             .symbol(symbol)
@@ -1581,6 +1602,21 @@ mod tests {
         assert!(
             !diagnostics.has_errors(),
             "lowering should accept named struct return type in fn signature"
+        );
+    }
+
+    #[test]
+    fn allows_named_struct_array_type_annotation() {
+        let src = r#"
+            struct ByteOp { opcode: i32, arg1: i32, arg2: i32 }
+            fn run(program: [ByteOp]) -> i32 { return len(program).to_i32() }
+        "#;
+        let lex_output = lex(FileId::from_u32(69), src);
+        let (ast, _) = parse(FileId::from_u32(69), src.len() as u32, lex_output.tokens);
+        let (_hir, _symbols, diagnostics) = lower(&ast);
+        assert!(
+            !diagnostics.has_errors(),
+            "lowering should accept [StructName] type annotations"
         );
     }
 

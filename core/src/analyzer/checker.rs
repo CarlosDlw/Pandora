@@ -1570,12 +1570,7 @@ impl<'a> Checker<'a> {
             }
             BinOp::Equal | BinOp::NotEqual => self.check_equality_pair(op, left_ty, right_ty, span),
             BinOp::Less | BinOp::LessEqual | BinOp::Greater | BinOp::GreaterEqual => {
-                let ty = self.check_numeric_pair(op, left_ty, right_ty, span);
-                if matches!(ty, AnalyzerType::Unknown) {
-                    AnalyzerType::Unknown
-                } else {
-                    AnalyzerType::Bool
-                }
+                self.check_numeric_comparison_pair(op, left_ty, right_ty, span)
             }
             BinOp::LogicalAnd | BinOp::LogicalOr => {
                 if left_ty == AnalyzerType::Bool && right_ty == AnalyzerType::Bool {
@@ -1656,6 +1651,43 @@ impl<'a> Checker<'a> {
         {
             if lb == rb {
                 return left_ty;
+            }
+            self.push_error(
+                format!(
+                    "float widths mismatch for {:?}: left={left_ty:?}, right={right_ty:?}",
+                    op
+                ),
+                span,
+            );
+            return AnalyzerType::Unknown;
+        }
+
+        self.push_error(
+            format!(
+                "invalid operands for {:?}: left={left_ty:?}, right={right_ty:?}",
+                op
+            ),
+            span,
+        );
+        AnalyzerType::Unknown
+    }
+
+    fn check_numeric_comparison_pair(
+        &mut self,
+        op: BinOp,
+        left_ty: AnalyzerType,
+        right_ty: AnalyzerType,
+        span: Span,
+    ) -> AnalyzerType {
+        if matches!(left_ty, AnalyzerType::Int { .. }) && matches!(right_ty, AnalyzerType::Int { .. }) {
+            return AnalyzerType::Bool;
+        }
+
+        if let (AnalyzerType::Float { bits: lb }, AnalyzerType::Float { bits: rb }) =
+            (&left_ty, &right_ty)
+        {
+            if lb == rb {
+                return AnalyzerType::Bool;
             }
             self.push_error(
                 format!(
@@ -2436,6 +2468,16 @@ mod tests {
         let src = "a: i32 = 2; b: i32 = 3; lt: bool = a < b; eq: bool = a == b";
         let lex_output = lex(FileId::from_u32(30), src);
         let (ast, _) = parse(FileId::from_u32(30), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn accepts_mixed_integer_comparison_ops() {
+        let src = "a: i32 = 2; b: u32 = 3; lt: bool = a < b; gt: bool = b > a";
+        let lex_output = lex(FileId::from_u32(301), src);
+        let (ast, _) = parse(FileId::from_u32(301), src.len() as u32, lex_output.tokens);
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());

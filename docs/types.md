@@ -31,6 +31,7 @@ Examples:
 
 ```pandora
 values: [i32] = [1, 2, 3]
+ops: [ByteOp] = [create_op(1, 7, 0)]
 pair: (i32, str) = (1, "x")
 lookup: map[str]i32 = {"a": 1}
 items: set[i32] = set{1, 2, 3}
@@ -69,6 +70,10 @@ At a high level:
   - set item type
 
 For non-matching unrelated types, assignment/call compatibility fails.
+
+For relational comparisons (`<`, `<=`, `>`, `>=`):
+- Integer operands can use different widths/signs (`i32` vs `u32`, etc.).
+- Float operands must still use matching width (`f32` with `f32`, `f64` with `f64`).
 
 ## Casting and Conversion
 

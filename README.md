@@ -14,6 +14,8 @@ print("Hello, Pandora")
 - Static type checking (with diagnostics)
 - Bytecode-based execution on a VM
 - Struct field assignment (for example, `state.debug = false`)
+- Named struct types inside array annotations (for example, `[ByteOp]`)
+- Relational comparisons across integer widths/signs (for example, `i32 < u32`)
 - CLI modes for lexing, AST/HIR inspection, checking, and execution
 - Standard library modules under `stdlib/std/`
 
