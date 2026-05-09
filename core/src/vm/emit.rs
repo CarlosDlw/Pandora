@@ -61,6 +61,7 @@ fn stmt_primary_span(stmt: &HirStmt) -> Span {
         | HirStmt::TupleDestructure { span, .. }
         | HirStmt::Assign { span, .. }
         | HirStmt::ArrayAssign { span, .. }
+        | HirStmt::FieldAssign { span, .. }
         | HirStmt::Expr { span, .. }
         | HirStmt::Block { span, .. }
         | HirStmt::If { span, .. }
@@ -169,6 +170,17 @@ fn emit_stmt(
             emit_expr(hir, model, *index, b, diagnostics, method_table);
             emit_expr(hir, model, *value, b, diagnostics, method_table);
             b.emit(Op::ArrayAssign(*symbol), *span);
+        }
+        HirStmt::FieldAssign {
+            symbol,
+            field,
+            value,
+            span,
+        } => {
+            b.emit(Op::Load(*symbol), *span);
+            emit_expr(hir, model, *value, b, diagnostics, method_table);
+            b.emit(Op::StructSet(field.clone()), *span);
+            b.emit(Op::Assign(*symbol), *span);
         }
         HirStmt::Expr { expr, span } => {
             emit_expr(hir, model, *expr, b, diagnostics, method_table);

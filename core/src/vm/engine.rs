@@ -386,6 +386,26 @@ impl<'a> Vm<'a> {
                     }
                 }
             }
+            Op::StructSet(field) => {
+                let value = self.pop_one(span)?;
+                let base = self.pop_one(span)?;
+                match base {
+                    Value::StructInstance {
+                        type_name,
+                        mut fields,
+                    } => {
+                        fields.insert(field.clone(), value);
+                        self.stack.push(Value::StructInstance { type_name, fields });
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("field assignment on non-struct value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                }
+            }
 
             Op::Load(sym) => {
                 let v = self.env.get(sym).cloned().ok_or_else(|| {

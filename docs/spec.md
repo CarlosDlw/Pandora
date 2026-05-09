@@ -63,7 +63,7 @@ tuple_name_list = "(" , identifier , "," , identifier , { "," , identifier } , "
                 | identifier , "," , identifier , { "," , identifier } ;
 
 assign_stmt     = assign_target , "=" , expr ;
-assign_target   = identifier , { "[" , expr , "]" } ;
+assign_target   = identifier , { ("[" , expr , "]") | ("." , identifier) } ;
 
 compound_assign_stmt
                 = identifier , ("+=" | "-=" | "*=" | "/=" | "%=" | "**="

@@ -186,6 +186,12 @@ pub enum HirStmt {
         value: HirId,
         span: Span,
     },
+    FieldAssign {
+        symbol: SymbolId,
+        field: String,
+        value: HirId,
+        span: Span,
+    },
     Expr {
         expr: HirId,
         span: Span,

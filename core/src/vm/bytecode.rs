@@ -94,6 +94,7 @@ pub enum Op {
     ArrayAssign(SymbolId),
     MakeStruct(String, Vec<String>),
     StructGet(String),
+    StructSet(String),
     WrapErr,
 
     Swap,

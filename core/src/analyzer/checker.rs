@@ -409,6 +409,55 @@ impl<'a> Checker<'a> {
                 }
                 expected.0
             }
+            HirStmt::FieldAssign {
+                symbol,
+                field,
+                value,
+                span,
+            } => {
+                let expected = self
+                    .symbols
+                    .symbol(*symbol)
+                    .map(|s| (s.ty.clone(), s.is_const))
+                    .unwrap_or((AnalyzerType::Unknown, false));
+                if expected.1 {
+                    self.push_error("cannot assign to constant", *span);
+                }
+                let field_ty = match expected.0.clone() {
+                    AnalyzerType::Struct(struct_id) => {
+                        let Some(fields) = self.struct_fields.get(&struct_id) else {
+                            self.push_error("unknown struct for field assignment", *span);
+                            return AnalyzerType::Unknown;
+                        };
+                        fields
+                            .iter()
+                            .find(|(name, _)| name == field)
+                            .map(|(_, ty)| ty.clone())
+                            .unwrap_or_else(|| {
+                                self.push_error(format!("unknown field '{field}'"), *span);
+                                AnalyzerType::Unknown
+                            })
+                    }
+                    AnalyzerType::Unknown => AnalyzerType::Unknown,
+                    other => {
+                        self.push_error(
+                            format!("field assignment requires struct target, got {other:?}"),
+                            *span,
+                        );
+                        AnalyzerType::Unknown
+                    }
+                };
+                let actual = self.check_expr_expected(*value, *span, Some(&field_ty));
+                if !is_assignable(&field_ty, &actual) {
+                    self.push_error(
+                        format!(
+                            "cannot assign value of type {actual:?} to struct field {field_ty:?}"
+                        ),
+                        *span,
+                    );
+                }
+                expected.0
+            }
             HirStmt::Block { stmts, .. } => {
                 for stmt in stmts {
                     let _ = self.check_stmt(stmt);
@@ -2250,6 +2299,30 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn supports_struct_field_assignment() {
+        let src = "struct VMState { debug: bool }; vm: VMState = VMState { debug: true }; vm.debug = false";
+        let lex_output = lex(FileId::from_u32(625), src);
+        let (ast, _) = parse(FileId::from_u32(625), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_struct_field_assignment_type_mismatch() {
+        let src =
+            "struct VMState { debug: bool }; vm: VMState = VMState { debug: true }; vm.debug = 1";
+        let lex_output = lex(FileId::from_u32(626), src);
+        let (ast, _) = parse(FileId::from_u32(626), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message.contains("cannot assign value of type") && d.message.contains("struct field")
+        }));
     }
 
     #[test]

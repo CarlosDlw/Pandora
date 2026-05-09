@@ -313,6 +313,19 @@ impl<'a> Lowering<'a> {
                             span: *span,
                         }
                     }
+                    Some(AstNode::FieldAccessExpr { base, field, .. }) => {
+                        if !matches!(self.ast.get(*base), Some(AstNode::Identifier { .. })) {
+                            self.push_error("invalid assignment target", *span);
+                            return HirStmt::Invalid { span: *span };
+                        }
+                        let symbol = self.resolve_assignment_target(*base);
+                        HirStmt::FieldAssign {
+                            symbol,
+                            field: field.clone(),
+                            value,
+                            span: *span,
+                        }
+                    }
                     _ => {
                         self.push_error("invalid assignment target", *span);
                         HirStmt::Invalid { span: *span }
@@ -1502,6 +1515,19 @@ mod tests {
         assert!(matches!(
             hir.exprs.get(*value),
             Some(HirExpr::Binary { op: BinOp::Add, .. })
+        ));
+    }
+
+    #[test]
+    fn lowers_struct_field_assignment_into_hir_field_assign() {
+        let src = "struct VMState { debug: bool }; vm: VMState = VMState { debug: true }; vm.debug = false";
+        let lex_output = lex(FileId::from_u32(68), src);
+        let (ast, _) = parse(FileId::from_u32(68), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        assert!(matches!(
+            hir.stmts.get(2),
+            Some(HirStmt::FieldAssign { field, .. }) if field == "debug"
         ));
     }
 

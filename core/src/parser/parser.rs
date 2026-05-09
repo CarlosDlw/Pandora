@@ -1150,29 +1150,52 @@ impl Parser {
         });
         while self
             .current()
-            .is_some_and(|t| t.kind == TokenKind::LeftBracket)
+            .is_some_and(|t| matches!(t.kind, TokenKind::LeftBracket | TokenKind::Dot))
         {
-            let open = self.current_span_or_eof();
-            self.bump();
             if self
                 .current()
-                .is_some_and(|t| t.kind == TokenKind::RightBracket)
+                .is_some_and(|t| t.kind == TokenKind::LeftBracket)
             {
-                self.push_error("expected index expression inside brackets", open);
-                return self.invalid_node(open);
+                let open = self.current_span_or_eof();
+                self.bump();
+                if self
+                    .current()
+                    .is_some_and(|t| t.kind == TokenKind::RightBracket)
+                {
+                    self.push_error("expected index expression inside brackets", open);
+                    return self.invalid_node(open);
+                }
+                let index = self.parse_expression();
+                if !self.consume_if(TokenKind::RightBracket) {
+                    self.push_error(
+                        "expected ']' after index expression",
+                        self.current_span_or_eof(),
+                    );
+                    return self.invalid_node(open);
+                }
+                let span = merge_span(self.node_span(target), self.node_span(index));
+                target = self.insert_node(AstNode::ArrayAccessExpr {
+                    base: target,
+                    index,
+                    span,
+                });
+                continue;
             }
-            let index = self.parse_expression();
-            if !self.consume_if(TokenKind::RightBracket) {
-                self.push_error(
-                    "expected ']' after index expression",
-                    self.current_span_or_eof(),
-                );
-                return self.invalid_node(open);
-            }
-            let span = merge_span(self.node_span(target), self.node_span(index));
-            target = self.insert_node(AstNode::ArrayAccessExpr {
+
+            let dot_span = self.current_span_or_eof();
+            self.bump();
+            let field_token = match self.current() {
+                Some(token) if token.kind == TokenKind::Identifier => token.clone(),
+                _ => {
+                    self.push_error("expected field name after '.' in assignment", dot_span);
+                    return self.invalid_node(dot_span);
+                }
+            };
+            self.bump();
+            let span = merge_span(self.node_span(target), field_token.span);
+            target = self.insert_node(AstNode::FieldAccessExpr {
                 base: target,
-                index,
+                field: field_token.lexeme,
                 span,
             });
         }
@@ -1327,19 +1350,28 @@ impl Parser {
             if self.peek_kind(idx) == Some(TokenKind::Assign) {
                 return true;
             }
-            if self.peek_kind(idx) != Some(TokenKind::LeftBracket) {
-                return false;
-            }
-            idx += 1;
-            let mut depth = 1usize;
-            while depth > 0 {
-                match self.peek_kind(idx) {
-                    Some(TokenKind::LeftBracket) => depth += 1,
-                    Some(TokenKind::RightBracket) => depth = depth.saturating_sub(1),
-                    Some(_) => {}
-                    None => return false,
+            match self.peek_kind(idx) {
+                Some(TokenKind::LeftBracket) => {
+                    idx += 1;
+                    let mut depth = 1usize;
+                    while depth > 0 {
+                        match self.peek_kind(idx) {
+                            Some(TokenKind::LeftBracket) => depth += 1,
+                            Some(TokenKind::RightBracket) => depth = depth.saturating_sub(1),
+                            Some(_) => {}
+                            None => return false,
+                        }
+                        idx += 1;
+                    }
                 }
-                idx += 1;
+                Some(TokenKind::Dot) => {
+                    idx += 1;
+                    if self.peek_kind(idx) != Some(TokenKind::Identifier) {
+                        return false;
+                    }
+                    idx += 1;
+                }
+                _ => return false,
             }
         }
     }
@@ -2025,6 +2057,18 @@ mod tests {
             Some(AstNode::LetDecl { value, .. })
                 if matches!(ast.get(*value), Some(AstNode::ArrayAccessExpr { .. }))
         ));
+    }
+
+    #[test]
+    fn parses_struct_field_assignment() {
+        let source = "struct VMState { debug: bool }; vm: VMState = VMState { debug: true }; vm.debug = false";
+        let lex_out = lex(FileId::from_u32(534), source);
+        let (ast, diagnostics) = parse(FileId::from_u32(534), source.len() as u32, lex_out.tokens);
+        assert!(!diagnostics.has_errors());
+        assert!(
+            matches!(ast.get(ast.roots[2]), Some(AstNode::AssignStmt { target, .. })
+            if matches!(ast.get(*target), Some(AstNode::FieldAccessExpr { field, .. }) if field == "debug"))
+        );
     }
 
     #[test]

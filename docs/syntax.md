@@ -52,6 +52,12 @@ Assignment after declaration uses `=`:
 age = age + 1
 ```
 
+Struct fields can also be assigned:
+
+```pandora
+state.debug = false
+```
+
 Tuple destructuring is supported:
 
 ```pandora
