@@ -1257,3 +1257,74 @@ fn check_mode_reports_internal_url_intrinsic_forbidden() {
         .code(1)
         .stderr(contains("internal intrinsic 'url_parse'"));
 }
+
+// --- Fase 7: CLI Integration Tests for V1 Contract ---
+
+#[test]
+fn phase7_check_mode_rejects_import_without_as_keyword() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"import \"std/core\"\nprint(\"x\")\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("import requires alias"));
+}
+
+#[test]
+fn phase7_check_mode_rejects_import_unknown_stdlib_module() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"import \"std/nonexistent\" as x\nprint(x)\n")
+        .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("unknown stdlib module"));
+}
+
+#[test]
+fn phase7_check_mode_rejects_from_import_unknown_symbol() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"from \"std/core\" import nonexistent_func\nprint(\"ok\")\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("not exported"));
+}
+
+#[test]
+fn phase7_check_mode_prelude_builtins_available_without_import() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(len(\"test\"))\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(0);
+}
+
+#[test]
+fn phase7_check_mode_internal_intrinsics_rejected_by_category() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"io_stdout_write(\"test\")\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("internal intrinsic"));
+}
