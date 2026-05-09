@@ -652,6 +652,21 @@ fn check_mode_reports_from_import_symbol_not_exported_by_module() {
 }
 
 #[test]
+fn check_mode_reports_prelude_builtin_not_exported_by_std_core() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"from \"std/core\" import print\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains(
+            "symbol 'print' is not exported by module 'std/core'",
+        ));
+}
+
+#[test]
 fn check_mode_reports_io_read_text_invalid_arg_type() {
     let mut file = NamedTempFile::new().expect("temp file");
     std::io::Write::write_all(&mut file, b"print(read_text(10))\n").expect("write");

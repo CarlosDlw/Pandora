@@ -1,11 +1,11 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::OnceLock,
-};
+use std::collections::HashMap;
 
 use crate::{
     analyzer::Type as AnalyzerType,
-    builtins::{BuiltinRegistry, default_registry},
+    builtins::{
+        BuiltinRegistry, default_registry, is_internal_stdlib_symbol, normalize_stdlib_path,
+        stdlib_module_exports,
+    },
     hir::{BinOp, Hir, HirExpr, HirId, HirStmt, ScopeId, SymbolId, SymbolTable, UnaryOp},
     integer_lit::{literal_f64, literal_u128},
 };
@@ -65,42 +65,6 @@ struct Checker<'a> {
     fn_required_params: HashMap<SymbolId, usize>,
     builtins: &'a BuiltinRegistry,
 }
-
-const STDLIB_MODULE_SOURCES: &[(&str, &str)] = &[
-    ("std/cli", include_str!("../../../stdlib/std/cli.pand")),
-    ("std/core", include_str!("../../../stdlib/std/core.pand")),
-    (
-        "std/crypto",
-        include_str!("../../../stdlib/std/crypto.pand"),
-    ),
-    ("std/csv", include_str!("../../../stdlib/std/csv.pand")),
-    (
-        "std/encoding",
-        include_str!("../../../stdlib/std/encoding.pand"),
-    ),
-    ("std/env", include_str!("../../../stdlib/std/env.pand")),
-    ("std/fs", include_str!("../../../stdlib/std/fs.pand")),
-    ("std/http", include_str!("../../../stdlib/std/http.pand")),
-    ("std/io", include_str!("../../../stdlib/std/io.pand")),
-    ("std/json", include_str!("../../../stdlib/std/json.pand")),
-    ("std/log", include_str!("../../../stdlib/std/log.pand")),
-    ("std/math", include_str!("../../../stdlib/std/math.pand")),
-    ("std/mime", include_str!("../../../stdlib/std/mime.pand")),
-    ("std/net", include_str!("../../../stdlib/std/net.pand")),
-    ("std/os", include_str!("../../../stdlib/std/os.pand")),
-    ("std/path", include_str!("../../../stdlib/std/path.pand")),
-    ("std/proc", include_str!("../../../stdlib/std/proc.pand")),
-    ("std/rand", include_str!("../../../stdlib/std/rand.pand")),
-    ("std/regex", include_str!("../../../stdlib/std/regex.pand")),
-    ("std/sync", include_str!("../../../stdlib/std/sync.pand")),
-    (
-        "std/thread",
-        include_str!("../../../stdlib/std/thread.pand"),
-    ),
-    ("std/time", include_str!("../../../stdlib/std/time.pand")),
-    ("std/url", include_str!("../../../stdlib/std/url.pand")),
-    ("std/xml", include_str!("../../../stdlib/std/xml.pand")),
-];
 
 impl<'a> Checker<'a> {
     fn check_program(&mut self) {
@@ -2007,62 +1971,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn stdlib_module_exports(path: &str) -> Option<&'static HashSet<String>> {
-    static STDLIB_EXPORTS: OnceLock<HashMap<&'static str, HashSet<String>>> = OnceLock::new();
-    STDLIB_EXPORTS
-        .get_or_init(|| {
-            STDLIB_MODULE_SOURCES
-                .iter()
-                .map(|(path, source)| (*path, collect_stdlib_exports(source)))
-                .collect()
-        })
-        .get(path)
-}
-
-fn collect_stdlib_exports(source: &str) -> HashSet<String> {
-    source
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let name = line.strip_prefix("fn ")?.split('(').next()?.trim();
-            (!name.is_empty()).then(|| name.to_string())
-        })
-        .collect()
-}
-
-fn normalize_stdlib_path(path: &str) -> String {
-    path.trim_matches('"').to_string()
-}
-
-fn is_internal_stdlib_symbol(name: &str) -> bool {
-    [
-        "io_",
-        "fs_",
-        "math_",
-        "time_",
-        "os_",
-        "proc_",
-        "thread_",
-        "sync_",
-        "net_",
-        "http_",
-        "crypto_",
-        "rand_",
-        "encoding_",
-        "regex_",
-        "cli_",
-        "env_",
-        "log_",
-        "json_",
-        "csv_",
-        "mime_",
-        "url_",
-        "xml_",
-    ]
-    .iter()
-    .any(|prefix| name.starts_with(prefix))
-}
-
 fn integer_fits(value: u128, signed: bool, bits: u16) -> bool {
     if bits == 0 || bits > 128 {
         return false;
@@ -2895,6 +2803,20 @@ mod tests {
         assert!(diagnostics.iter().any(|d| {
             d.message
                 .contains("symbol 'read_text' is not exported by module 'std/http'")
+        }));
+    }
+
+    #[test]
+    fn rejects_prelude_builtin_from_std_core_import() {
+        let src = "from \"std/core\" import print";
+        let lex_output = lex(FileId::from_u32(66), src);
+        let (ast, _) = parse(FileId::from_u32(66), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("symbol 'print' is not exported by module 'std/core'")
         }));
     }
 }

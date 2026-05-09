@@ -7666,8 +7666,11 @@ pub fn execute(chunk: &Chunk, symbols: &SymbolTable) -> Result<(), Diagnostics> 
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use foundation::ids::FileId;
 
+    use crate::builtins::default_registry;
     use crate::hir::symbols::SymbolTable;
     use crate::vm::bytecode::Op;
     use crate::vm::chunk::ChunkBuilder;
@@ -7676,6 +7679,70 @@ mod tests {
 
     fn span() -> Span {
         Span::new_unchecked(FileId::from_u32(0), 0, 1)
+    }
+
+    fn dispatch_builtin_source_names() -> HashSet<&'static str> {
+        let source = include_str!("engine.rs");
+        let start = source
+            .find("fn dispatch_builtin(")
+            .expect("dispatch_builtin start");
+        let end = source[start..]
+            .find("fn dispatch_integer_method(")
+            .map(|offset| start + offset)
+            .expect("dispatch_builtin end");
+        let dispatch_source = &source[start..end];
+
+        let mut names = HashSet::new();
+        for line in dispatch_source.lines() {
+            let trimmed = line.trim();
+            if !trimmed.starts_with('"') || !trimmed.contains("=>") {
+                continue;
+            }
+            let Some(patterns) = trimmed.split("=>").next() else {
+                continue;
+            };
+            for branch in patterns.split('|') {
+                let branch = branch.trim();
+                if let Some(name) = branch
+                    .strip_prefix('"')
+                    .and_then(|rest| rest.split('"').next())
+                {
+                    names.insert(name);
+                }
+            }
+        }
+
+        names
+    }
+
+    #[test]
+    fn runtime_dispatch_covers_every_registered_builtin_function() {
+        let registry = default_registry();
+        let runtime_names = dispatch_builtin_source_names();
+        let registry_names = registry
+            .functions
+            .iter()
+            .map(|function| function.name)
+            .filter(|name| !name.starts_with("__meth_"))
+            .collect::<HashSet<_>>();
+
+        let missing_in_runtime = registry_names
+            .difference(&runtime_names)
+            .copied()
+            .collect::<Vec<_>>();
+        let missing_in_registry = runtime_names
+            .difference(&registry_names)
+            .copied()
+            .collect::<Vec<_>>();
+
+        assert!(
+            missing_in_runtime.is_empty(),
+            "registered builtin functions missing runtime dispatch: {missing_in_runtime:?}"
+        );
+        assert!(
+            missing_in_registry.is_empty(),
+            "runtime dispatch exposes builtin functions missing from registry: {missing_in_registry:?}"
+        );
     }
 
     #[test]
