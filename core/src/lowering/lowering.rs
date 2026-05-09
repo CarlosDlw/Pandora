@@ -40,6 +40,7 @@ struct Lowering<'a> {
     symbols: SymbolTable,
     diagnostics: Diagnostics,
     current_scope: ScopeId,
+    predeclared_types: HashMap<ArenaId, SymbolId>,
     predeclared_fns: HashMap<ArenaId, SymbolId>,
     discard_counter: u32,
 }
@@ -59,6 +60,7 @@ impl<'a> Lowering<'a> {
             symbols,
             diagnostics: Diagnostics::new(),
             current_scope: root_scope,
+            predeclared_types: HashMap::new(),
             predeclared_fns: HashMap::new(),
             discard_counter: 0,
         }
@@ -69,10 +71,33 @@ impl<'a> Lowering<'a> {
     }
 
     fn lower_program(&mut self) {
+        self.predeclare_top_level_types();
         self.predeclare_top_level_functions();
         for root in &self.ast.roots {
             let stmt = self.lower_stmt(*root);
             self.hir.stmts.push(stmt);
+        }
+    }
+
+    fn predeclare_top_level_types(&mut self) {
+        for root in &self.ast.roots {
+            match self.ast.get(*root) {
+                Some(AstNode::StructDecl { name, .. }) => {
+                    let symbol = self.bind_symbol(*name, Type::Unknown, true);
+                    if let Some(sym) = self.symbols.symbol_mut(symbol) {
+                        sym.ty = Type::Struct(symbol);
+                    }
+                    self.predeclared_types.insert(*root, symbol);
+                }
+                Some(AstNode::TraitDecl { name, .. }) => {
+                    let symbol = self.bind_symbol(*name, Type::Unknown, true);
+                    if let Some(sym) = self.symbols.symbol_mut(symbol) {
+                        sym.ty = Type::Trait(symbol);
+                    }
+                    self.predeclared_types.insert(*root, symbol);
+                }
+                _ => {}
+            }
         }
     }
 
@@ -150,7 +175,11 @@ impl<'a> Lowering<'a> {
                     Some(AstNode::Identifier { name, .. }) => name.clone(),
                     _ => "<invalid>".to_string(),
                 };
-                let symbol = self.bind_symbol(*name, Type::Unknown, true);
+                let symbol = self
+                    .predeclared_types
+                    .get(&id)
+                    .copied()
+                    .unwrap_or_else(|| self.bind_symbol(*name, Type::Unknown, true));
                 if let Some(sym) = self.symbols.symbol_mut(symbol) {
                     sym.ty = Type::Struct(symbol);
                 }
@@ -176,7 +205,11 @@ impl<'a> Lowering<'a> {
                 methods,
                 span,
             } => {
-                let symbol = self.bind_symbol(*name, Type::Unknown, true);
+                let symbol = self
+                    .predeclared_types
+                    .get(&id)
+                    .copied()
+                    .unwrap_or_else(|| self.bind_symbol(*name, Type::Unknown, true));
                 let trait_name = match self.ast.get(*name) {
                     Some(AstNode::Identifier { name, .. }) => name.clone(),
                     _ => "<invalid>".to_string(),
@@ -1506,6 +1539,23 @@ mod tests {
         let (hir, _symbols, diagnostics) = lower(&ast);
         assert!(!diagnostics.has_errors());
         assert!(matches!(hir.stmts.first(), Some(HirStmt::FnDecl { .. })));
+    }
+
+    #[test]
+    fn allows_struct_type_in_function_signature() {
+        let src = r#"
+            struct ByteOp { opcode: i32, arg1: i32, arg2: i32 }
+            fn create_op(opcode: i32, arg1: i32, arg2: i32) -> ByteOp {
+                return ByteOp { opcode: opcode, arg1: arg1, arg2: arg2 }
+            }
+        "#;
+        let lex_output = lex(FileId::from_u32(67), src);
+        let (ast, _) = parse(FileId::from_u32(67), src.len() as u32, lex_output.tokens);
+        let (_hir, _symbols, diagnostics) = lower(&ast);
+        assert!(
+            !diagnostics.has_errors(),
+            "lowering should accept named struct return type in fn signature"
+        );
     }
 
     #[test]
