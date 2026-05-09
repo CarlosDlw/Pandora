@@ -2819,4 +2819,18 @@ mod tests {
                 .contains("symbol 'print' is not exported by module 'std/core'")
         }));
     }
+
+    #[test]
+    fn rejects_internal_stdlib_intrinsic_as_function_call() {
+        let src = "fn main() { fs_create_dir(\".\"); }";
+        let lex_output = lex(FileId::from_u32(67), src);
+        let (ast, _) = parse(FileId::from_u32(67), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("internal intrinsic 'fs_create_dir' is not part of the public stdlib API")
+        }));
+    }
 }

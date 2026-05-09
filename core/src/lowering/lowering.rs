@@ -1554,4 +1554,17 @@ mod tests {
         };
         assert_eq!(from_import_path, "std/http");
     }
+
+    #[test]
+    fn rejects_import_without_alias_at_parse_time() {
+        let src = "import \"std/core\"";
+        let lex_output = lex(FileId::from_u32(62), src);
+        let (_, diagnostics) = parse(FileId::from_u32(62), src.len() as u32, lex_output.tokens);
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| { d.message.contains("import requires alias") })
+        );
+    }
 }

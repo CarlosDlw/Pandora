@@ -667,6 +667,38 @@ fn check_mode_reports_prelude_builtin_not_exported_by_std_core() {
 }
 
 #[test]
+fn check_mode_accepts_multiple_imports_with_valid_exports() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(
+        &mut file,
+        b"import \"std/core\" as core\nimport \"std/io\" as io\nfrom \"std/http\" import parse_request\nfn main() -> unit { }\n",
+    )
+    .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(0);
+}
+
+#[test]
+fn check_mode_rejects_internal_intrinsic_called_directly() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"fn main() -> unit { fs_create_dir(\".\"); }\n")
+        .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains(
+            "internal intrinsic 'fs_create_dir' is not part of the public stdlib API",
+        ));
+}
+
+#[test]
 fn check_mode_reports_io_read_text_invalid_arg_type() {
     let mut file = NamedTempFile::new().expect("temp file");
     std::io::Write::write_all(&mut file, b"print(read_text(10))\n").expect("write");
