@@ -2833,4 +2833,211 @@ mod tests {
                 .contains("internal intrinsic 'fs_create_dir' is not part of the public stdlib API")
         }));
     }
+
+    // --- Intrinsic blocking by category (Phase 6 coverage) ---
+    #[test]
+    fn rejects_io_intrinsic_io_stdout_write() {
+        let src = "fn main() { io_stdout_write(\"test\"); }";
+        let lex_output = lex(FileId::from_u32(68), src);
+        let (ast, _) = parse(FileId::from_u32(68), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("internal intrinsic 'io_stdout_write'"))
+        );
+    }
+
+    #[test]
+    fn rejects_math_intrinsic_math_rand_i32() {
+        let src = "fn main() { math_rand_i32(0, 100); }";
+        let lex_output = lex(FileId::from_u32(69), src);
+        let (ast, _) = parse(FileId::from_u32(69), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("internal intrinsic 'math_rand_i32'"))
+        );
+    }
+
+    #[test]
+    fn rejects_time_intrinsic_time_sleep_ms() {
+        let src = "fn main() { time_sleep_ms(100); }";
+        let lex_output = lex(FileId::from_u32(70), src);
+        let (ast, _) = parse(FileId::from_u32(70), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("internal intrinsic 'time_sleep_ms'"))
+        );
+    }
+
+    #[test]
+    fn rejects_http_intrinsic_http_parse_request() {
+        let src = "fn main() { http_parse_request(\"GET\"); }";
+        let lex_output = lex(FileId::from_u32(71), src);
+        let (ast, _) = parse(FileId::from_u32(71), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("internal intrinsic 'http_parse_request'")
+        }));
+    }
+
+    #[test]
+    fn rejects_json_intrinsic_json_parse() {
+        let src = "fn main() { json_parse(\"{}\"); }";
+        let lex_output = lex(FileId::from_u32(72), src);
+        let (ast, _) = parse(FileId::from_u32(72), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("internal intrinsic 'json_parse'"))
+        );
+    }
+
+    #[test]
+    fn rejects_crypto_intrinsic_crypto_random_bytes() {
+        let src = "fn main() { crypto_random_bytes(32); }";
+        let lex_output = lex(FileId::from_u32(73), src);
+        let (ast, _) = parse(FileId::from_u32(73), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("internal intrinsic 'crypto_random_bytes'")
+        }));
+    }
+
+    // --- Stdlib module resolution (Phase 6 coverage) ---
+    #[test]
+    fn accepts_known_stdlib_module_import() {
+        let src = "import \"std/core\" as core";
+        let lex_output = lex(FileId::from_u32(74), src);
+        let (ast, _) = parse(FileId::from_u32(74), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_unknown_stdlib_module() {
+        let src = "import \"std/nonexistent\" as bad";
+        let lex_output = lex(FileId::from_u32(75), src);
+        let (ast, _) = parse(FileId::from_u32(75), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("unknown stdlib module 'std/nonexistent'")
+        }));
+    }
+
+    #[test]
+    fn accepts_valid_from_import_single_symbol() {
+        let src = "from \"std/core\" import helper";
+        let lex_output = lex(FileId::from_u32(76), src);
+        let (ast, _) = parse(FileId::from_u32(76), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_symbol_not_in_module_exports() {
+        let src = "from \"std/io\" import helper";
+        let lex_output = lex(FileId::from_u32(77), src);
+        let (ast, _) = parse(FileId::from_u32(77), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("'helper' is not exported by module 'std/io'")
+        }));
+    }
+
+    #[test]
+    fn rejects_from_import_prelude_builtin_len() {
+        let src = "from \"std/core\" import len";
+        let lex_output = lex(FileId::from_u32(78), src);
+        let (ast, _) = parse(FileId::from_u32(78), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("'len' is not exported by module 'std/core'")
+        }));
+    }
+
+    #[test]
+    fn rejects_from_import_prelude_builtin_error() {
+        let src = "from \"std/core\" import error";
+        let lex_output = lex(FileId::from_u32(79), src);
+        let (ast, _) = parse(FileId::from_u32(79), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("'error' is not exported by module 'std/core'")
+        }));
+    }
+
+    #[test]
+    fn accepts_multiple_different_modules() {
+        let src =
+            "import \"std/core\" as core\nimport \"std/io\" as io\nimport \"std/http\" as http";
+        let lex_output = lex(FileId::from_u32(80), src);
+        let (ast, _) = parse(FileId::from_u32(80), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_intrinsic_in_nested_expression() {
+        let src = "fn main() { let x = fs_exists(\".\") ? \"yes\" : \"no\"; }";
+        let lex_output = lex(FileId::from_u32(81), src);
+        let (ast, _) = parse(FileId::from_u32(81), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("internal intrinsic 'fs_exists'"))
+        );
+    }
+
+    #[test]
+    fn rejects_intrinsic_as_array_element() {
+        let src = "fn main() { let arr = [io_stdout_write(\"a\")]; }";
+        let lex_output = lex(FileId::from_u32(82), src);
+        let (ast, _) = parse(FileId::from_u32(82), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("internal intrinsic 'io_stdout_write'"))
+        );
+    }
 }

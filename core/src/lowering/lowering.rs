@@ -1567,4 +1567,73 @@ mod tests {
                 .any(|d| { d.message.contains("import requires alias") })
         );
     }
+
+    // --- Import variants and resolution (Phase 6 coverage) ---
+    #[test]
+    fn lowers_import_with_multiple_as_variants() {
+        let srcs = vec![
+            "import \"std/core\" as core",
+            "import \"std/io\" as io",
+            "import \"std/http\" as http",
+        ];
+        for src in srcs {
+            let lex_output = lex(FileId::from_u32(63), src);
+            let (ast, _) = parse(FileId::from_u32(63), src.len() as u32, lex_output.tokens);
+            let (hir, _, diagnostics) = lower(&ast);
+            assert!(
+                !diagnostics.has_errors(),
+                "should lower import alias successfully: {src}"
+            );
+            assert_eq!(hir.stmts.len(), 1);
+        }
+    }
+
+    #[test]
+    fn lowers_from_import_with_single_symbol() {
+        let src = "from \"std/core\" import helper";
+        let lex_output = lex(FileId::from_u32(64), src);
+        let (ast, _) = parse(FileId::from_u32(64), src.len() as u32, lex_output.tokens);
+        let (hir, _, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        assert_eq!(hir.stmts.len(), 1);
+        match hir.stmts.first() {
+            Some(HirStmt::FromImport { names, .. }) => {
+                assert_eq!(names.len(), 1);
+            }
+            _ => panic!("expected FromImport stmt"),
+        }
+    }
+
+    #[test]
+    fn lowers_mixed_import_statements() {
+        let src = "import \"std/core\" as core\nfrom \"std/io\" import read_text\nimport \"std/http\" as http";
+        let lex_output = lex(FileId::from_u32(65), src);
+        let (ast, _) = parse(FileId::from_u32(65), src.len() as u32, lex_output.tokens);
+        let (hir, _, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+        assert_eq!(hir.stmts.len(), 3);
+        assert!(matches!(hir.stmts[0], HirStmt::Import { .. }));
+        assert!(matches!(hir.stmts[1], HirStmt::FromImport { .. }));
+        assert!(matches!(hir.stmts[2], HirStmt::Import { .. }));
+    }
+
+    #[test]
+    fn lowering_preserves_import_paths_verbatim() {
+        let srcs = vec![
+            ("std/core", "std/core"),
+            ("std/io", "std/io"),
+            ("std/http", "std/http"),
+        ];
+        for (input_path, expected_path) in srcs {
+            let src = format!("import \"{}\" as alias", input_path);
+            let lex_output = lex(FileId::from_u32(66), &src);
+            let (ast, _) = parse(FileId::from_u32(66), src.len() as u32, lex_output.tokens);
+            let (hir, _, _) = lower(&ast);
+            if let Some(HirStmt::Import { path, .. }) = hir.stmts.first() {
+                assert_eq!(path, expected_path);
+            } else {
+                panic!("expected import stmt");
+            }
+        }
+    }
 }
