@@ -135,7 +135,15 @@ impl<'a> Lowering<'a> {
                 span,
             } => {
                 let symbol = self.predeclared_fns.get(&id).copied();
-                self.lower_fn_decl(*name, params, param_defaults, *return_ty, *body, *span, symbol)
+                self.lower_fn_decl(
+                    *name,
+                    params,
+                    param_defaults,
+                    *return_ty,
+                    *body,
+                    *span,
+                    symbol,
+                )
             }
             AstNode::StructDecl { name, fields, span } => {
                 let struct_name = match self.ast.get(*name) {
@@ -247,7 +255,11 @@ impl<'a> Lowering<'a> {
                     span: *span,
                 }
             }
-            AstNode::AssignStmt { target, value, span } => {
+            AstNode::AssignStmt {
+                target,
+                value,
+                span,
+            } => {
                 let value = self.lower_expr(*value);
                 match self.ast.get(*target) {
                     Some(AstNode::Identifier { .. }) => {
@@ -304,7 +316,7 @@ impl<'a> Lowering<'a> {
             AstNode::ImportStmt { path, alias, span } => {
                 let alias_sym = self.bind_symbol(*alias, Type::Unknown, true);
                 HirStmt::Import {
-                    path: path.clone(),
+                    path: unquote_string_literal(path),
                     alias: alias_sym,
                     span: *span,
                 }
@@ -317,18 +329,18 @@ impl<'a> Lowering<'a> {
                             Some(AstNode::Identifier { name, .. }) => Some(name.as_str()),
                             _ => None,
                         };
-                        if let Some(existing_name) = ident {
-                            if let Some(existing) =
-                                self.symbols.resolve_in_scope(self.current_scope, existing_name)
-                            {
-                                return existing;
-                            }
+                        if let Some(existing_name) = ident
+                            && let Some(existing) = self
+                                .symbols
+                                .resolve_in_scope(self.current_scope, existing_name)
+                        {
+                            return existing;
                         }
                         self.bind_symbol(*name, Type::Unknown, true)
                     })
                     .collect::<Vec<_>>();
                 HirStmt::FromImport {
-                    path: path.clone(),
+                    path: unquote_string_literal(path),
                     names: syms,
                     span: *span,
                 }
@@ -404,7 +416,10 @@ impl<'a> Lowering<'a> {
                 let index_symbol = self.symbols.define(
                     self.current_scope,
                     "__forin_index".to_string(),
-                    Type::Int { signed: true, bits: 64 },
+                    Type::Int {
+                        signed: true,
+                        bits: 64,
+                    },
                     SymbolOrigin::User,
                     false,
                 );
@@ -423,7 +438,10 @@ impl<'a> Lowering<'a> {
             AstNode::ContinueStmt { span } => HirStmt::Continue { span: *span },
             AstNode::ReturnStmt { values, span } => {
                 let values = values.iter().map(|id| self.lower_expr(*id)).collect();
-                HirStmt::Return { values, span: *span }
+                HirStmt::Return {
+                    values,
+                    span: *span,
+                }
             }
             AstNode::Invalid { span } => HirStmt::Invalid { span: *span },
             other => {
@@ -474,29 +492,42 @@ impl<'a> Lowering<'a> {
     fn resolve_assignment_target(&mut self, id: ArenaId) -> SymbolId {
         let Some(AstNode::Identifier { name, span }) = self.ast.get(id) else {
             self.push_error("invalid assignment target", self.node_span(id));
-            return self
-                .symbols
-                .define(self.current_scope, "<invalid_assign>".to_string(), Type::Unknown, SymbolOrigin::User, false);
+            return self.symbols.define(
+                self.current_scope,
+                "<invalid_assign>".to_string(),
+                Type::Unknown,
+                SymbolOrigin::User,
+                false,
+            );
         };
         match self.symbols.resolve(self.current_scope, name) {
             Some(symbol_id) => symbol_id,
             None => {
                 self.push_error(format!("undefined symbol '{name}'"), *span);
-                self.symbols
-                    .define(self.current_scope, "<undefined_assign>".to_string(), Type::Unknown, SymbolOrigin::User, false)
+                self.symbols.define(
+                    self.current_scope,
+                    "<undefined_assign>".to_string(),
+                    Type::Unknown,
+                    SymbolOrigin::User,
+                    false,
+                )
             }
         }
     }
 
     fn bind_destructure_symbol(&mut self, id: ArenaId) -> SymbolId {
-        if let Some(AstNode::Identifier { name, .. }) = self.ast.get(id) {
-            if name == "_" {
-                let synth = format!("__discard_{}", self.discard_counter);
-                self.discard_counter = self.discard_counter.saturating_add(1);
-                return self
-                    .symbols
-                    .define(self.current_scope, synth, Type::Unknown, SymbolOrigin::User, false);
-            }
+        if let Some(AstNode::Identifier { name, .. }) = self.ast.get(id)
+            && name == "_"
+        {
+            let synth = format!("__discard_{}", self.discard_counter);
+            self.discard_counter = self.discard_counter.saturating_add(1);
+            return self.symbols.define(
+                self.current_scope,
+                synth,
+                Type::Unknown,
+                SymbolOrigin::User,
+                false,
+            );
         }
         self.bind_symbol(id, Type::Unknown, false)
     }
@@ -536,13 +567,17 @@ impl<'a> Lowering<'a> {
                 };
                 self.insert_hir_expr(HirExpr::Unary { op, operand }, self.node_span(id))
             }
-            AstNode::Identifier { name, span } => match self.symbols.resolve(self.current_scope, name) {
-                Some(symbol_id) => self.insert_hir_expr(HirExpr::Var(symbol_id), self.node_span(id)),
-                None => {
-                    self.push_error(format!("undefined symbol '{name}'"), *span);
-                    self.insert_hir_expr(HirExpr::Invalid, *span)
+            AstNode::Identifier { name, span } => {
+                match self.symbols.resolve(self.current_scope, name) {
+                    Some(symbol_id) => {
+                        self.insert_hir_expr(HirExpr::Var(symbol_id), self.node_span(id))
+                    }
+                    None => {
+                        self.push_error(format!("undefined symbol '{name}'"), *span);
+                        self.insert_hir_expr(HirExpr::Invalid, *span)
+                    }
                 }
-            },
+            }
             AstNode::BinaryExpr {
                 op, left, right, ..
             } => {
@@ -574,8 +609,15 @@ impl<'a> Lowering<'a> {
                     self.node_span(id),
                 )
             }
-            AstNode::CallExpr { callee, args, span: _ } => {
-                let lowered_args = args.iter().map(|arg| self.lower_expr(*arg)).collect::<Vec<_>>();
+            AstNode::CallExpr {
+                callee,
+                args,
+                span: _,
+            } => {
+                let lowered_args = args
+                    .iter()
+                    .map(|arg| self.lower_expr(*arg))
+                    .collect::<Vec<_>>();
                 let callee_expr = self.lower_expr(*callee);
                 self.insert_hir_expr(
                     HirExpr::Call {
@@ -644,7 +686,10 @@ impl<'a> Lowering<'a> {
                 )
             }
             AstNode::TupleLiteral { items, .. } => {
-                let items = items.iter().map(|item| self.lower_expr(*item)).collect::<Vec<_>>();
+                let items = items
+                    .iter()
+                    .map(|item| self.lower_expr(*item))
+                    .collect::<Vec<_>>();
                 self.insert_hir_expr(HirExpr::Tuple(items), self.node_span(id))
             }
             AstNode::TupleAccess { tuple, index, .. } => {
@@ -662,7 +707,9 @@ impl<'a> Lowering<'a> {
                     .iter()
                     .map(|item| match item {
                         AstArrayItem::Expr(id) => HirArrayItem::Expr(self.lower_expr(*id)),
-                        AstArrayItem::SpreadExpr(id) => HirArrayItem::SpreadExpr(self.lower_expr(*id)),
+                        AstArrayItem::SpreadExpr(id) => {
+                            HirArrayItem::SpreadExpr(self.lower_expr(*id))
+                        }
                     })
                     .collect::<Vec<_>>();
                 self.insert_hir_expr(HirExpr::Array(items), self.node_span(id))
@@ -675,7 +722,10 @@ impl<'a> Lowering<'a> {
                 self.insert_hir_expr(HirExpr::Map(entries), self.node_span(id))
             }
             AstNode::SetLiteral { items, .. } => {
-                let items = items.iter().map(|item| self.lower_expr(*item)).collect::<Vec<_>>();
+                let items = items
+                    .iter()
+                    .map(|item| self.lower_expr(*item))
+                    .collect::<Vec<_>>();
                 self.insert_hir_expr(HirExpr::Set(items), self.node_span(id))
             }
             AstNode::ArrayAccessExpr { base, index, .. } => {
@@ -716,7 +766,8 @@ impl<'a> Lowering<'a> {
                 let catch_scope = self.symbols.create_scope(Some(parent_scope));
                 self.current_scope = catch_scope;
                 let err_symbol = self.bind_symbol(*err_name, err_ty, false);
-                let (catch_stmts, catch_value) = self.lower_catch_block_with_value(*catch_block, *span);
+                let (catch_stmts, catch_value) =
+                    self.lower_catch_block_with_value(*catch_block, *span);
                 self.current_scope = parent_scope;
                 self.insert_hir_expr(
                     HirExpr::TryCatch {
@@ -757,13 +808,17 @@ impl<'a> Lowering<'a> {
             | AstNode::ReturnStmt { .. }
             | AstNode::ExprStmt { .. }
             | AstNode::BlockStmt { .. } => {
-                self.push_error("statement used where expression expected", self.node_span(id));
+                self.push_error(
+                    "statement used where expression expected",
+                    self.node_span(id),
+                );
                 self.insert_hir_expr(HirExpr::Invalid, self.node_span(id))
             }
             AstNode::Invalid { .. } => self.insert_hir_expr(HirExpr::Invalid, self.node_span(id)),
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lower_fn_decl(
         &mut self,
         name_id: ArenaId,
@@ -896,7 +951,11 @@ impl<'a> Lowering<'a> {
         }
     }
 
-    fn lower_catch_block_with_value(&mut self, block_id: ArenaId, span: Span) -> (Vec<HirStmt>, ArenaId) {
+    fn lower_catch_block_with_value(
+        &mut self,
+        block_id: ArenaId,
+        span: Span,
+    ) -> (Vec<HirStmt>, ArenaId) {
         let Some(AstNode::BlockStmt { statements, .. }) = self.ast.get(block_id) else {
             self.push_error("catch requires a block", self.node_span(block_id));
             return (Vec::new(), self.insert_hir_expr(HirExpr::Invalid, span));
@@ -906,7 +965,10 @@ impl<'a> Lowering<'a> {
         for (idx, stmt_id) in statements.iter().enumerate() {
             let is_last = idx + 1 == statements.len();
             match self.ast.get(*stmt_id) {
-                Some(AstNode::ReturnStmt { values, span: ret_span }) if is_last => {
+                Some(AstNode::ReturnStmt {
+                    values,
+                    span: ret_span,
+                }) if is_last => {
                     if values.len() != 1 {
                         self.push_error("catch return must contain exactly one value", *ret_span);
                         value = Some(self.insert_hir_expr(HirExpr::Invalid, *ret_span));
@@ -915,7 +977,10 @@ impl<'a> Lowering<'a> {
                     }
                 }
                 Some(AstNode::ReturnStmt { span: ret_span, .. }) => {
-                    self.push_error("catch return must be the last statement in catch block", *ret_span);
+                    self.push_error(
+                        "catch return must be the last statement in catch block",
+                        *ret_span,
+                    );
                     lowered.push(HirStmt::Invalid { span: *ret_span });
                 }
                 _ => lowered.push(self.lower_stmt(*stmt_id)),
@@ -1044,18 +1109,54 @@ fn map_type_name(name: &str) -> Option<Type> {
         return Some(fn_ty);
     }
     match name {
-        "i1" => Some(Type::Int { signed: true, bits: 1 }),
-        "i8" => Some(Type::Int { signed: true, bits: 8 }),
-        "i16" => Some(Type::Int { signed: true, bits: 16 }),
-        "i32" => Some(Type::Int { signed: true, bits: 32 }),
-        "i64" => Some(Type::Int { signed: true, bits: 64 }),
-        "i128" => Some(Type::Int { signed: true, bits: 128 }),
-        "u1" => Some(Type::Int { signed: false, bits: 1 }),
-        "u8" => Some(Type::Int { signed: false, bits: 8 }),
-        "u16" => Some(Type::Int { signed: false, bits: 16 }),
-        "u32" => Some(Type::Int { signed: false, bits: 32 }),
-        "u64" => Some(Type::Int { signed: false, bits: 64 }),
-        "u128" => Some(Type::Int { signed: false, bits: 128 }),
+        "i1" => Some(Type::Int {
+            signed: true,
+            bits: 1,
+        }),
+        "i8" => Some(Type::Int {
+            signed: true,
+            bits: 8,
+        }),
+        "i16" => Some(Type::Int {
+            signed: true,
+            bits: 16,
+        }),
+        "i32" => Some(Type::Int {
+            signed: true,
+            bits: 32,
+        }),
+        "i64" => Some(Type::Int {
+            signed: true,
+            bits: 64,
+        }),
+        "i128" => Some(Type::Int {
+            signed: true,
+            bits: 128,
+        }),
+        "u1" => Some(Type::Int {
+            signed: false,
+            bits: 1,
+        }),
+        "u8" => Some(Type::Int {
+            signed: false,
+            bits: 8,
+        }),
+        "u16" => Some(Type::Int {
+            signed: false,
+            bits: 16,
+        }),
+        "u32" => Some(Type::Int {
+            signed: false,
+            bits: 32,
+        }),
+        "u64" => Some(Type::Int {
+            signed: false,
+            bits: 64,
+        }),
+        "u128" => Some(Type::Int {
+            signed: false,
+            bits: 128,
+        }),
         "f32" => Some(Type::Float { bits: 32 }),
         "f64" => Some(Type::Float { bits: 64 }),
         "str" => Some(Type::Str),
@@ -1181,7 +1282,8 @@ mod tests {
     fn lowers_identifiers_to_symbols() {
         let src = "a := 1; b := a + 2";
         let lex_output = lex(FileId::from_u32(1), src);
-        let (ast, parser_diagnostics) = parse(FileId::from_u32(1), src.len() as u32, lex_output.tokens);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(1), src.len() as u32, lex_output.tokens);
         assert!(!parser_diagnostics.has_errors());
 
         let (hir, symbols, diagnostics) = lower(&ast);
@@ -1208,7 +1310,11 @@ mod tests {
             }
         }
         assert!(has_invalid);
-        assert!(diagnostics.iter().any(|d| d.message.contains("undefined symbol")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("undefined symbol"))
+        );
     }
 
     #[test]
@@ -1277,7 +1383,11 @@ mod tests {
         let (ast, _) = parse(FileId::from_u32(7), src.len() as u32, lex_output.tokens);
         let (_hir, _symbols, diagnostics) = lower(&ast);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("undefined symbol 'local'")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("undefined symbol 'local'"))
+        );
     }
 
     #[test]
@@ -1382,7 +1492,10 @@ mod tests {
         let Some(HirStmt::Let { value, .. }) = hir.stmts.get(1) else {
             panic!("expected second let");
         };
-        assert!(matches!(hir.exprs.get(*value), Some(HirExpr::IncDec { .. })));
+        assert!(matches!(
+            hir.exprs.get(*value),
+            Some(HirExpr::IncDec { .. })
+        ));
     }
 
     #[test]
@@ -1414,5 +1527,31 @@ mod tests {
             has_try_catch |= matches!(hir.exprs.get(id), Some(HirExpr::TryCatch { .. }));
         }
         assert!(has_propagate && has_try_catch);
+    }
+
+    #[test]
+    fn lowers_import_paths_without_string_quotes() {
+        let src = "import \"std/core\" as core\nfrom \"std/http\" import parse_request";
+        let lex_output = lex(FileId::from_u32(61), src);
+        let (ast, _) = parse(FileId::from_u32(61), src.len() as u32, lex_output.tokens);
+        let (hir, _symbols, diagnostics) = lower(&ast);
+        assert!(!diagnostics.has_errors());
+
+        let Some(HirStmt::Import {
+            path: import_path, ..
+        }) = hir.stmts.first()
+        else {
+            panic!("expected import stmt");
+        };
+        assert_eq!(import_path, "std/core");
+
+        let Some(HirStmt::FromImport {
+            path: from_import_path,
+            ..
+        }) = hir.stmts.get(1)
+        else {
+            panic!("expected from-import stmt");
+        };
+        assert_eq!(from_import_path, "std/http");
     }
 }

@@ -54,7 +54,9 @@ impl Diagnostics {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.items.iter().any(|d| matches!(d.severity, Severity::Error))
+        self.items
+            .iter()
+            .any(|d| matches!(d.severity, Severity::Error))
     }
 }
 

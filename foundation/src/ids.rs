@@ -21,9 +21,8 @@ impl ArenaId {
     }
 
     pub fn try_from_usize(value: usize) -> Result<Self, FoundationError> {
-        let value = u32::try_from(value).map_err(|_| FoundationError::IdExhausted {
-            kind: "ArenaId",
-        })?;
+        let value =
+            u32::try_from(value).map_err(|_| FoundationError::IdExhausted { kind: "ArenaId" })?;
         Ok(Self(value))
     }
 }
@@ -40,9 +39,8 @@ impl FileId {
     }
 
     pub fn try_from_usize(value: usize) -> Result<Self, FoundationError> {
-        let value = u32::try_from(value).map_err(|_| FoundationError::IdExhausted {
-            kind: "FileId",
-        })?;
+        let value =
+            u32::try_from(value).map_err(|_| FoundationError::IdExhausted { kind: "FileId" })?;
         Ok(Self(value))
     }
 }
@@ -59,9 +57,8 @@ impl CacheId {
     }
 
     pub fn try_from_usize(value: usize) -> Result<Self, FoundationError> {
-        let value = u32::try_from(value).map_err(|_| FoundationError::IdExhausted {
-            kind: "CacheId",
-        })?;
+        let value =
+            u32::try_from(value).map_err(|_| FoundationError::IdExhausted { kind: "CacheId" })?;
         Ok(Self(value))
     }
 }

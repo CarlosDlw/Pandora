@@ -1,10 +1,7 @@
 //! Pluggable frontend so `crate::pipeline::Pipeline` can run the Pandora compiler (`core`)
 //! without circular crate dependencies (`core` depends on `foundation`, not the reverse).
 
-use crate::{
-    diagnostics::Diagnostics,
-    ids::FileId,
-};
+use crate::{diagnostics::Diagnostics, ids::FileId};
 
 /// Compiles source for a [`FileId`]. Implemented in the `core` crate.
 pub trait PandoraFrontend {

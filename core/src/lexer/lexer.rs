@@ -362,7 +362,10 @@ impl<'a> Lexer<'a> {
                     if !self.lex_based_digits(is_hex_digit) {
                         had_error = true;
                     }
-                    if self.peek().is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                    if self
+                        .peek()
+                        .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    {
                         had_error = true;
                         self.consume_number_tail();
                     }
@@ -382,7 +385,10 @@ impl<'a> Lexer<'a> {
                     if !self.lex_based_digits(is_octal_digit) {
                         had_error = true;
                     }
-                    if self.peek().is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                    if self
+                        .peek()
+                        .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    {
                         had_error = true;
                         self.consume_number_tail();
                     }
@@ -402,7 +408,10 @@ impl<'a> Lexer<'a> {
                     if !self.lex_based_digits(is_binary_digit) {
                         had_error = true;
                     }
-                    if self.peek().is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                    if self
+                        .peek()
+                        .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    {
                         had_error = true;
                         self.consume_number_tail();
                     }
@@ -495,7 +504,10 @@ impl<'a> Lexer<'a> {
     }
 
     fn consume_number_tail(&mut self) {
-        while self.peek().is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        while self
+            .peek()
+            .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
             self.bump();
         }
     }
@@ -611,8 +623,7 @@ impl<'a> Lexer<'a> {
 fn is_known_type(text: &str) -> bool {
     matches!(
         text,
-        "i1"
-            | "i8"
+        "i1" | "i8"
             | "i16"
             | "i32"
             | "i64"
@@ -652,7 +663,7 @@ fn is_binary_digit(ch: char) -> bool {
 mod tests {
     use foundation::ids::FileId;
 
-    use super::{lex, TokenKind};
+    use super::{TokenKind, lex};
 
     #[test]
     fn lexes_tokens_used_by_example_file() {
@@ -664,7 +675,12 @@ print(name, age)
 "#;
         let output = lex(FileId::from_u32(1), src);
         assert!(output.diagnostics.is_empty());
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::DoubleColon));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::DoubleColon)
+        );
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::TypeName));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Float));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::String));
@@ -676,7 +692,12 @@ print(name, age)
         let output = lex(FileId::from_u32(6), "{ x := 1 }");
         assert!(!output.diagnostics.has_errors());
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::LeftBrace));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::RightBrace));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::RightBrace)
+        );
     }
 
     #[test]
@@ -703,7 +724,12 @@ print(name, age)
         let output = lex(FileId::from_u32(3), "x := .5");
         assert!(!output.diagnostics.has_errors());
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Dot));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "5"));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Integer && t.lexeme == "5")
+        );
     }
 
     #[test]
@@ -727,42 +753,95 @@ print(name, age)
             "a == b != c <= d >= e < f > g && h || i & j | k ^ l << m >> n !o ~p % q ** r",
         );
         assert!(!output.diagnostics.has_errors());
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::EqualEqual));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::EqualEqual)
+        );
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::BangEqual));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::LessEqual));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::GreaterEqual));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::GreaterEqual)
+        );
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::AndAnd));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::OrOr));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Ampersand));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Pipe));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Caret));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::ShiftLeft));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::ShiftRight));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::ShiftRight)
+        );
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Bang));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Tilde));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Percent));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::DoubleStar));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::DoubleStar)
+        );
     }
 
     #[test]
     fn lexes_based_and_scientific_literals() {
-        let output = lex(FileId::from_u32(8), "a := 0xFF; b := 0o755; c := 0b1010; d := 1_000_000; e := 6.02e23");
+        let output = lex(
+            FileId::from_u32(8),
+            "a := 0xFF; b := 0o755; c := 0b1010; d := 1_000_000; e := 6.02e23",
+        );
         assert!(!output.diagnostics.has_errors());
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "0xFF"));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "0o755"));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "0b1010"));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Integer && t.lexeme == "1_000_000"));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Float && t.lexeme == "6.02e23"));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Integer && t.lexeme == "0xFF")
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Integer && t.lexeme == "0o755")
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Integer && t.lexeme == "0b1010")
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Integer && t.lexeme == "1_000_000")
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Float && t.lexeme == "6.02e23")
+        );
     }
 
     #[test]
     fn invalid_based_and_scientific_literals_report_errors() {
-        let output = lex(FileId::from_u32(9), "a := 0x; b := 0b102; c := 1__0; d := 1e+");
+        let output = lex(
+            FileId::from_u32(9),
+            "a := 0x; b := 0b102; c := 1__0; d := 1e+",
+        );
         assert!(output.diagnostics.has_errors());
-        assert!(output
-            .diagnostics
-            .iter()
-            .all(|d| d.message.contains("invalid numeric literal")));
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .all(|d| d.message.contains("invalid numeric literal"))
+        );
     }
 
     #[test]
@@ -777,10 +856,12 @@ print(name, age)
     fn keeps_partial_keyword_as_identifier() {
         let output = lex(FileId::from_u32(11), "gift := 1");
         assert!(!output.diagnostics.has_errors());
-        assert!(output
-            .tokens
-            .iter()
-            .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "gift"));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "gift")
+        );
     }
 
     #[test]
@@ -798,7 +879,12 @@ print(name, age)
         assert!(!output.diagnostics.has_errors());
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::For));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusPlus));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusMinus));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::MinusMinus)
+        );
     }
 
     #[test]
@@ -806,9 +892,24 @@ print(name, age)
         let output = lex(FileId::from_u32(18), "x++ + ++x; y-- - --y; z += 1; w -= 1");
         assert!(!output.diagnostics.has_errors());
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusPlus));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusMinus));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusAssign));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::MinusMinus)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::PlusAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::MinusAssign)
+        );
     }
 
     #[test]
@@ -825,8 +926,18 @@ print(name, age)
         let output = lex(FileId::from_u32(20), "t.0; t[1]");
         assert!(!output.diagnostics.has_errors());
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Dot));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::LeftBracket));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::RightBracket));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::LeftBracket)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::RightBracket)
+        );
     }
 
     #[test]
@@ -838,7 +949,10 @@ print(name, age)
 
     #[test]
     fn lexes_struct_impl_trait_self_keywords() {
-        let output = lex(FileId::from_u32(56), "struct Point {} trait Show {} impl Point { fn p(self) -> i32 { return 1 } }");
+        let output = lex(
+            FileId::from_u32(56),
+            "struct Point {} trait Show {} impl Point { fn p(self) -> i32 { return 1 } }",
+        );
         assert!(!output.diagnostics.has_errors());
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Struct));
         assert!(output.tokens.iter().any(|t| t.kind == TokenKind::Trait));
@@ -848,20 +962,29 @@ print(name, age)
 
     #[test]
     fn keeps_loop_keyword_prefixes_as_identifiers() {
-        let output = lex(FileId::from_u32(13), "breakfast := 1; continued := 2; meanwhile := 3");
+        let output = lex(
+            FileId::from_u32(13),
+            "breakfast := 1; continued := 2; meanwhile := 3",
+        );
         assert!(!output.diagnostics.has_errors());
-        assert!(output
-            .tokens
-            .iter()
-            .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "breakfast"));
-        assert!(output
-            .tokens
-            .iter()
-            .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "continued"));
-        assert!(output
-            .tokens
-            .iter()
-            .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "meanwhile"));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "breakfast")
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "continued")
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::Identifier && t.lexeme == "meanwhile")
+        );
     }
 
     #[test]
@@ -871,23 +994,83 @@ print(name, age)
             "a += 1; b -= 1; c *= 1; d /= 1; e %= 1; f **= 2; g &= 1; h |= 1; i ^= 1; j <<= 1; k >>= 1",
         );
         assert!(!output.diagnostics.has_errors());
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PlusAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::MinusAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::StarAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::SlashAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PercentAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::DoubleStarAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::AmpersandAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::PipeAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::CaretAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::ShiftLeftAssign));
-        assert!(output.tokens.iter().any(|t| t.kind == TokenKind::ShiftRightAssign));
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::PlusAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::MinusAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::StarAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::SlashAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::PercentAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::DoubleStarAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::AmpersandAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::PipeAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::CaretAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::ShiftLeftAssign)
+        );
+        assert!(
+            output
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::ShiftRightAssign)
+        );
     }
 
     #[test]
     fn distinguishes_compound_from_simple() {
         let compound = lex(FileId::from_u32(15), "x += 1");
-        assert!(compound.tokens.iter().any(|t| t.kind == TokenKind::PlusAssign));
+        assert!(
+            compound
+                .tokens
+                .iter()
+                .any(|t| t.kind == TokenKind::PlusAssign)
+        );
 
         let split = lex(FileId::from_u32(16), "x + = 1");
         assert!(split.tokens.iter().any(|t| t.kind == TokenKind::Plus));

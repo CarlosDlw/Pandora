@@ -22,17 +22,13 @@ pub fn literal_f64(raw: &str) -> Result<f64, &'static str> {
 pub fn bytecode_int_from_checked_literal(raw: &str, ty: &Type) -> Result<IntConst, &'static str> {
     let parsed = literal_u128(raw)?;
     match ty {
-        Type::Int {
-            signed: true, ..
-        } => {
+        Type::Int { signed: true, .. } => {
             if parsed > i128::MAX as u128 {
                 return Err("literal out of signed range");
             }
             Ok(IntConst::Signed(parsed as i128))
         }
-        Type::Int {
-            signed: false, ..
-        } => Ok(IntConst::Unsigned(parsed)),
+        Type::Int { signed: false, .. } => Ok(IntConst::Unsigned(parsed)),
         _ => Err("integer literal has non-int type"),
     }
 }
@@ -44,15 +40,16 @@ pub enum IntConst {
 }
 
 fn normalize_integer_literal(raw: &str) -> Result<(String, u32), &'static str> {
-    let (digits_raw, radix) = if let Some(rest) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
-        (rest, 16)
-    } else if let Some(rest) = raw.strip_prefix("0o").or_else(|| raw.strip_prefix("0O")) {
-        (rest, 8)
-    } else if let Some(rest) = raw.strip_prefix("0b").or_else(|| raw.strip_prefix("0B")) {
-        (rest, 2)
-    } else {
-        (raw, 10)
-    };
+    let (digits_raw, radix) =
+        if let Some(rest) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
+            (rest, 16)
+        } else if let Some(rest) = raw.strip_prefix("0o").or_else(|| raw.strip_prefix("0O")) {
+            (rest, 8)
+        } else if let Some(rest) = raw.strip_prefix("0b").or_else(|| raw.strip_prefix("0B")) {
+            (rest, 2)
+        } else {
+            (raw, 10)
+        };
 
     let mut normalized = String::with_capacity(digits_raw.len());
     let mut saw_digit = false;

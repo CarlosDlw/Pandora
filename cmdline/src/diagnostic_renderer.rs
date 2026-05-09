@@ -11,7 +11,11 @@ pub fn render(path: &str, source: &str, diagnostic: &Diagnostic) -> String {
     if let Some(loc) = locate(source, start, end) {
         out.push_str(&format!(
             "  --> {}:{}:{} [{}..{}]\n",
-            path, loc.line, loc.column, diagnostic.span.start(), diagnostic.span.end()
+            path,
+            loc.line,
+            loc.column,
+            diagnostic.span.start(),
+            diagnostic.span.end()
         ));
         out.push_str("   |\n");
         out.push_str(&format!("{:>3} | {}\n", loc.line, loc.line_text));
@@ -106,9 +110,13 @@ fn suggest_fix(message: &str) -> Option<&'static str> {
     } else if message.contains("unexpected 'else' without matching 'if'") {
         Some("remove this `else` or add the corresponding `if` before it.")
     } else if message.contains("if condition is not truthy/falsy-compatible") {
-        Some("use a truthy/falsy-compatible value in the condition, such as bool, number, string, or char.")
+        Some(
+            "use a truthy/falsy-compatible value in the condition, such as bool, number, string, or char.",
+        )
     } else if message.contains("while condition is not truthy/falsy-compatible") {
-        Some("use a truthy/falsy-compatible value in the while condition, such as bool, number, string, or char.")
+        Some(
+            "use a truthy/falsy-compatible value in the while condition, such as bool, number, string, or char.",
+        )
     } else if message.contains("break used outside of loop") {
         Some("use `break` only inside a loop body.")
     } else if message.contains("continue used outside of loop") {
@@ -116,24 +124,35 @@ fn suggest_fix(message: &str) -> Option<&'static str> {
     } else if message.contains("expected '}'") {
         Some("close the block with '}' to end its local scope.")
     } else if message.contains("undefined symbol") {
-        Some("declare the variable before use with ':=' or ': type = value'; symbols from a block are not visible outside it.")
+        Some(
+            "declare the variable before use with ':=' or ': type = value'; symbols from a block are not visible outside it.",
+        )
     } else if message.contains("cannot assign to constant") {
         Some("use ':' instead of '::' for mutable bindings, or assign to a new name.")
-    } else if message.contains("invalid argument type") || message.contains("cannot assign value of type") {
-        Some("adjust the declared type to match the value, or convert the value to the expected type.")
+    } else if message.contains("invalid argument type")
+        || message.contains("cannot assign value of type")
+    {
+        Some(
+            "adjust the declared type to match the value, or convert the value to the expected type.",
+        )
     } else if message.contains("unterminated string") {
         Some("close the string with a double quote and escape quotes/newlines when needed.")
     } else if message.contains("invalid char literal") {
         Some("use exactly one character in single quotes, for example 'a' or '\\n'.")
     } else if message.contains("division by zero") {
         Some("ensure the divisor is never zero before this operation.")
-    } else if message.contains("invalid numeric literal") || message.contains("invalid integer literal") {
-        Some("check base prefixes (0b/0o/0x), place '_' only between digits, and use valid exponent form like 1.2e-3.")
+    } else if message.contains("invalid numeric literal")
+        || message.contains("invalid integer literal")
+    {
+        Some(
+            "check base prefixes (0b/0o/0x), place '_' only between digits, and use valid exponent form like 1.2e-3.",
+        )
     } else if message.contains("operator '?' expects expression of type (T, err)") {
         Some("apply '?' only to expressions that return a tuple like (value, err).")
     } else if message.contains("operator '?' expects tuple error position to be err") {
         Some("ensure the second tuple item is `err`, for example: (T, err).")
-    } else if message.contains("operator '?' requires current function return type to be (T, err)") {
+    } else if message.contains("operator '?' requires current function return type to be (T, err)")
+    {
         Some("change the function return type to `(T, err)` when using '?'.")
     } else if message.contains("try expression expects value of type (T, err)") {
         Some("use `try` only with expressions that return `(value, err)`.")
@@ -142,7 +161,9 @@ fn suggest_fix(message: &str) -> Option<&'static str> {
     } else if message.contains("catch binding type must be err-like") {
         Some("declare catch binding as `catch(e: err)` or an error-like type with message/code.")
     } else if message.contains("catch block must end with `return <value>`") {
-        Some("finish catch blocks with `return value` so try/catch can produce an expression value.")
+        Some(
+            "finish catch blocks with `return value` so try/catch can produce an expression value.",
+        )
     } else if message.contains("catch expression type mismatch") {
         Some("return a value in catch with the same type as the success branch.")
     } else if message.contains("return type mismatch") {
@@ -182,7 +203,11 @@ mod tests {
     fn multi_line_span_marks_start_only() {
         let source = "a := (\n1 + 2\n";
         let span = Span::new_unchecked(FileId::from_u32(0), 5, 11);
-        let d = Diagnostic::new("expected ')'", span, foundation::diagnostics::Severity::Error);
+        let d = Diagnostic::new(
+            "expected ')'",
+            span,
+            foundation::diagnostics::Severity::Error,
+        );
         let text = render("main.pand", source, &d);
         assert!(text.contains("  1 | a := ("));
         assert!(text.contains("   = help:"));
@@ -201,7 +226,11 @@ mod tests {
     fn help_is_optional() {
         let source = "x := 1";
         let span = Span::new_unchecked(FileId::from_u32(0), 0, 1);
-        let d = Diagnostic::new("custom unknown message", span, foundation::diagnostics::Severity::Error);
+        let d = Diagnostic::new(
+            "custom unknown message",
+            span,
+            foundation::diagnostics::Severity::Error,
+        );
         let text = render("main.pand", source, &d);
         assert!(!text.contains("= help:"));
     }
@@ -210,7 +239,11 @@ mod tests {
     fn suggests_fix_for_missing_right_brace() {
         let source = "{ x := 1";
         let span = Span::new_unchecked(FileId::from_u32(0), 0, source.len() as u32);
-        let d = Diagnostic::new("expected '}'", span, foundation::diagnostics::Severity::Error);
+        let d = Diagnostic::new(
+            "expected '}'",
+            span,
+            foundation::diagnostics::Severity::Error,
+        );
         let text = render("main.pand", source, &d);
         assert!(text.contains("close the block with '}'"));
     }

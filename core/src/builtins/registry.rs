@@ -57,10 +57,9 @@ impl BuiltinRegistry {
     }
 
     pub fn method_for_type(&self, receiver_ty: &Type, method: &str) -> Option<&BuiltinMethod> {
-        self.methods.iter().find(|m| {
-            m.name == method
-                && match_receiver(receiver_ty, m.receiver)
-        })
+        self.methods
+            .iter()
+            .find(|m| m.name == method && match_receiver(receiver_ty, m.receiver))
     }
 }
 

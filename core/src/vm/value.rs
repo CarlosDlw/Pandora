@@ -53,11 +53,17 @@ impl Value {
             Value::Builtin(_) => "<builtin fn>".to_string(),
             Value::Function { .. } => "<fn>".to_string(),
             Value::Tuple(items) => {
-                let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
+                let rendered = items
+                    .iter()
+                    .map(Value::display_for_print)
+                    .collect::<Vec<_>>();
                 format!("({})", rendered.join(", "))
             }
             Value::Array(items) => {
-                let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
+                let rendered = items
+                    .iter()
+                    .map(Value::display_for_print)
+                    .collect::<Vec<_>>();
                 format!("[{}]", rendered.join(", "))
             }
             Value::Map(entries) => {
@@ -68,7 +74,10 @@ impl Value {
                 format!("{{{}}}", rendered.join(", "))
             }
             Value::Set(items) => {
-                let rendered = items.iter().map(Value::display_for_print).collect::<Vec<_>>();
+                let rendered = items
+                    .iter()
+                    .map(Value::display_for_print)
+                    .collect::<Vec<_>>();
                 format!("set{{{}}}", rendered.join(", "))
             }
             Value::Err {

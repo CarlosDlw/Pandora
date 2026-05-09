@@ -1,8 +1,11 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::OnceLock,
+};
 
 use crate::{
     analyzer::Type as AnalyzerType,
-    builtins::{default_registry, BuiltinRegistry},
+    builtins::{BuiltinRegistry, default_registry},
     hir::{BinOp, Hir, HirExpr, HirId, HirStmt, ScopeId, SymbolId, SymbolTable, UnaryOp},
     integer_lit::{literal_f64, literal_u128},
 };
@@ -44,6 +47,10 @@ pub fn analyze_with_registry(
     (checker.model, checker.diagnostics)
 }
 
+type TraitMethodSignature = (String, Vec<AnalyzerType>, AnalyzerType, bool);
+type ImplMethodKey = (SymbolId, Option<SymbolId>, String, bool);
+type ImplMethodSignature = (Vec<AnalyzerType>, AnalyzerType);
+
 struct Checker<'a> {
     hir: &'a Hir,
     symbols: &'a mut SymbolTable,
@@ -53,11 +60,47 @@ struct Checker<'a> {
     fn_return_stack: Vec<AnalyzerType>,
     self_type_stack: Vec<AnalyzerType>,
     struct_fields: HashMap<SymbolId, Vec<(String, AnalyzerType)>>,
-    trait_methods: HashMap<SymbolId, Vec<(String, Vec<AnalyzerType>, AnalyzerType, bool)>>,
-    impl_methods: HashMap<(SymbolId, Option<SymbolId>, String, bool), (Vec<AnalyzerType>, AnalyzerType)>,
+    trait_methods: HashMap<SymbolId, Vec<TraitMethodSignature>>,
+    impl_methods: HashMap<ImplMethodKey, ImplMethodSignature>,
     fn_required_params: HashMap<SymbolId, usize>,
     builtins: &'a BuiltinRegistry,
 }
+
+const STDLIB_MODULE_SOURCES: &[(&str, &str)] = &[
+    ("std/cli", include_str!("../../../stdlib/std/cli.pand")),
+    ("std/core", include_str!("../../../stdlib/std/core.pand")),
+    (
+        "std/crypto",
+        include_str!("../../../stdlib/std/crypto.pand"),
+    ),
+    ("std/csv", include_str!("../../../stdlib/std/csv.pand")),
+    (
+        "std/encoding",
+        include_str!("../../../stdlib/std/encoding.pand"),
+    ),
+    ("std/env", include_str!("../../../stdlib/std/env.pand")),
+    ("std/fs", include_str!("../../../stdlib/std/fs.pand")),
+    ("std/http", include_str!("../../../stdlib/std/http.pand")),
+    ("std/io", include_str!("../../../stdlib/std/io.pand")),
+    ("std/json", include_str!("../../../stdlib/std/json.pand")),
+    ("std/log", include_str!("../../../stdlib/std/log.pand")),
+    ("std/math", include_str!("../../../stdlib/std/math.pand")),
+    ("std/mime", include_str!("../../../stdlib/std/mime.pand")),
+    ("std/net", include_str!("../../../stdlib/std/net.pand")),
+    ("std/os", include_str!("../../../stdlib/std/os.pand")),
+    ("std/path", include_str!("../../../stdlib/std/path.pand")),
+    ("std/proc", include_str!("../../../stdlib/std/proc.pand")),
+    ("std/rand", include_str!("../../../stdlib/std/rand.pand")),
+    ("std/regex", include_str!("../../../stdlib/std/regex.pand")),
+    ("std/sync", include_str!("../../../stdlib/std/sync.pand")),
+    (
+        "std/thread",
+        include_str!("../../../stdlib/std/thread.pand"),
+    ),
+    ("std/time", include_str!("../../../stdlib/std/time.pand")),
+    ("std/url", include_str!("../../../stdlib/std/url.pand")),
+    ("std/xml", include_str!("../../../stdlib/std/xml.pand")),
+];
 
 impl<'a> Checker<'a> {
     fn check_program(&mut self) {
@@ -86,7 +129,8 @@ impl<'a> Checker<'a> {
                             ..
                         } = method
                         {
-                            let required_count = param_defaults.iter().filter(|d| d.is_none()).count();
+                            let required_count =
+                                param_defaults.iter().filter(|d| d.is_none()).count();
                             self.fn_required_params.insert(*symbol, required_count);
                         }
                     }
@@ -145,7 +189,8 @@ impl<'a> Checker<'a> {
                             .symbol(params[idx])
                             .map(|s| s.ty.clone())
                             .unwrap_or(AnalyzerType::Unknown);
-                        let actual = self.check_expr_expected(*default_expr, *span, Some(&expected));
+                        let actual =
+                            self.check_expr_expected(*default_expr, *span, Some(&expected));
                         if !is_assignable(&expected, &actual) {
                             self.push_error(
                                 format!(
@@ -162,7 +207,10 @@ impl<'a> Checker<'a> {
                 }
                 let _ = self.fn_return_stack.pop();
                 if *return_ty != AnalyzerType::Unit && !all_paths_return(body) {
-                    self.push_error("function with non-unit return must return on all paths", *span);
+                    self.push_error(
+                        "function with non-unit return must return on all paths",
+                        *span,
+                    );
                 }
                 AnalyzerType::Function {
                     params: params
@@ -181,7 +229,9 @@ impl<'a> Checker<'a> {
                 self.struct_fields.insert(*symbol, fields.clone());
                 AnalyzerType::Struct(*symbol)
             }
-            HirStmt::TraitDecl { symbol, methods, .. } => {
+            HirStmt::TraitDecl {
+                symbol, methods, ..
+            } => {
                 self.trait_methods.insert(*symbol, methods.clone());
                 AnalyzerType::Trait(*symbol)
             }
@@ -196,10 +246,10 @@ impl<'a> Checker<'a> {
                 for method_stmt in methods {
                     if let HirStmt::FnDecl { params, .. } = method_stmt {
                         for param in params {
-                            if let Some(sym) = self.symbols.symbol_mut(*param) {
-                                if matches!(sym.ty, AnalyzerType::SelfType) {
-                                    sym.ty = resolved_target.clone();
-                                }
+                            if let Some(sym) = self.symbols.symbol_mut(*param)
+                                && matches!(sym.ty, AnalyzerType::SelfType)
+                            {
+                                sym.ty = resolved_target.clone();
                             }
                         }
                     }
@@ -213,13 +263,17 @@ impl<'a> Checker<'a> {
                     {
                         let (name, param_tys) = {
                             let sym = self.symbols.symbol(*symbol);
-                            let name = sym.map(|s| s.name.clone()).unwrap_or_else(|| "<invalid>".to_string());
+                            let name = sym
+                                .map(|s| s.name.clone())
+                                .unwrap_or_else(|| "<invalid>".to_string());
                             let ptys = params
                                 .iter()
                                 .map(|id| {
                                     self.symbols
                                         .symbol(*id)
-                                        .map(|s| resolve_self_type(s.ty.clone(), resolved_target.clone()))
+                                        .map(|s| {
+                                            resolve_self_type(s.ty.clone(), resolved_target.clone())
+                                        })
                                         .unwrap_or(AnalyzerType::Unknown)
                                 })
                                 .collect::<Vec<_>>();
@@ -253,35 +307,40 @@ impl<'a> Checker<'a> {
 
                 if let (AnalyzerType::Struct(sid), Some(AnalyzerType::Trait(tid))) =
                     (resolved_target.clone(), trait_target.clone())
+                    && let Some(required_methods) = self.trait_methods.get(&tid).cloned()
                 {
-                    if let Some(required_methods) = self.trait_methods.get(&tid).cloned() {
-                        for (name, params, ret, is_instance) in required_methods {
-                            let Some((impl_params, impl_ret)) =
-                                self.impl_methods.get(&(sid, Some(tid), name.clone(), is_instance))
-                            else {
-                                self.push_error(
-                                    format!("trait impl missing required method '{name}'"),
-                                    *span,
-                                );
-                                continue;
-                            };
-                            let expected_params = params
-                                .into_iter()
-                                .map(|t| resolve_self_type(t, AnalyzerType::Struct(sid)))
-                                .collect::<Vec<_>>();
-                            let expected_ret = resolve_self_type(ret, AnalyzerType::Struct(sid));
-                            if *impl_params != expected_params || *impl_ret != expected_ret {
-                                self.push_error(
-                                    format!("trait method '{name}' signature mismatch"),
-                                    *span,
-                                );
-                            }
+                    for (name, params, ret, is_instance) in required_methods {
+                        let Some((impl_params, impl_ret)) =
+                            self.impl_methods
+                                .get(&(sid, Some(tid), name.clone(), is_instance))
+                        else {
+                            self.push_error(
+                                format!("trait impl missing required method '{name}'"),
+                                *span,
+                            );
+                            continue;
+                        };
+                        let expected_params = params
+                            .into_iter()
+                            .map(|t| resolve_self_type(t, AnalyzerType::Struct(sid)))
+                            .collect::<Vec<_>>();
+                        let expected_ret = resolve_self_type(ret, AnalyzerType::Struct(sid));
+                        if *impl_params != expected_params || *impl_ret != expected_ret {
+                            self.push_error(
+                                format!("trait method '{name}' signature mismatch"),
+                                *span,
+                            );
                         }
                     }
                 }
                 AnalyzerType::Unknown
             }
-            HirStmt::TupleDestructure { names, ty, value, span } => {
+            HirStmt::TupleDestructure {
+                names,
+                ty,
+                value,
+                span,
+            } => {
                 let value_ty = self.check_expr(*value, *span);
                 let tuple_items = match value_ty {
                     AnalyzerType::Tuple(items) => items,
@@ -304,13 +363,16 @@ impl<'a> Checker<'a> {
                         *span,
                     );
                 }
-                if let Some(annotated) = ty {
-                    if !is_assignable(annotated, &AnalyzerType::Tuple(tuple_items.clone())) {
-                        self.push_error("tuple destructuring type annotation mismatch", *span);
-                    }
+                if let Some(annotated) = ty
+                    && !is_assignable(annotated, &AnalyzerType::Tuple(tuple_items.clone()))
+                {
+                    self.push_error("tuple destructuring type annotation mismatch", *span);
                 }
                 for (idx, symbol_id) in names.iter().enumerate() {
-                    let item_ty = tuple_items.get(idx).cloned().unwrap_or(AnalyzerType::Unknown);
+                    let item_ty = tuple_items
+                        .get(idx)
+                        .cloned()
+                        .unwrap_or(AnalyzerType::Unknown);
                     if let Some(sym) = self.symbols.symbol_mut(*symbol_id) {
                         sym.ty = item_ty;
                     }
@@ -375,7 +437,9 @@ impl<'a> Checker<'a> {
                 let actual = self.check_expr_expected(*value, *span, Some(&elem_ty));
                 if !is_assignable(&elem_ty, &actual) {
                     self.push_error(
-                        format!("cannot assign value of type {actual:?} to array element {elem_ty:?}"),
+                        format!(
+                            "cannot assign value of type {actual:?} to array element {elem_ty:?}"
+                        ),
                         *span,
                     );
                 }
@@ -480,17 +544,19 @@ impl<'a> Checker<'a> {
                 };
                 if let Some(sym) = self.symbols.symbol(*symbol) {
                     let declared = sym.ty.clone();
-                    if !matches!(declared, AnalyzerType::Unknown) && !is_assignable(&declared, &item_ty) {
+                    if !matches!(declared, AnalyzerType::Unknown)
+                        && !is_assignable(&declared, &item_ty)
+                    {
                         self.push_error(
                             format!("for-in binding type mismatch: expected {declared:?}, got {item_ty:?}"),
                             *span,
                         );
                     }
                 }
-                if let Some(sym) = self.symbols.symbol_mut(*symbol) {
-                    if matches!(sym.ty, AnalyzerType::Unknown) {
-                        sym.ty = item_ty.clone();
-                    }
+                if let Some(sym) = self.symbols.symbol_mut(*symbol)
+                    && matches!(sym.ty, AnalyzerType::Unknown)
+                {
+                    sym.ty = item_ty.clone();
                 }
                 for stmt in body {
                     let _ = self.check_stmt(stmt);
@@ -545,8 +611,10 @@ impl<'a> Checker<'a> {
                         );
                     }
                     for (idx, expr) in values.iter().enumerate() {
-                        let expected_item = items.get(idx).cloned().unwrap_or(AnalyzerType::Unknown);
-                        let actual_item = self.check_expr_expected(*expr, *span, Some(&expected_item));
+                        let expected_item =
+                            items.get(idx).cloned().unwrap_or(AnalyzerType::Unknown);
+                        let actual_item =
+                            self.check_expr_expected(*expr, *span, Some(&expected_item));
                         if !is_assignable(&expected_item, &actual_item) {
                             self.push_error(
                                 format!(
@@ -575,13 +643,54 @@ impl<'a> Checker<'a> {
                 let actual = self.check_expr(expr, *span);
                 if !is_assignable(&expected_return, &actual) {
                     self.push_error(
-                        format!("return type mismatch: expected {expected_return:?}, got {actual:?}"),
+                        format!(
+                            "return type mismatch: expected {expected_return:?}, got {actual:?}"
+                        ),
                         *span,
                     );
                 }
                 expected_return
             }
-            HirStmt::Import { .. } | HirStmt::FromImport { .. } => AnalyzerType::Unknown,
+            HirStmt::Import { path, span, .. } => {
+                let module_path = normalize_stdlib_path(path);
+                if stdlib_module_exports(&module_path).is_none() {
+                    self.push_error(format!("unknown stdlib module '{module_path}'"), *span);
+                }
+                AnalyzerType::Unknown
+            }
+            HirStmt::FromImport { path, names, span } => {
+                let module_path = normalize_stdlib_path(path);
+                let Some(exports) = stdlib_module_exports(&module_path) else {
+                    self.push_error(format!("unknown stdlib module '{module_path}'"), *span);
+                    return AnalyzerType::Unknown;
+                };
+
+                for symbol_id in names {
+                    let Some(symbol) = self.symbols.symbol(*symbol_id) else {
+                        continue;
+                    };
+                    let name = symbol.name.clone();
+
+                    if !exports.contains(&name) {
+                        self.push_error(
+                            format!("symbol '{name}' is not exported by module '{module_path}'"),
+                            *span,
+                        );
+                        continue;
+                    }
+
+                    if self.find_builtin_symbol_by_name(&name).is_none() {
+                        self.push_error(
+                            format!(
+                                "public stdlib symbol '{name}' from module '{module_path}' is not available in the runtime registry"
+                            ),
+                            *span,
+                        );
+                    }
+                }
+
+                AnalyzerType::Unknown
+            }
             HirStmt::Invalid { span } => {
                 self.push_error("invalid statement", *span);
                 AnalyzerType::Unknown
@@ -631,7 +740,10 @@ impl<'a> Checker<'a> {
                         .find(|(fname, _)| fname == name)
                         .map(|(_, t)| t.clone());
                     let Some(expected_ty) = expected else {
-                        self.push_error(format!("unknown field '{name}' for struct '{type_name}'"), span);
+                        self.push_error(
+                            format!("unknown field '{name}' for struct '{type_name}'"),
+                            span,
+                        );
                         continue;
                     };
                     let actual = self.check_expr_expected(*expr, span, Some(&expected_ty));
@@ -695,11 +807,16 @@ impl<'a> Checker<'a> {
             }) => {
                 let recv_ty = self.check_expr(*receiver, span);
                 if let Some(builtin_method) = self.builtins.method_for_type(&recv_ty, method) {
-                    if let Some(symbol_id) = self.find_builtin_symbol_by_name(builtin_method.symbol_name) {
+                    if let Some(symbol_id) =
+                        self.find_builtin_symbol_by_name(builtin_method.symbol_name)
+                    {
                         self.model.method_builtin_targets.insert(id, symbol_id);
                     } else {
                         self.push_error(
-                            format!("internal error: builtin method symbol '{}' not registered", builtin_method.symbol_name),
+                            format!(
+                                "internal error: builtin method symbol '{}' not registered",
+                                builtin_method.symbol_name
+                            ),
                             span,
                         );
                     }
@@ -762,9 +879,9 @@ impl<'a> Checker<'a> {
                                             Box::new(*value.clone()),
                                         )
                                     }
-                                    ("get_or", 1)
-                                    | ("get_or_insert", 1)
-                                    | ("insert", 1) => *value.clone(),
+                                    ("get_or", 1) | ("get_or_insert", 1) | ("insert", 1) => {
+                                        *value.clone()
+                                    }
                                     ("update", 1) => AnalyzerType::Function {
                                         params: vec![*value.clone()],
                                         ret: Box::new(*value.clone()),
@@ -809,15 +926,22 @@ impl<'a> Checker<'a> {
                             (AnalyzerType::Map(_, v), "values") => {
                                 AnalyzerType::Array(Box::new(*v.clone()))
                             }
-                            (AnalyzerType::Map(k, v), "entries") => AnalyzerType::Array(Box::new(
-                                AnalyzerType::Tuple(vec![*k.clone(), *v.clone()]),
-                            )),
+                            (AnalyzerType::Map(k, v), "entries") => {
+                                AnalyzerType::Array(Box::new(AnalyzerType::Tuple(vec![
+                                    *k.clone(),
+                                    *v.clone(),
+                                ])))
+                            }
                             (AnalyzerType::Set(item), "values") => {
                                 AnalyzerType::Array(Box::new(*item.clone()))
                             }
                             _ => recv_ty.clone(),
                         },
-                        AnalyzerType::Tuple(items) if items.len() == 2 && items[0] == AnalyzerType::Any && items[1] == AnalyzerType::Err => {
+                        AnalyzerType::Tuple(items)
+                            if items.len() == 2
+                                && items[0] == AnalyzerType::Any
+                                && items[1] == AnalyzerType::Err =>
+                        {
                             let value_ty = match &recv_ty {
                                 AnalyzerType::Array(inner) => *inner.clone(),
                                 AnalyzerType::Set(inner) => *inner.clone(),
@@ -831,7 +955,10 @@ impl<'a> Checker<'a> {
                 }
                 let AnalyzerType::Struct(struct_id) = recv_ty.clone() else {
                     self.push_error(
-                        format!("unknown method '{}' for receiver type {:?}", method, recv_ty),
+                        format!(
+                            "unknown method '{}' for receiver type {:?}",
+                            method, recv_ty
+                        ),
                         span,
                     );
                     return AnalyzerType::Unknown;
@@ -861,7 +988,10 @@ impl<'a> Checker<'a> {
                     );
                 }
                 for (idx, arg) in args.iter().enumerate() {
-                    let expected = expected_args.get(idx).cloned().unwrap_or(AnalyzerType::Unknown);
+                    let expected = expected_args
+                        .get(idx)
+                        .cloned()
+                        .unwrap_or(AnalyzerType::Unknown);
                     let actual = self.check_expr_expected(*arg, span, Some(&expected));
                     if !is_assignable(&expected, &actual) {
                         self.push_error(
@@ -891,7 +1021,10 @@ impl<'a> Checker<'a> {
                     .map(|(_, sig)| sig.clone())
                     .collect::<Vec<_>>();
                 let Some((param_tys, ret_ty)) = candidates.first().cloned() else {
-                    self.push_error(format!("unknown static method '{}::{}'", type_name, method), span);
+                    self.push_error(
+                        format!("unknown static method '{}::{}'", type_name, method),
+                        span,
+                    );
                     return AnalyzerType::Unknown;
                 };
                 if param_tys.len() != args.len() {
@@ -952,7 +1085,10 @@ impl<'a> Checker<'a> {
                 let start_ty = self.check_expr(*start, span);
                 let end_ty = self.check_expr(*end, span);
                 if !matches!(start_ty, AnalyzerType::Int { .. } | AnalyzerType::Unknown) {
-                    self.push_error(format!("range start must be integer, got {start_ty:?}"), span);
+                    self.push_error(
+                        format!("range start must be integer, got {start_ty:?}"),
+                        span,
+                    );
                     return AnalyzerType::Unknown;
                 }
                 if !matches!(end_ty, AnalyzerType::Int { .. } | AnalyzerType::Unknown) {
@@ -1016,22 +1152,27 @@ impl<'a> Checker<'a> {
                     if let Some(item) = expected_item {
                         AnalyzerType::Array(Box::new(item))
                     } else {
-                        self.push_error("empty array literal requires explicit array type context", span);
+                        self.push_error(
+                            "empty array literal requires explicit array type context",
+                            span,
+                        );
                         AnalyzerType::Unknown
                     }
                 } else {
                     let seed_ty = match &items[0] {
                         crate::hir::HirArrayItem::Expr(item) => self.check_expr(*item, span),
-                        crate::hir::HirArrayItem::SpreadExpr(item) => match self.check_expr(*item, span) {
-                            AnalyzerType::Array(inner) => *inner,
-                            other => {
-                                self.push_error(
-                                    format!("array spread expects array value, got {other:?}"),
-                                    span,
-                                );
-                                AnalyzerType::Unknown
+                        crate::hir::HirArrayItem::SpreadExpr(item) => {
+                            match self.check_expr(*item, span) {
+                                AnalyzerType::Array(inner) => *inner,
+                                other => {
+                                    self.push_error(
+                                        format!("array spread expects array value, got {other:?}"),
+                                        span,
+                                    );
+                                    AnalyzerType::Unknown
+                                }
                             }
-                        },
+                        }
                     };
                     let mut inferred = expected_item.unwrap_or(seed_ty);
                     for item in items {
@@ -1045,7 +1186,9 @@ impl<'a> Checker<'a> {
                                     AnalyzerType::Array(inner) => *inner,
                                     other => {
                                         self.push_error(
-                                            format!("array spread expects array value, got {other:?}"),
+                                            format!(
+                                                "array spread expects array value, got {other:?}"
+                                            ),
                                             span,
                                         );
                                         AnalyzerType::Unknown
@@ -1078,7 +1221,10 @@ impl<'a> Checker<'a> {
                     if let Some((k, v)) = expected_kv {
                         AnalyzerType::Map(Box::new(k), Box::new(v))
                     } else {
-                        self.push_error("empty map literal requires explicit map type context", span);
+                        self.push_error(
+                            "empty map literal requires explicit map type context",
+                            span,
+                        );
                         AnalyzerType::Unknown
                     }
                 } else {
@@ -1087,7 +1233,10 @@ impl<'a> Checker<'a> {
                         (self.check_expr(k0, span), self.check_expr(v0, span))
                     });
                     if !is_hashable_map_key(&seed_k) {
-                        self.push_error(format!("map key type must be hashable, got {seed_k:?}"), span);
+                        self.push_error(
+                            format!("map key type must be hashable, got {seed_k:?}"),
+                            span,
+                        );
                     }
                     let mut key_ty = seed_k;
                     let mut value_ty = seed_v;
@@ -1127,13 +1276,19 @@ impl<'a> Checker<'a> {
                     if let Some(item) = expected_item {
                         AnalyzerType::Set(Box::new(item))
                     } else {
-                        self.push_error("empty set literal requires explicit set type context", span);
+                        self.push_error(
+                            "empty set literal requires explicit set type context",
+                            span,
+                        );
                         AnalyzerType::Unknown
                     }
                 } else {
                     let seed = expected_item.unwrap_or_else(|| self.check_expr(items[0], span));
                     if !is_hashable_map_key(&seed) {
-                        self.push_error(format!("set item type must be hashable, got {seed:?}"), span);
+                        self.push_error(
+                            format!("set item type must be hashable, got {seed:?}"),
+                            span,
+                        );
                     }
                     let mut inferred = seed;
                     for item in items {
@@ -1171,7 +1326,11 @@ impl<'a> Checker<'a> {
                             };
                             items.get(idx).cloned().unwrap_or_else(|| {
                                 self.push_error(
-                                    format!("tuple index {} out of range (len={})", idx, items.len()),
+                                    format!(
+                                        "tuple index {} out of range (len={})",
+                                        idx,
+                                        items.len()
+                                    ),
                                     span,
                                 );
                                 AnalyzerType::Unknown
@@ -1195,7 +1354,9 @@ impl<'a> Checker<'a> {
                 let inner_ty = self.check_expr(*expr, span);
                 let Some((ok_ty, err_ty)) = extract_fallible_tuple(&inner_ty) else {
                     self.push_error(
-                        format!("operator '?' expects expression of type (T, err), got {inner_ty:?}"),
+                        format!(
+                            "operator '?' expects expression of type (T, err), got {inner_ty:?}"
+                        ),
                         span,
                     );
                     return AnalyzerType::Unknown;
@@ -1266,7 +1427,9 @@ impl<'a> Checker<'a> {
                     .symbol(*err_symbol)
                     .map(|s| s.ty.clone())
                     .unwrap_or(AnalyzerType::Unknown);
-                if !is_error_like(&binding_ty, &self.struct_fields) && binding_ty != AnalyzerType::Unknown {
+                if !is_error_like(&binding_ty, &self.struct_fields)
+                    && binding_ty != AnalyzerType::Unknown
+                {
                     self.push_error("catch binding type must be err-like", span);
                 }
                 if !is_assignable(&binding_ty, &err_ty) && binding_ty != AnalyzerType::Unknown {
@@ -1308,7 +1471,10 @@ impl<'a> Checker<'a> {
                     sym.ty.clone()
                 } else {
                     self.push_error(
-                        format!("increment/decrement requires numeric variable, got {:?}", sym.ty),
+                        format!(
+                            "increment/decrement requires numeric variable, got {:?}",
+                            sym.ty
+                        ),
                         span,
                     );
                     AnalyzerType::Unknown
@@ -1419,27 +1585,25 @@ impl<'a> Checker<'a> {
                     AnalyzerType::Unknown
                 }
             },
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-                match (&left_ty, &right_ty) {
-                    (
-                        AnalyzerType::Int {
-                            signed: ls,
-                            bits: lb,
-                        },
-                        AnalyzerType::Int {
-                            signed: rs,
-                            bits: rb,
-                        },
-                    ) if ls == rs && lb == rb => left_ty,
-                    _ => {
-                        self.push_error(
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => match (&left_ty, &right_ty) {
+                (
+                    AnalyzerType::Int {
+                        signed: ls,
+                        bits: lb,
+                    },
+                    AnalyzerType::Int {
+                        signed: rs,
+                        bits: rb,
+                    },
+                ) if ls == rs && lb == rb => left_ty,
+                _ => {
+                    self.push_error(
                             format!("bitwise operator {:?} expects matching integer operands, got left={left_ty:?}, right={right_ty:?}", op),
                             span,
                         );
-                        AnalyzerType::Unknown
-                    }
+                    AnalyzerType::Unknown
                 }
-            }
+            },
         }
     }
 
@@ -1465,25 +1629,36 @@ impl<'a> Checker<'a> {
                 return left_ty;
             }
             self.push_error(
-                format!("integer widths/signs mismatch for {:?}: left={left_ty:?}, right={right_ty:?}", op),
+                format!(
+                    "integer widths/signs mismatch for {:?}: left={left_ty:?}, right={right_ty:?}",
+                    op
+                ),
                 span,
             );
             return AnalyzerType::Unknown;
         }
 
-        if let (AnalyzerType::Float { bits: lb }, AnalyzerType::Float { bits: rb }) = (&left_ty, &right_ty) {
+        if let (AnalyzerType::Float { bits: lb }, AnalyzerType::Float { bits: rb }) =
+            (&left_ty, &right_ty)
+        {
             if lb == rb {
                 return left_ty;
             }
             self.push_error(
-                format!("float widths mismatch for {:?}: left={left_ty:?}, right={right_ty:?}", op),
+                format!(
+                    "float widths mismatch for {:?}: left={left_ty:?}, right={right_ty:?}",
+                    op
+                ),
                 span,
             );
             return AnalyzerType::Unknown;
         }
 
         self.push_error(
-            format!("invalid operands for {:?}: left={left_ty:?}, right={right_ty:?}", op),
+            format!(
+                "invalid operands for {:?}: left={left_ty:?}, right={right_ty:?}",
+                op
+            ),
             span,
         );
         AnalyzerType::Unknown
@@ -1496,11 +1671,17 @@ impl<'a> Checker<'a> {
         right_ty: AnalyzerType,
         span: Span,
     ) -> AnalyzerType {
-        if left_ty == right_ty || is_assignable(&left_ty, &right_ty) || is_assignable(&right_ty, &left_ty) {
+        if left_ty == right_ty
+            || is_assignable(&left_ty, &right_ty)
+            || is_assignable(&right_ty, &left_ty)
+        {
             AnalyzerType::Bool
         } else {
             self.push_error(
-                format!("invalid operands for {:?}: left={left_ty:?}, right={right_ty:?}", op),
+                format!(
+                    "invalid operands for {:?}: left={left_ty:?}, right={right_ty:?}",
+                    op
+                ),
                 span,
             );
             AnalyzerType::Unknown
@@ -1590,29 +1771,7 @@ impl<'a> Checker<'a> {
         args: &[HirId],
         span: Span,
     ) -> AnalyzerType {
-        if name.starts_with("io_")
-            || name.starts_with("fs_")
-            || name.starts_with("math_")
-            || name.starts_with("time_")
-            || name.starts_with("os_")
-            || name.starts_with("proc_")
-            || name.starts_with("thread_")
-            || name.starts_with("sync_")
-            || name.starts_with("net_")
-            || name.starts_with("http_")
-            || name.starts_with("crypto_")
-            || name.starts_with("rand_")
-            || name.starts_with("encoding_")
-            || name.starts_with("regex_")
-            || name.starts_with("cli_")
-            || name.starts_with("env_")
-            || name.starts_with("log_")
-            || name.starts_with("json_")
-            || name.starts_with("csv_")
-            || name.starts_with("mime_")
-            || name.starts_with("url_")
-            || name.starts_with("xml_")
-        {
+        if is_internal_stdlib_symbol(name) {
             self.push_error(
                 format!("internal intrinsic '{name}' is not part of the public stdlib API"),
                 span,
@@ -1633,10 +1792,7 @@ impl<'a> Checker<'a> {
                 if let Some(first) = args.first() {
                     let msg_ty = self.check_expr_expected(*first, span, Some(&AnalyzerType::Str));
                     if !is_assignable(&AnalyzerType::Str, &msg_ty) {
-                        self.push_error(
-                            format!("error message must be str, got {msg_ty:?}"),
-                            span,
-                        );
+                        self.push_error(format!("error message must be str, got {msg_ty:?}"), span);
                     }
                 }
                 if let Some(second) = args.get(1) {
@@ -1646,10 +1802,7 @@ impl<'a> Checker<'a> {
                     };
                     let code_ty = self.check_expr_expected(*second, span, Some(&expected_code));
                     if !is_assignable(&expected_code, &code_ty) {
-                        self.push_error(
-                            format!("error code must be i32, got {code_ty:?}"),
-                            span,
-                        );
+                        self.push_error(format!("error code must be i32, got {code_ty:?}"), span);
                     }
                 }
                 AnalyzerType::Err
@@ -1664,10 +1817,7 @@ impl<'a> Checker<'a> {
                 if let Some(first) = args.first() {
                     let msg_ty = self.check_expr_expected(*first, span, Some(&AnalyzerType::Str));
                     if !is_assignable(&AnalyzerType::Str, &msg_ty) {
-                        self.push_error(
-                            format!("panic message must be str, got {msg_ty:?}"),
-                            span,
-                        );
+                        self.push_error(format!("panic message must be str, got {msg_ty:?}"), span);
                     }
                 }
                 if let Some(second) = args.get(1) {
@@ -1677,10 +1827,7 @@ impl<'a> Checker<'a> {
                     };
                     let code_ty = self.check_expr_expected(*second, span, Some(&expected_code));
                     if !is_assignable(&expected_code, &code_ty) {
-                        self.push_error(
-                            format!("panic code must be i32, got {code_ty:?}"),
-                            span,
-                        );
+                        self.push_error(format!("panic code must be i32, got {code_ty:?}"), span);
                     }
                 }
                 AnalyzerType::Unit
@@ -1694,7 +1841,9 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(first) = args.first() {
                     let err_ty = self.check_expr(*first, span);
-                    if !is_error_like(&err_ty, &self.struct_fields) && err_ty != AnalyzerType::Unknown {
+                    if !is_error_like(&err_ty, &self.struct_fields)
+                        && err_ty != AnalyzerType::Unknown
+                    {
                         self.push_error(
                             format!("wrap first argument must be err-like, got {err_ty:?}"),
                             span,
@@ -1704,10 +1853,7 @@ impl<'a> Checker<'a> {
                 if let Some(second) = args.get(1) {
                     let msg_ty = self.check_expr_expected(*second, span, Some(&AnalyzerType::Str));
                     if !is_assignable(&AnalyzerType::Str, &msg_ty) {
-                        self.push_error(
-                            format!("wrap message must be str, got {msg_ty:?}"),
-                            span,
-                        );
+                        self.push_error(format!("wrap message must be str, got {msg_ty:?}"), span);
                     }
                 }
                 if let Some(third) = args.get(2) {
@@ -1717,10 +1863,7 @@ impl<'a> Checker<'a> {
                     };
                     let code_ty = self.check_expr_expected(*third, span, Some(&expected_code));
                     if !is_assignable(&expected_code, &code_ty) {
-                        self.push_error(
-                            format!("wrap code must be i32, got {code_ty:?}"),
-                            span,
-                        );
+                        self.push_error(format!("wrap code must be i32, got {code_ty:?}"), span);
                     }
                 }
                 AnalyzerType::Err
@@ -1735,10 +1878,12 @@ impl<'a> Checker<'a> {
                 }
                 let arg_ty = self.check_expr(args[0], span);
                 match arg_ty {
-                    AnalyzerType::Str | AnalyzerType::Array(_) | AnalyzerType::Unknown => AnalyzerType::Int {
-                        signed: false,
-                        bits: 64,
-                    },
+                    AnalyzerType::Str | AnalyzerType::Array(_) | AnalyzerType::Unknown => {
+                        AnalyzerType::Int {
+                            signed: false,
+                            bits: 64,
+                        }
+                    }
                     other => {
                         self.push_error(format!("len expects str or array, got {other:?}"), span);
                         AnalyzerType::Unknown
@@ -1786,7 +1931,11 @@ impl<'a> Checker<'a> {
                 };
             }
             self.push_error(
-                format!("integer literal '{raw}' out of range for {}{}", if *signed { "i" } else { "u" }, bits),
+                format!(
+                    "integer literal '{raw}' out of range for {}{}",
+                    if *signed { "i" } else { "u" },
+                    bits
+                ),
                 span,
             );
             return AnalyzerType::Unknown;
@@ -1808,7 +1957,10 @@ impl<'a> Checker<'a> {
                 bits: 128,
             }
         } else {
-            self.push_error(format!("integer literal '{raw}' out of supported range"), span);
+            self.push_error(
+                format!("integer literal '{raw}' out of supported range"),
+                span,
+            );
             AnalyzerType::Unknown
         }
     }
@@ -1831,7 +1983,10 @@ impl<'a> Checker<'a> {
             if float_fits(parsed, *bits) {
                 return AnalyzerType::Float { bits: *bits };
             }
-            self.push_error(format!("float literal '{raw}' out of range for f{bits}"), span);
+            self.push_error(
+                format!("float literal '{raw}' out of range for f{bits}"),
+                span,
+            );
             return AnalyzerType::Unknown;
         }
 
@@ -1850,6 +2005,62 @@ impl<'a> Checker<'a> {
             .map(|s| s.ty.clone())
             .unwrap_or(AnalyzerType::Unknown)
     }
+}
+
+fn stdlib_module_exports(path: &str) -> Option<&'static HashSet<String>> {
+    static STDLIB_EXPORTS: OnceLock<HashMap<&'static str, HashSet<String>>> = OnceLock::new();
+    STDLIB_EXPORTS
+        .get_or_init(|| {
+            STDLIB_MODULE_SOURCES
+                .iter()
+                .map(|(path, source)| (*path, collect_stdlib_exports(source)))
+                .collect()
+        })
+        .get(path)
+}
+
+fn collect_stdlib_exports(source: &str) -> HashSet<String> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let name = line.strip_prefix("fn ")?.split('(').next()?.trim();
+            (!name.is_empty()).then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn normalize_stdlib_path(path: &str) -> String {
+    path.trim_matches('"').to_string()
+}
+
+fn is_internal_stdlib_symbol(name: &str) -> bool {
+    [
+        "io_",
+        "fs_",
+        "math_",
+        "time_",
+        "os_",
+        "proc_",
+        "thread_",
+        "sync_",
+        "net_",
+        "http_",
+        "crypto_",
+        "rand_",
+        "encoding_",
+        "regex_",
+        "cli_",
+        "env_",
+        "log_",
+        "json_",
+        "csv_",
+        "mime_",
+        "url_",
+        "xml_",
+    ]
+    .iter()
+    .any(|prefix| name.starts_with(prefix))
 }
 
 fn integer_fits(value: u128, signed: bool, bits: u16) -> bool {
@@ -1946,7 +2157,9 @@ fn is_error_like(
 
 fn extract_fallible_tuple(ty: &AnalyzerType) -> Option<(AnalyzerType, AnalyzerType)> {
     match ty {
-        AnalyzerType::Tuple(items) if items.len() == 2 => Some((items[0].clone(), items[1].clone())),
+        AnalyzerType::Tuple(items) if items.len() == 2 => {
+            Some((items[0].clone(), items[1].clone()))
+        }
         _ => None,
     }
 }
@@ -1983,7 +2196,9 @@ fn resolve_self_type(ty: AnalyzerType, concrete: AnalyzerType) -> AnalyzerType {
                 .map(|i| resolve_self_type(i, concrete.clone()))
                 .collect(),
         ),
-        AnalyzerType::Array(item) => AnalyzerType::Array(Box::new(resolve_self_type(*item, concrete))),
+        AnalyzerType::Array(item) => {
+            AnalyzerType::Array(Box::new(resolve_self_type(*item, concrete)))
+        }
         AnalyzerType::Map(k, v) => AnalyzerType::Map(
             Box::new(resolve_self_type(*k, concrete.clone())),
             Box::new(resolve_self_type(*v, concrete)),
@@ -2033,7 +2248,10 @@ mod tests {
         assert!(
             !diagnostics.has_errors(),
             "{:?}",
-            diagnostics.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+            diagnostics
+                .iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -2095,9 +2313,10 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("operator '?' requires current function return type to be (T, err)")));
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("operator '?' requires current function return type to be (T, err)")
+        }));
     }
 
     #[test]
@@ -2133,7 +2352,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("array index must be integer")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("array index must be integer"))
+        );
     }
 
     #[test]
@@ -2176,9 +2399,14 @@ mod tests {
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
         assert!(
-            diagnostics.iter().any(|d| d.message.contains("for-in binding type mismatch")),
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("for-in binding type mismatch")),
             "{:?}",
-            diagnostics.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+            diagnostics
+                .iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -2190,7 +2418,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("cannot assign to constant")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot assign to constant"))
+        );
     }
 
     #[test]
@@ -2211,7 +2443,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("logical operator")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("logical operator"))
+        );
     }
 
     #[test]
@@ -2242,7 +2478,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("out of range")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("out of range"))
+        );
     }
 
     #[test]
@@ -2263,9 +2503,10 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("if condition is not truthy/falsy-compatible")));
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("if condition is not truthy/falsy-compatible")
+        }));
     }
 
     #[test]
@@ -2285,7 +2526,11 @@ mod tests {
         let (ast, _) = parse(FileId::from_u32(36), src.len() as u32, lex_output.tokens);
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
-        assert!(diagnostics.iter().any(|d| d.message.contains("break used outside of loop")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("break used outside of loop"))
+        );
     }
 
     #[test]
@@ -2295,9 +2540,11 @@ mod tests {
         let (ast, _) = parse(FileId::from_u32(37), src.len() as u32, lex_output.tokens);
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("continue used outside of loop")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("continue used outside of loop"))
+        );
     }
 
     #[test]
@@ -2348,7 +2595,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("cannot assign to constant")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot assign to constant"))
+        );
     }
 
     #[test]
@@ -2369,9 +2620,10 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("increment/decrement requires numeric variable")));
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("increment/decrement requires numeric variable")
+        }));
     }
 
     #[test]
@@ -2382,7 +2634,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("cannot assign to constant")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot assign to constant"))
+        );
     }
 
     #[test]
@@ -2393,9 +2649,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("return used outside of function")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("return used outside of function"))
+        );
     }
 
     #[test]
@@ -2406,9 +2664,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("must return on all paths")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("must return on all paths"))
+        );
     }
 
     #[test]
@@ -2449,9 +2709,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("tuple destructuring arity mismatch")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("tuple destructuring arity mismatch"))
+        );
     }
 
     #[test]
@@ -2462,9 +2724,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("tuple index 2 out of range")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("tuple index 2 out of range"))
+        );
     }
 
     #[test]
@@ -2495,9 +2759,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("multiple return values are allowed only for functions returning tuple")));
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("multiple return values are allowed only for functions returning tuple"))
+        );
     }
 
     #[test]
@@ -2508,9 +2774,10 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("tuple return must use explicit positional values")));
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("tuple return must use explicit positional values")
+        }));
     }
 
     #[test]
@@ -2531,9 +2798,11 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("tuple return position 1 type mismatch")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("tuple return position 1 type mismatch"))
+        );
     }
 
     #[test]
@@ -2574,9 +2843,21 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("error message must be str")));
-        assert!(diagnostics.iter().any(|d| d.message.contains("error code must be i32")));
-        assert!(diagnostics.iter().any(|d| d.message.contains("error expects 1 or 2 arguments")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("error message must be str"))
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("error code must be i32"))
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("error expects 1 or 2 arguments"))
+        );
     }
 
     #[test]
@@ -2587,5 +2868,33 @@ mod tests {
         let (hir, mut symbols, _) = lower(&ast);
         let (_model, diagnostics) = analyze(&hir, &mut symbols);
         assert!(!diagnostics.has_errors());
+    }
+
+    #[test]
+    fn rejects_unknown_stdlib_module_import() {
+        let src = "import \"std/does_not_exist\" as missing";
+        let lex_output = lex(FileId::from_u32(64), src);
+        let (ast, _) = parse(FileId::from_u32(64), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("unknown stdlib module 'std/does_not_exist'")
+        }));
+    }
+
+    #[test]
+    fn rejects_from_import_symbol_not_exported_by_module() {
+        let src = "from \"std/http\" import read_text";
+        let lex_output = lex(FileId::from_u32(65), src);
+        let (ast, _) = parse(FileId::from_u32(65), src.len() as u32, lex_output.tokens);
+        let (hir, mut symbols, _) = lower(&ast);
+        let (_model, diagnostics) = analyze(&hir, &mut symbols);
+        assert!(diagnostics.has_errors());
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("symbol 'read_text' is not exported by module 'std/http'")
+        }));
     }
 }

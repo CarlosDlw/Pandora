@@ -15,7 +15,8 @@ pub struct Chunk {
 impl Chunk {
     #[must_use]
     pub fn invariant_holds(&self) -> bool {
-        self.code.len() == self.spans.len() && self.functions.values().all(|f| f.chunk.invariant_holds())
+        self.code.len() == self.spans.len()
+            && self.functions.values().all(|f| f.chunk.invariant_holds())
     }
 }
 

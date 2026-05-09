@@ -13,7 +13,10 @@ impl fmt::Display for FoundationError {
         match self {
             Self::IdExhausted { kind } => write!(f, "id space exhausted for {kind}"),
             Self::InvalidSpan { start, end } => {
-                write!(f, "invalid span: start ({start}) is greater than end ({end})")
+                write!(
+                    f,
+                    "invalid span: start ({start}) is greater than end ({end})"
+                )
             }
             Self::FileNotFound => write!(f, "file not found"),
             Self::InconsistentState(message) => write!(f, "inconsistent internal state: {message}"),

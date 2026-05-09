@@ -1,9 +1,10 @@
 use crate::{
     db::Database,
-    diagnostics::Diagnostics,
+    diagnostics::{Diagnostic, Diagnostics, Severity},
     error::FoundationError,
     frontend::PandoraFrontend,
     ids::{CacheId, FileId},
+    span::Span,
 };
 
 #[derive(Debug, Default)]
@@ -69,7 +70,14 @@ impl Pipeline {
     }
 
     pub fn parse(&self, _db: &Database, file_id: FileId) -> (Ast, Diagnostics) {
-        (Ast { file_id }, Diagnostics::new())
+        (
+            Ast { file_id },
+            unsupported_stage_diagnostics(
+                file_id,
+                "parse",
+                "use `Pipeline::run` with a `PandoraFrontend` from the `core` crate",
+            ),
+        )
     }
 
     pub fn lower(&self, ast: Ast) -> (Hir, Diagnostics) {
@@ -77,7 +85,11 @@ impl Pipeline {
             Hir {
                 file_id: ast.file_id(),
             },
-            Diagnostics::new(),
+            unsupported_stage_diagnostics(
+                ast.file_id(),
+                "lower",
+                "use `Pipeline::run` with a `PandoraFrontend` from the `core` crate",
+            ),
         )
     }
 
@@ -86,7 +98,11 @@ impl Pipeline {
             Analysis {
                 file_id: hir.file_id(),
             },
-            Diagnostics::new(),
+            unsupported_stage_diagnostics(
+                hir.file_id(),
+                "analyze",
+                "use `Pipeline::run` with a `PandoraFrontend` from the `core` crate",
+            ),
         )
     }
 
@@ -120,11 +136,27 @@ impl Pipeline {
     }
 }
 
+fn unsupported_stage_diagnostics(
+    file_id: FileId,
+    stage: &'static str,
+    guidance: &'static str,
+) -> Diagnostics {
+    let mut diagnostics = Diagnostics::new();
+    diagnostics.push(Diagnostic::new(
+        format!(
+            "foundation pipeline stage `{stage}` is not implemented as a standalone API; {guidance}"
+        ),
+        Span::new_unchecked(file_id, 0, 0),
+        Severity::Error,
+    ));
+    diagnostics
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
         db::Database,
-        diagnostics::Diagnostics,
+        diagnostics::{Diagnostics, Severity},
         frontend::PandoraFrontend,
         ids::FileId,
     };
@@ -177,9 +209,54 @@ mod tests {
             .expect("load file");
 
         let mut fe = RecordingFrontend;
-        pipeline
-            .run(&mut db, &mut fe)
-            .expect("run pipeline");
+        pipeline.run(&mut db, &mut fe).expect("run pipeline");
         assert!(db.diagnostics_for(file_id).is_some());
+    }
+
+    #[test]
+    fn parse_reports_placeholder_status() {
+        let pipeline = Pipeline::new();
+        let db = Database::new();
+        let file_id = FileId::from_u32(10);
+
+        let (_ast, diagnostics) = pipeline.parse(&db, file_id);
+
+        assert!(diagnostics.has_errors());
+        let diagnostic = diagnostics.iter().next().expect("placeholder diagnostic");
+        assert_eq!(diagnostic.severity, Severity::Error);
+        assert!(diagnostic.message.contains("`parse`"));
+        assert!(diagnostic.message.contains("Pipeline::run"));
+    }
+
+    #[test]
+    fn lower_reports_placeholder_status() {
+        let pipeline = Pipeline::new();
+        let ast = super::Ast {
+            file_id: FileId::from_u32(11),
+        };
+
+        let (_hir, diagnostics) = pipeline.lower(ast);
+
+        assert!(diagnostics.has_errors());
+        let diagnostic = diagnostics.iter().next().expect("placeholder diagnostic");
+        assert_eq!(diagnostic.severity, Severity::Error);
+        assert!(diagnostic.message.contains("`lower`"));
+        assert!(diagnostic.message.contains("PandoraFrontend"));
+    }
+
+    #[test]
+    fn analyze_reports_placeholder_status() {
+        let pipeline = Pipeline::new();
+        let hir = super::Hir {
+            file_id: FileId::from_u32(12),
+        };
+
+        let (_analysis, diagnostics) = pipeline.analyze(hir);
+
+        assert!(diagnostics.has_errors());
+        let diagnostic = diagnostics.iter().next().expect("placeholder diagnostic");
+        assert_eq!(diagnostic.severity, Severity::Error);
+        assert!(diagnostic.message.contains("`analyze`"));
+        assert!(diagnostic.message.contains("core` crate"));
     }
 }

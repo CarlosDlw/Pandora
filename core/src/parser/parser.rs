@@ -61,49 +61,91 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> ArenaId {
-        if self.current().is_some_and(|token| token.kind == TokenKind::Struct) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Struct)
+        {
             return self.parse_struct_decl();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::Trait) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Trait)
+        {
             return self.parse_trait_decl();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::Impl) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Impl)
+        {
             return self.parse_impl_block();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::Fn) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Fn)
+        {
             return self.parse_fn_decl();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::Return) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Return)
+        {
             return self.parse_return_stmt();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::While) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::While)
+        {
             return self.parse_while_stmt();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::For) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::For)
+        {
             return self.parse_for_stmt();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::Break) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Break)
+        {
             return self.parse_break_stmt();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::Continue) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Continue)
+        {
             return self.parse_continue_stmt();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::If) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::If)
+        {
             return self.parse_if_stmt();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::Import) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Import)
+        {
             return self.parse_import_stmt();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::From) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::From)
+        {
             return self.parse_from_import_stmt();
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::Else) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::Else)
+        {
             let span = self.current_span_or_eof();
             self.push_error("unexpected 'else' without matching 'if'", span);
             self.bump();
             return self.invalid_node(span);
         }
-        if self.current().is_some_and(|token| token.kind == TokenKind::LeftBrace) {
+        if self
+            .current()
+            .is_some_and(|token| token.kind == TokenKind::LeftBrace)
+        {
             return self.parse_block_stmt();
         }
         if self.is_declaration_start() {
@@ -127,8 +169,15 @@ impl Parser {
     fn parse_while_stmt(&mut self) -> ArenaId {
         let while_span = self.current_span_or_eof();
         self.bump();
-        if self.current().is_none() || self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
-            self.push_error("expected condition expression after 'while'", self.current_span_or_eof());
+        if self.current().is_none()
+            || self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::LeftBrace)
+        {
+            self.push_error(
+                "expected condition expression after 'while'",
+                self.current_span_or_eof(),
+            );
         }
         let condition = self.parse_expression();
         let prev_depth = self.loop_depth;
@@ -151,7 +200,10 @@ impl Parser {
             return self.parse_for_in_stmt(for_span);
         }
 
-        let init = if self.current().is_some_and(|t| t.kind == TokenKind::Semicolon) {
+        let init = if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::Semicolon)
+        {
             None
         } else {
             Some(self.parse_for_init_decl())
@@ -160,16 +212,25 @@ impl Parser {
             self.push_error("expected ';' after for init", self.current_span_or_eof());
         }
 
-        let condition = if self.current().is_some_and(|t| t.kind == TokenKind::Semicolon) {
+        let condition = if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::Semicolon)
+        {
             None
         } else {
             Some(self.parse_expression())
         };
         if !self.consume_if(TokenKind::Semicolon) {
-            self.push_error("expected ';' after for condition", self.current_span_or_eof());
+            self.push_error(
+                "expected ';' after for condition",
+                self.current_span_or_eof(),
+            );
         }
 
-        let step = if self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+        let step = if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::LeftBrace)
+        {
             None
         } else {
             Some(self.parse_expression())
@@ -196,13 +257,19 @@ impl Parser {
         let path_tok = match self.current() {
             Some(t) if t.kind == TokenKind::String => t.clone(),
             _ => {
-                self.push_error("expected string path after import", self.current_span_or_eof());
+                self.push_error(
+                    "expected string path after import",
+                    self.current_span_or_eof(),
+                );
                 return self.invalid_node(start);
             }
         };
         self.bump();
         if !self.consume_if(TokenKind::As) {
-            self.push_error("import requires alias: use `import \"...\" as name`", self.current_span_or_eof());
+            self.push_error(
+                "import requires alias: use `import \"...\" as name`",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
         let alias = self.parse_required_identifier("expected alias identifier after 'as'");
@@ -220,13 +287,19 @@ impl Parser {
         let path_tok = match self.current() {
             Some(t) if t.kind == TokenKind::String => t.clone(),
             _ => {
-                self.push_error("expected string path after from", self.current_span_or_eof());
+                self.push_error(
+                    "expected string path after from",
+                    self.current_span_or_eof(),
+                );
                 return self.invalid_node(start);
             }
         };
         self.bump();
         if !self.consume_if(TokenKind::Import) {
-            self.push_error("expected `import` after module path", self.current_span_or_eof());
+            self.push_error(
+                "expected `import` after module path",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
         let mut names = Vec::new();
@@ -291,7 +364,9 @@ impl Parser {
                     Some(TokenKind::LeftParen) => depth_paren += 1,
                     Some(TokenKind::RightParen) => depth_paren = depth_paren.saturating_sub(1),
                     Some(TokenKind::LeftBracket) => depth_bracket += 1,
-                    Some(TokenKind::RightBracket) => depth_bracket = depth_bracket.saturating_sub(1),
+                    Some(TokenKind::RightBracket) => {
+                        depth_bracket = depth_bracket.saturating_sub(1)
+                    }
                     Some(_) => {}
                     None => return false,
                 }
@@ -318,13 +393,19 @@ impl Parser {
         });
 
         if !self.consume_if(TokenKind::Colon) {
-            self.push_error("for init must use typed declaration 'name: type = value'", self.current_span_or_eof());
+            self.push_error(
+                "for init must use typed declaration 'name: type = value'",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(name_token.span);
         }
         let ty = self.parse_type_name();
 
         if !self.consume_if(TokenKind::Assign) {
-            self.push_error("expected '=' in for init declaration", self.current_span_or_eof());
+            self.push_error(
+                "expected '=' in for init declaration",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(name_token.span);
         }
         let value = self.parse_expression();
@@ -351,7 +432,9 @@ impl Parser {
         let return_span = self.current_span_or_eof();
         self.bump();
         if self.current().is_none()
-            || self.current().is_some_and(|t| t.kind == TokenKind::Semicolon || t.kind == TokenKind::RightBrace)
+            || self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::Semicolon || t.kind == TokenKind::RightBrace)
         {
             return self.insert_node(AstNode::ReturnStmt {
                 values: Vec::new(),
@@ -362,9 +445,14 @@ impl Parser {
         let mut values = vec![first];
         while self.consume_if(TokenKind::Comma) {
             if self.current().is_none()
-                || self.current().is_some_and(|t| t.kind == TokenKind::Semicolon || t.kind == TokenKind::RightBrace)
+                || self.current().is_some_and(|t| {
+                    t.kind == TokenKind::Semicolon || t.kind == TokenKind::RightBrace
+                })
             {
-                self.push_error("expected return value after ','", self.current_span_or_eof());
+                self.push_error(
+                    "expected return value after ','",
+                    self.current_span_or_eof(),
+                );
                 break;
             }
             values.push(self.parse_expression());
@@ -374,10 +462,7 @@ impl Parser {
             .map(|id| self.node_span(*id))
             .unwrap_or(return_span);
         let span = merge_span(return_span, end_span);
-        self.insert_node(AstNode::ReturnStmt {
-            values,
-            span,
-        })
+        self.insert_node(AstNode::ReturnStmt { values, span })
     }
 
     fn parse_continue_stmt(&mut self) -> ArenaId {
@@ -393,8 +478,15 @@ impl Parser {
         let if_span = self.current_span_or_eof();
         self.bump();
 
-        if self.current().is_none() || self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
-            self.push_error("expected condition expression after 'if'", self.current_span_or_eof());
+        if self.current().is_none()
+            || self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::LeftBrace)
+        {
+            self.push_error(
+                "expected condition expression after 'if'",
+                self.current_span_or_eof(),
+            );
         }
         let condition = self.parse_expression();
         let then_branch = self.parse_if_branch_block("expected '{' after if condition");
@@ -421,7 +513,10 @@ impl Parser {
     }
 
     fn parse_if_branch_block(&mut self, message: &str) -> ArenaId {
-        if self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+        if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::LeftBrace)
+        {
             return self.parse_block_stmt();
         }
         let span = self.current_span_or_eof();
@@ -491,7 +586,8 @@ impl Parser {
             }
         }
 
-        if !matches!(self.previous_kind(), Some(TokenKind::InferAssign)) && !self.consume_if(TokenKind::Assign)
+        if !matches!(self.previous_kind(), Some(TokenKind::InferAssign))
+            && !self.consume_if(TokenKind::Assign)
         {
             let span = self.current_span_or_eof();
             self.push_error("expected '=' in declaration", span);
@@ -520,12 +616,18 @@ impl Parser {
             ty = Some(self.parse_type_ref());
             false
         } else {
-            self.push_error("expected ':=' or ':' after tuple destructuring pattern", self.current_span_or_eof());
+            self.push_error(
+                "expected ':=' or ':' after tuple destructuring pattern",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         };
 
         if !used_infer && !self.consume_if(TokenKind::Assign) {
-            self.push_error("expected '=' in tuple destructuring declaration", self.current_span_or_eof());
+            self.push_error(
+                "expected '=' in tuple destructuring declaration",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
 
@@ -547,21 +649,36 @@ impl Parser {
         if self.current().is_some_and(|t| t.kind == TokenKind::Fn) {
             return self.parse_fn_type_ref();
         }
-        if self.current().is_some_and(|t| t.kind == TokenKind::SelfType) {
+        if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::SelfType)
+        {
             let span = self.current_span_or_eof();
             self.bump();
             return self.insert_node(AstNode::SelfTypeRef { span });
         }
-        if self.current().is_some_and(|t| t.kind == TokenKind::LeftParen) {
+        if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::LeftParen)
+        {
             return self.parse_tuple_type_ref();
         }
-        if self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket) {
+        if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::LeftBracket)
+        {
             return self.parse_array_type_ref();
         }
-        if self.current().is_some_and(|t| t.kind == TokenKind::Identifier && t.lexeme == "map") {
+        if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::Identifier && t.lexeme == "map")
+        {
             return self.parse_map_type_ref();
         }
-        if self.current().is_some_and(|t| t.kind == TokenKind::Identifier && t.lexeme == "set") {
+        if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::Identifier && t.lexeme == "set")
+        {
             return self.parse_set_type_ref();
         }
         let token = match self.current() {
@@ -590,7 +707,10 @@ impl Parser {
             return self.invalid_node(span);
         }
         let mut param_types = Vec::new();
-        if !self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+        if !self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::RightParen)
+        {
             loop {
                 let ty_id = self.parse_type_ref();
                 let ty_name = self.type_name_from_node(ty_id);
@@ -621,7 +741,10 @@ impl Parser {
         let first = self.parse_type_ref();
         item_types.push(self.type_name_from_node(first));
         if !self.consume_if(TokenKind::Comma) {
-            self.push_error("tuple type must contain at least two elements", self.current_span_or_eof());
+            self.push_error(
+                "tuple type must contain at least two elements",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
         let second = self.parse_type_ref();
@@ -631,7 +754,10 @@ impl Parser {
             item_types.push(self.type_name_from_node(next));
         }
         if !self.consume_if(TokenKind::RightParen) {
-            self.push_error("expected ')' to close tuple type", self.current_span_or_eof());
+            self.push_error(
+                "expected ')' to close tuple type",
+                self.current_span_or_eof(),
+            );
         }
         let name = format!("({})", item_types.join(", "));
         let span = merge_span(start, self.previous_span_or(start));
@@ -643,7 +769,10 @@ impl Parser {
         self.bump();
         let item = self.parse_type_ref();
         if !self.consume_if(TokenKind::RightBracket) {
-            self.push_error("expected ']' to close array type", self.current_span_or_eof());
+            self.push_error(
+                "expected ']' to close array type",
+                self.current_span_or_eof(),
+            );
         }
         let item_name = self.type_name_from_node(item);
         let name = format!("[{}]", item_name);
@@ -655,12 +784,18 @@ impl Parser {
         let start = self.current_span_or_eof();
         self.bump();
         if !self.consume_if(TokenKind::LeftBracket) {
-            self.push_error("expected '[' after 'map' in map type", self.current_span_or_eof());
+            self.push_error(
+                "expected '[' after 'map' in map type",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
         let key = self.parse_type_ref();
         if !self.consume_if(TokenKind::RightBracket) {
-            self.push_error("expected ']' after map key type", self.current_span_or_eof());
+            self.push_error(
+                "expected ']' after map key type",
+                self.current_span_or_eof(),
+            );
         }
         let value = self.parse_type_ref();
         let name = format!(
@@ -676,12 +811,18 @@ impl Parser {
         let start = self.current_span_or_eof();
         self.bump();
         if !self.consume_if(TokenKind::LeftBracket) {
-            self.push_error("expected '[' after 'set' in set type", self.current_span_or_eof());
+            self.push_error(
+                "expected '[' after 'set' in set type",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
         let item = self.parse_type_ref();
         if !self.consume_if(TokenKind::RightBracket) {
-            self.push_error("expected ']' after set item type", self.current_span_or_eof());
+            self.push_error(
+                "expected ']' after set item type",
+                self.current_span_or_eof(),
+            );
         }
         let name = format!("set[{}]", self.type_name_from_node(item));
         let span = merge_span(start, self.previous_span_or(start));
@@ -726,11 +867,17 @@ impl Parser {
         }
         let (params, param_defaults) = self.parse_fn_params(true);
         if !self.consume_if(TokenKind::RightParen) {
-            self.push_error("expected ')' after function parameters", self.current_span_or_eof());
+            self.push_error(
+                "expected ')' after function parameters",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(name_token.span);
         }
         if !self.consume_if(TokenKind::Arrow) {
-            self.push_error("expected '->' after function parameters", self.current_span_or_eof());
+            self.push_error(
+                "expected '->' after function parameters",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(name_token.span);
         }
         let return_ty = self.parse_type_ref();
@@ -755,7 +902,11 @@ impl Parser {
             return self.invalid_node(start);
         }
         let mut fields = Vec::new();
-        while self.current().is_some() && !self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+        while self.current().is_some()
+            && !self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::RightBrace)
+        {
             let field_name = self.parse_required_identifier("expected field name in struct");
             if !self.consume_if(TokenKind::Colon) {
                 self.push_error("expected ':' after field name", self.current_span_or_eof());
@@ -769,7 +920,10 @@ impl Parser {
             break;
         }
         if !self.consume_if(TokenKind::RightBrace) {
-            self.push_error("expected '}' after struct fields", self.current_span_or_eof());
+            self.push_error(
+                "expected '}' after struct fields",
+                self.current_span_or_eof(),
+            );
         }
         let span = merge_span(start, self.previous_span_or(start));
         self.insert_node(AstNode::StructDecl { name, fields, span })
@@ -784,9 +938,16 @@ impl Parser {
             return self.invalid_node(start);
         }
         let mut methods = Vec::new();
-        while self.current().is_some() && !self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+        while self.current().is_some()
+            && !self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::RightBrace)
+        {
             if !self.current().is_some_and(|t| t.kind == TokenKind::Fn) {
-                self.push_error("expected 'fn' in trait declaration", self.current_span_or_eof());
+                self.push_error(
+                    "expected 'fn' in trait declaration",
+                    self.current_span_or_eof(),
+                );
                 self.bump();
                 continue;
             }
@@ -798,7 +959,11 @@ impl Parser {
             self.push_error("expected '}' after trait body", self.current_span_or_eof());
         }
         let span = merge_span(start, self.previous_span_or(start));
-        self.insert_node(AstNode::TraitDecl { name, methods, span })
+        self.insert_node(AstNode::TraitDecl {
+            name,
+            methods,
+            span,
+        })
     }
 
     fn parse_impl_block(&mut self) -> ArenaId {
@@ -815,7 +980,11 @@ impl Parser {
             return self.invalid_node(start);
         }
         let mut methods = Vec::new();
-        while self.current().is_some() && !self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+        while self.current().is_some()
+            && !self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::RightBrace)
+        {
             if !self.current().is_some_and(|t| t.kind == TokenKind::Fn) {
                 self.push_error("expected 'fn' in impl block", self.current_span_or_eof());
                 self.bump();
@@ -846,10 +1015,16 @@ impl Parser {
         }
         let (params, param_defaults) = self.parse_fn_params(true);
         if !self.consume_if(TokenKind::RightParen) {
-            self.push_error("expected ')' after method parameters", self.current_span_or_eof());
+            self.push_error(
+                "expected ')' after method parameters",
+                self.current_span_or_eof(),
+            );
         }
         if !self.consume_if(TokenKind::Arrow) {
-            self.push_error("expected '->' after method parameters", self.current_span_or_eof());
+            self.push_error(
+                "expected '->' after method parameters",
+                self.current_span_or_eof(),
+            );
         }
         let return_ty = self.parse_type_ref();
         let empty_body = self.insert_node(AstNode::BlockStmt {
@@ -866,11 +1041,17 @@ impl Parser {
         })
     }
 
-    fn parse_fn_params(&mut self, allow_self: bool) -> (Vec<(ArenaId, ArenaId)>, Vec<Option<ArenaId>>) {
+    fn parse_fn_params(
+        &mut self,
+        allow_self: bool,
+    ) -> (Vec<(ArenaId, ArenaId)>, Vec<Option<ArenaId>>) {
         let mut params = Vec::new();
         let mut defaults = Vec::new();
         let mut saw_optional = false;
-        if self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+        if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::RightParen)
+        {
             return (params, defaults);
         }
         loop {
@@ -887,7 +1068,10 @@ impl Parser {
             } else {
                 let param_name = self.parse_required_identifier("expected parameter name");
                 if !self.consume_if(TokenKind::Colon) {
-                    self.push_error("expected ':' after parameter name", self.current_span_or_eof());
+                    self.push_error(
+                        "expected ':' after parameter name",
+                        self.current_span_or_eof(),
+                    );
                     break;
                 }
                 let param_ty = self.parse_type_ref();
@@ -964,16 +1148,25 @@ impl Parser {
             name: ident.lexeme,
             span: ident.span,
         });
-        while self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket) {
+        while self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::LeftBracket)
+        {
             let open = self.current_span_or_eof();
             self.bump();
-            if self.current().is_some_and(|t| t.kind == TokenKind::RightBracket) {
+            if self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::RightBracket)
+            {
                 self.push_error("expected index expression inside brackets", open);
                 return self.invalid_node(open);
             }
             let index = self.parse_expression();
             if !self.consume_if(TokenKind::RightBracket) {
-                self.push_error("expected ']' after index expression", self.current_span_or_eof());
+                self.push_error(
+                    "expected ']' after index expression",
+                    self.current_span_or_eof(),
+                );
                 return self.invalid_node(open);
             }
             let span = merge_span(self.node_span(target), self.node_span(index));
@@ -1074,7 +1267,10 @@ impl Parser {
             }
             idx += 1;
         }
-        matches!(self.peek_kind(idx), Some(TokenKind::InferAssign | TokenKind::Colon))
+        matches!(
+            self.peek_kind(idx),
+            Some(TokenKind::InferAssign | TokenKind::Colon)
+        )
     }
 
     fn parse_destructure_name_list(&mut self) -> Vec<ArenaId> {
@@ -1084,7 +1280,10 @@ impl Parser {
             let token = match self.current() {
                 Some(token) if token.kind == TokenKind::Identifier => token.clone(),
                 _ => {
-                    self.push_error("expected identifier in tuple destructuring pattern", self.current_span_or_eof());
+                    self.push_error(
+                        "expected identifier in tuple destructuring pattern",
+                        self.current_span_or_eof(),
+                    );
                     break;
                 }
             };
@@ -1096,7 +1295,11 @@ impl Parser {
             if !self.consume_if(TokenKind::Comma) {
                 break;
             }
-            if has_parens && self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+            if has_parens
+                && self
+                    .current()
+                    .is_some_and(|t| t.kind == TokenKind::RightParen)
+            {
                 break;
             }
         }
@@ -1107,7 +1310,10 @@ impl Parser {
             );
         }
         if has_parens && !self.consume_if(TokenKind::RightParen) {
-            self.push_error("expected ')' in tuple destructuring declaration", self.current_span_or_eof());
+            self.push_error(
+                "expected ')' in tuple destructuring declaration",
+                self.current_span_or_eof(),
+            );
         }
         names
     }
@@ -1165,7 +1371,9 @@ impl Parser {
     }
 
     pub(super) fn peek_kind(&self, lookahead: usize) -> Option<TokenKind> {
-        self.tokens.get(self.pos + lookahead).map(|t| t.kind.clone())
+        self.tokens
+            .get(self.pos + lookahead)
+            .map(|t| t.kind.clone())
     }
 
     pub(super) fn bump(&mut self) {
@@ -1193,7 +1401,10 @@ impl Parser {
         if self.pos == 0 {
             fallback
         } else {
-            self.tokens.get(self.pos - 1).map(|t| t.span).unwrap_or(fallback)
+            self.tokens
+                .get(self.pos - 1)
+                .map(|t| t.span)
+                .unwrap_or(fallback)
         }
     }
 
@@ -1224,7 +1435,9 @@ impl Parser {
     }
 
     pub(super) fn current_span_or_eof(&self) -> Span {
-        self.current().map(|t| t.span).unwrap_or_else(|| self.eof_span())
+        self.current()
+            .map(|t| t.span)
+            .unwrap_or_else(|| self.eof_span())
     }
 
     pub(super) fn push_error(&mut self, message: impl Into<String>, span: Span) {
@@ -1356,8 +1569,14 @@ mod tests {
             panic!("expected block statement");
         };
         assert_eq!(statements.len(), 2);
-        assert!(matches!(ast.get(statements[0]), Some(AstNode::LetDecl { .. })));
-        assert!(matches!(ast.get(statements[1]), Some(AstNode::ExprStmt { .. })));
+        assert!(matches!(
+            ast.get(statements[0]),
+            Some(AstNode::LetDecl { .. })
+        ));
+        assert!(matches!(
+            ast.get(statements[1]),
+            Some(AstNode::ExprStmt { .. })
+        ));
     }
 
     #[test]
@@ -1366,7 +1585,11 @@ mod tests {
         let lex_out = lex(FileId::from_u32(8), source);
         let (_ast, diagnostics) = parse(FileId::from_u32(8), source.len() as u32, lex_out.tokens);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("expected '}'")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("expected '}'"))
+        );
     }
 
     #[test]
@@ -1394,7 +1617,8 @@ mod tests {
         let AstNode::BinaryExpr {
             op: BinaryOp::LogicalOr,
             ..
-        } = ast.get(*value).expect("logical or root") else {
+        } = ast.get(*value).expect("logical or root")
+        else {
             panic!("expected logical or at root");
         };
     }
@@ -1412,7 +1636,8 @@ mod tests {
             op: BinaryOp::Power,
             right,
             ..
-        } = ast.get(*value).expect("outer pow") else {
+        } = ast.get(*value).expect("outer pow")
+        else {
             panic!("expected power expression");
         };
         assert!(matches!(
@@ -1463,10 +1688,14 @@ mod tests {
             then_branch,
             else_branch,
             ..
-        } = ast.get(root).expect("if stmt") else {
+        } = ast.get(root).expect("if stmt")
+        else {
             panic!("expected if statement");
         };
-        assert!(matches!(ast.get(*then_branch), Some(AstNode::BlockStmt { .. })));
+        assert!(matches!(
+            ast.get(*then_branch),
+            Some(AstNode::BlockStmt { .. })
+        ));
         let else_id = else_branch.expect("else branch");
         assert!(matches!(
             ast.get(else_id),
@@ -1480,9 +1709,11 @@ mod tests {
         let lex_out = lex(FileId::from_u32(14), source);
         let (_ast, diagnostics) = parse(FileId::from_u32(14), source.len() as u32, lex_out.tokens);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("expected '{' after if condition")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("expected '{' after if condition"))
+        );
     }
 
     #[test]
@@ -1491,9 +1722,10 @@ mod tests {
         let lex_out = lex(FileId::from_u32(15), source);
         let (_ast, diagnostics) = parse(FileId::from_u32(15), source.len() as u32, lex_out.tokens);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("unexpected 'else' without matching 'if'")));
+        assert!(diagnostics.iter().any(|d| {
+            d.message
+                .contains("unexpected 'else' without matching 'if'")
+        }));
     }
 
     #[test]
@@ -1502,7 +1734,10 @@ mod tests {
         let lex_out = lex(FileId::from_u32(16), source);
         let (ast, diagnostics) = parse(FileId::from_u32(16), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
-        assert!(matches!(ast.get(ast.roots[0]), Some(AstNode::WhileStmt { .. })));
+        assert!(matches!(
+            ast.get(ast.roots[0]),
+            Some(AstNode::WhileStmt { .. })
+        ));
     }
 
     #[test]
@@ -1511,7 +1746,11 @@ mod tests {
         let lex_out = lex(FileId::from_u32(17), source);
         let (_ast, diagnostics) = parse(FileId::from_u32(17), source.len() as u32, lex_out.tokens);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("expected '{' after while condition")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("expected '{' after while condition"))
+        );
     }
 
     #[test]
@@ -1520,7 +1759,11 @@ mod tests {
         let lex_out = lex(FileId::from_u32(18), source);
         let (_ast, diagnostics) = parse(FileId::from_u32(18), source.len() as u32, lex_out.tokens);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics.iter().any(|d| d.message.contains("break used outside of loop")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("break used outside of loop"))
+        );
     }
 
     #[test]
@@ -1529,9 +1772,11 @@ mod tests {
         let lex_out = lex(FileId::from_u32(19), source);
         let (_ast, diagnostics) = parse(FileId::from_u32(19), source.len() as u32, lex_out.tokens);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("continue used outside of loop")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("continue used outside of loop"))
+        );
     }
 
     #[test]
@@ -1540,7 +1785,10 @@ mod tests {
         let lex_out = lex(FileId::from_u32(43), source);
         let (ast, diagnostics) = parse(FileId::from_u32(43), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
-        assert!(matches!(ast.get(ast.roots[0]), Some(AstNode::ForStmt { .. })));
+        assert!(matches!(
+            ast.get(ast.roots[0]),
+            Some(AstNode::ForStmt { .. })
+        ));
     }
 
     #[test]
@@ -1549,7 +1797,13 @@ mod tests {
         let lex_out = lex(FileId::from_u32(44), source);
         let (ast, diagnostics) = parse(FileId::from_u32(44), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
-        let Some(AstNode::ForStmt { init, condition, step, .. }) = ast.get(ast.roots[0]) else {
+        let Some(AstNode::ForStmt {
+            init,
+            condition,
+            step,
+            ..
+        }) = ast.get(ast.roots[0])
+        else {
             panic!("expected for stmt");
         };
         assert!(init.is_none());
@@ -1563,9 +1817,11 @@ mod tests {
         let lex_out = lex(FileId::from_u32(45), source);
         let (_ast, diagnostics) = parse(FileId::from_u32(45), source.len() as u32, lex_out.tokens);
         assert!(diagnostics.has_errors());
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("for init must use typed declaration")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("for init must use typed declaration"))
+        );
     }
 
     #[test]
@@ -1574,7 +1830,10 @@ mod tests {
         let lex_out = lex(FileId::from_u32(47), source);
         let (ast, diagnostics) = parse(FileId::from_u32(47), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
-        assert!(matches!(ast.get(ast.roots[0]), Some(AstNode::FnDecl { .. })));
+        assert!(matches!(
+            ast.get(ast.roots[0]),
+            Some(AstNode::FnDecl { .. })
+        ));
     }
 
     #[test]
@@ -1583,10 +1842,15 @@ mod tests {
         let lex_out = lex(FileId::from_u32(48), source);
         let (ast, diagnostics) = parse(FileId::from_u32(48), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
-        let Some(AstNode::LetDecl { ty: Some(ty_id), .. }) = ast.get(ast.roots[0]) else {
+        let Some(AstNode::LetDecl {
+            ty: Some(ty_id), ..
+        }) = ast.get(ast.roots[0])
+        else {
             panic!("expected typed let");
         };
-        assert!(matches!(ast.get(*ty_id), Some(AstNode::TypeName { name, .. }) if name.starts_with("fn(")));
+        assert!(
+            matches!(ast.get(*ty_id), Some(AstNode::TypeName { name, .. }) if name.starts_with("fn("))
+        );
     }
 
     #[test]
@@ -1601,9 +1865,11 @@ mod tests {
         let Some(AstNode::BlockStmt { statements, .. }) = ast.get(*body) else {
             panic!("expected block");
         };
-        assert!(statements
-            .iter()
-            .any(|id| matches!(ast.get(*id), Some(AstNode::FnDecl { .. }))));
+        assert!(
+            statements
+                .iter()
+                .any(|id| matches!(ast.get(*id), Some(AstNode::FnDecl { .. })))
+        );
     }
 
     #[test]
@@ -1692,10 +1958,11 @@ mod tests {
         let (ast, diagnostics) = parse(FileId::from_u32(41), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
         assert_eq!(ast.roots.len(), 11);
-        assert!(ast
-            .roots
-            .iter()
-            .all(|id| matches!(ast.get(*id), Some(AstNode::CompoundAssignStmt { .. }))));
+        assert!(
+            ast.roots
+                .iter()
+                .all(|id| matches!(ast.get(*id), Some(AstNode::CompoundAssignStmt { .. })))
+        );
     }
 
     #[test]
@@ -1712,14 +1979,22 @@ mod tests {
         let lex_out = lex(FileId::from_u32(53), source);
         let (ast, diagnostics) = parse(FileId::from_u32(53), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
-        let AstNode::LetDecl { value: tuple_value, .. } = ast.get(ast.roots[0]).expect("let t") else {
+        let AstNode::LetDecl {
+            value: tuple_value, ..
+        } = ast.get(ast.roots[0]).expect("let t")
+        else {
             panic!("expected tuple let");
         };
-        assert!(matches!(ast.get(*tuple_value), Some(AstNode::TupleLiteral { items, .. }) if items.len() == 2));
+        assert!(
+            matches!(ast.get(*tuple_value), Some(AstNode::TupleLiteral { items, .. }) if items.len() == 2)
+        );
         let AstNode::LetDecl { value: x_value, .. } = ast.get(ast.roots[1]).expect("let x") else {
             panic!("expected let x");
         };
-        assert!(matches!(ast.get(*x_value), Some(AstNode::TupleAccess { index: 0, .. })));
+        assert!(matches!(
+            ast.get(*x_value),
+            Some(AstNode::TupleAccess { index: 0, .. })
+        ));
         let AstNode::LetDecl { value: y_value, .. } = ast.get(ast.roots[2]).expect("let y") else {
             panic!("expected let y");
         };
@@ -1754,7 +2029,8 @@ mod tests {
 
     #[test]
     fn parses_array_spread_and_optional_param_defaults() {
-        let source = "fn f(a: i32, b: i32 = 2) -> i32 { return a + b }\narr: [i32] = [1, ...[2, 3]]";
+        let source =
+            "fn f(a: i32, b: i32 = 2) -> i32 { return a + b }\narr: [i32] = [1, ...[2, 3]]";
         let lex_out = lex(FileId::from_u32(532), source);
         let (ast, diagnostics) = parse(FileId::from_u32(532), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
@@ -1776,13 +2052,17 @@ mod tests {
 
     #[test]
     fn parses_range_and_for_in_forms() {
-        let source = "a := 0..10; b := 0..=10; for i: i32 in a { print(i) }; for j in b { print(j) }";
+        let source =
+            "a := 0..10; b := 0..=10; for i: i32 in a { print(i) }; for j in b { print(j) }";
         let lex_out = lex(FileId::from_u32(533), source);
         let (ast, diagnostics) = parse(FileId::from_u32(533), source.len() as u32, lex_out.tokens);
         assert!(
             !diagnostics.has_errors(),
             "{:?}",
-            diagnostics.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+            diagnostics
+                .iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
         );
         assert!(matches!(
             ast.get(ast.roots[0]),
@@ -1792,8 +2072,14 @@ mod tests {
             ast.get(ast.roots[1]),
             Some(AstNode::LetDecl { value, .. }) if matches!(ast.get(*value), Some(AstNode::RangeExpr { inclusive: true, .. }))
         ));
-        assert!(matches!(ast.get(ast.roots[2]), Some(AstNode::ForInStmt { ty: Some(_), .. })));
-        assert!(matches!(ast.get(ast.roots[3]), Some(AstNode::ForInStmt { ty: None, .. })));
+        assert!(matches!(
+            ast.get(ast.roots[2]),
+            Some(AstNode::ForInStmt { ty: Some(_), .. })
+        ));
+        assert!(matches!(
+            ast.get(ast.roots[3]),
+            Some(AstNode::ForInStmt { ty: None, .. })
+        ));
     }
 
     #[test]
@@ -1843,9 +2129,21 @@ mod tests {
         let lex_out = lex(FileId::from_u32(57), source);
         let (ast, diagnostics) = parse(FileId::from_u32(57), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
-        assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::StructDecl { .. }))));
-        assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::TraitDecl { .. }))));
-        assert!(ast.roots.iter().any(|id| matches!(ast.get(*id), Some(AstNode::ImplBlock { .. }))));
+        assert!(
+            ast.roots
+                .iter()
+                .any(|id| matches!(ast.get(*id), Some(AstNode::StructDecl { .. })))
+        );
+        assert!(
+            ast.roots
+                .iter()
+                .any(|id| matches!(ast.get(*id), Some(AstNode::TraitDecl { .. })))
+        );
+        assert!(
+            ast.roots
+                .iter()
+                .any(|id| matches!(ast.get(*id), Some(AstNode::ImplBlock { .. })))
+        );
     }
 
     #[test]
@@ -1867,10 +2165,16 @@ mod tests {
         let Some(AstNode::LetDecl { value, .. }) = ast.get(statements[0]) else {
             panic!("expected let");
         };
-        assert!(matches!(ast.get(*value), Some(AstNode::PropagateExpr { .. })));
+        assert!(matches!(
+            ast.get(*value),
+            Some(AstNode::PropagateExpr { .. })
+        ));
         let Some(AstNode::LetDecl { value, .. }) = ast.get(ast.roots[2]) else {
             panic!("expected let");
         };
-        assert!(matches!(ast.get(*value), Some(AstNode::TryCatchExpr { .. })));
+        assert!(matches!(
+            ast.get(*value),
+            Some(AstNode::TryCatchExpr { .. })
+        ));
     }
 }

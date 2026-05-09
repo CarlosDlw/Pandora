@@ -11,7 +11,7 @@ use crate::{
         BinOp, Hir, HirArrayItem, HirExpr, HirId, HirStmt, IncDecOp as HirIncDecOp,
         IncDecPosition as HirIncDecPosition, SymbolId, UnaryOp as HirUnaryOp,
     },
-    integer_lit::{bytecode_int_from_checked_literal, literal_f64, literal_u128, IntConst},
+    integer_lit::{IntConst, bytecode_int_from_checked_literal, literal_f64, literal_u128},
 };
 
 use super::{
@@ -83,6 +83,7 @@ fn expr_span(hir: &Hir, id: HirId) -> Span {
         .unwrap_or_else(|| Span::new_unchecked(hir.file_id, 0, 0))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_stmt(
     hir: &Hir,
     model: &SemanticModel,
@@ -95,7 +96,10 @@ fn emit_stmt(
 ) {
     match stmt {
         HirStmt::Let {
-            symbol, value, span, ..
+            symbol,
+            value,
+            span,
+            ..
         } => {
             emit_expr(hir, model, *value, b, diagnostics, method_table);
             b.emit(Op::Bind(*symbol), *span);
@@ -137,10 +141,7 @@ fn emit_stmt(
             }
         }
         HirStmt::TupleDestructure {
-            names,
-            value,
-            span,
-            ..
+            names, value, span, ..
         } => {
             emit_expr(hir, model, *value, b, diagnostics, method_table);
             for (idx, sym) in names.iter().enumerate() {
@@ -151,7 +152,10 @@ fn emit_stmt(
             b.emit(Op::Pop, *span);
         }
         HirStmt::Assign {
-            symbol, value, span, ..
+            symbol,
+            value,
+            span,
+            ..
         } => {
             emit_expr(hir, model, *value, b, diagnostics, method_table);
             b.emit(Op::Assign(*symbol), *span);
@@ -174,7 +178,16 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in stmts {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
+                emit_stmt(
+                    hir,
+                    model,
+                    stmt,
+                    b,
+                    diagnostics,
+                    loop_stack,
+                    scope_depth,
+                    method_table,
+                );
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
@@ -190,7 +203,16 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in then_branch {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
+                emit_stmt(
+                    hir,
+                    model,
+                    stmt,
+                    b,
+                    diagnostics,
+                    loop_stack,
+                    scope_depth,
+                    method_table,
+                );
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
@@ -198,23 +220,44 @@ fn emit_stmt(
                 let jump_end_at = b.emit_placeholder_jump(*span);
                 let else_start = b.len();
                 if !b.patch_jump_target(jump_if_false_at, else_start) {
-                    diagnostics.push(Diagnostic::new("failed to patch conditional jump", *span, Severity::Error));
+                    diagnostics.push(Diagnostic::new(
+                        "failed to patch conditional jump",
+                        *span,
+                        Severity::Error,
+                    ));
                 }
                 b.emit(Op::EnterScope, *span);
                 *scope_depth += 1;
                 for stmt in else_stmts {
-                    emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
+                    emit_stmt(
+                        hir,
+                        model,
+                        stmt,
+                        b,
+                        diagnostics,
+                        loop_stack,
+                        scope_depth,
+                        method_table,
+                    );
                 }
                 b.emit(Op::ExitScope, *span);
                 *scope_depth = scope_depth.saturating_sub(1);
                 let end = b.len();
                 if !b.patch_jump_target(jump_end_at, end) {
-                    diagnostics.push(Diagnostic::new("failed to patch end jump", *span, Severity::Error));
+                    diagnostics.push(Diagnostic::new(
+                        "failed to patch end jump",
+                        *span,
+                        Severity::Error,
+                    ));
                 }
             } else {
                 let end = b.len();
                 if !b.patch_jump_target(jump_if_false_at, end) {
-                    diagnostics.push(Diagnostic::new("failed to patch conditional jump", *span, Severity::Error));
+                    diagnostics.push(Diagnostic::new(
+                        "failed to patch conditional jump",
+                        *span,
+                        Severity::Error,
+                    ));
                 }
             }
         }
@@ -237,7 +280,16 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in body {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
+                emit_stmt(
+                    hir,
+                    model,
+                    stmt,
+                    b,
+                    diagnostics,
+                    loop_stack,
+                    scope_depth,
+                    method_table,
+                );
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
@@ -245,23 +297,39 @@ fn emit_stmt(
             b.emit(Op::Jump(cond_target), *span);
             let loop_end = b.len();
             if !b.patch_jump_target(jump_out_at, loop_end) {
-                diagnostics.push(Diagnostic::new("failed to patch while exit jump", *span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "failed to patch while exit jump",
+                    *span,
+                    Severity::Error,
+                ));
             }
             if let Some(ctx) = loop_stack.pop() {
                 for site in ctx.break_sites {
                     if !b.patch_jump_target(site, loop_end) {
-                        diagnostics.push(Diagnostic::new("failed to patch break jump", *span, Severity::Error));
+                        diagnostics.push(Diagnostic::new(
+                            "failed to patch break jump",
+                            *span,
+                            Severity::Error,
+                        ));
                     }
                 }
                 if let Some(continue_target) = ctx.continue_target {
                     for site in ctx.continue_sites {
                         if !b.patch_jump_target(site, continue_target) {
-                            diagnostics.push(Diagnostic::new("failed to patch continue jump", *span, Severity::Error));
+                            diagnostics.push(Diagnostic::new(
+                                "failed to patch continue jump",
+                                *span,
+                                Severity::Error,
+                            ));
                         }
                     }
                 }
             } else {
-                diagnostics.push(Diagnostic::new("internal loop stack underflow in emitter", *span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "internal loop stack underflow in emitter",
+                    *span,
+                    Severity::Error,
+                ));
             }
         }
         HirStmt::For {
@@ -274,7 +342,16 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             if let Some(init_stmt) = init {
-                emit_stmt(hir, model, init_stmt, b, diagnostics, loop_stack, scope_depth, method_table);
+                emit_stmt(
+                    hir,
+                    model,
+                    init_stmt,
+                    b,
+                    diagnostics,
+                    loop_stack,
+                    scope_depth,
+                    method_table,
+                );
             }
 
             let cond_target = b.len();
@@ -295,7 +372,16 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in body {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
+                emit_stmt(
+                    hir,
+                    model,
+                    stmt,
+                    b,
+                    diagnostics,
+                    loop_stack,
+                    scope_depth,
+                    method_table,
+                );
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
@@ -312,21 +398,37 @@ fn emit_stmt(
             let loop_end = b.len();
 
             if !b.patch_jump_target(jump_out_at, loop_end) {
-                diagnostics.push(Diagnostic::new("failed to patch for exit jump", *span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "failed to patch for exit jump",
+                    *span,
+                    Severity::Error,
+                ));
             }
             if let Some(ctx) = loop_stack.pop() {
                 for site in ctx.break_sites {
                     if !b.patch_jump_target(site, loop_end) {
-                        diagnostics.push(Diagnostic::new("failed to patch break jump", *span, Severity::Error));
+                        diagnostics.push(Diagnostic::new(
+                            "failed to patch break jump",
+                            *span,
+                            Severity::Error,
+                        ));
                     }
                 }
                 for site in ctx.continue_sites {
                     if !b.patch_jump_target(site, continue_target) {
-                        diagnostics.push(Diagnostic::new("failed to patch continue jump", *span, Severity::Error));
+                        diagnostics.push(Diagnostic::new(
+                            "failed to patch continue jump",
+                            *span,
+                            Severity::Error,
+                        ));
                     }
                 }
             } else {
-                diagnostics.push(Diagnostic::new("internal loop stack underflow in emitter", *span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "internal loop stack underflow in emitter",
+                    *span,
+                    Severity::Error,
+                ));
             }
 
             b.emit(Op::ExitScope, *span);
@@ -364,7 +466,16 @@ fn emit_stmt(
             b.emit(Op::EnterScope, *span);
             *scope_depth += 1;
             for stmt in body {
-                emit_stmt(hir, model, stmt, b, diagnostics, loop_stack, scope_depth, method_table);
+                emit_stmt(
+                    hir,
+                    model,
+                    stmt,
+                    b,
+                    diagnostics,
+                    loop_stack,
+                    scope_depth,
+                    method_table,
+                );
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
@@ -377,14 +488,22 @@ fn emit_stmt(
 
             let loop_end = b.len();
             if !b.patch_jump_target(jump_out_at, loop_end) {
-                diagnostics.push(Diagnostic::new("failed to patch for-in exit jump", *span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "failed to patch for-in exit jump",
+                    *span,
+                    Severity::Error,
+                ));
             }
             b.emit(Op::ExitScope, *span);
             *scope_depth = scope_depth.saturating_sub(1);
         }
         HirStmt::Break { span } => {
             let Some(loop_ctx) = loop_stack.last_mut() else {
-                diagnostics.push(Diagnostic::new("break used outside of loop", *span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "break used outside of loop",
+                    *span,
+                    Severity::Error,
+                ));
                 return;
             };
             emit_scope_unwind_for_loop_exit(b, *span, *scope_depth, loop_ctx.scope_depth_at_loop);
@@ -393,7 +512,11 @@ fn emit_stmt(
         }
         HirStmt::Continue { span } => {
             let Some(loop_ctx) = loop_stack.last() else {
-                diagnostics.push(Diagnostic::new("continue used outside of loop", *span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "continue used outside of loop",
+                    *span,
+                    Severity::Error,
+                ));
                 return;
             };
             emit_scope_unwind_for_loop_exit(b, *span, *scope_depth, loop_ctx.scope_depth_at_loop);
@@ -424,7 +547,11 @@ fn emit_stmt(
         }
         HirStmt::Import { .. } | HirStmt::FromImport { .. } => {}
         HirStmt::Invalid { span } => {
-            diagnostics.push(Diagnostic::new("invalid statement skipped in bytecode", *span, Severity::Error));
+            diagnostics.push(Diagnostic::new(
+                "invalid statement skipped in bytecode",
+                *span,
+                Severity::Error,
+            ));
         }
     }
 }
@@ -460,17 +587,17 @@ fn emit_expr(
     let span = expr_span(hir, id);
 
     let Some(expr) = hir.exprs.get(id) else {
-        diagnostics.push(Diagnostic::new("missing hir expression", span, Severity::Error));
+        diagnostics.push(Diagnostic::new(
+            "missing hir expression",
+            span,
+            Severity::Error,
+        ));
         return;
     };
 
     match expr {
         HirExpr::Int(raw) => {
-            let hir_ty = model
-                .types
-                .get(&id)
-                .cloned()
-                .unwrap_or(Type::Unknown);
+            let hir_ty = model.types.get(&id).cloned().unwrap_or(Type::Unknown);
 
             match emit_int_const(raw, &hir_ty) {
                 Ok(IntConst::Signed(v)) => b.emit(Op::ConstI128(v), span),
@@ -579,14 +706,13 @@ fn emit_expr(
                 emit_expr(hir, model, *a, b, diagnostics, method_table);
             }
             let mut final_argc = args.len();
-            if let Some(HirExpr::Var(sym)) = hir.exprs.get(*callee) {
-                if let Some(defaults) = find_fn_param_defaults(hir, *sym) {
-                    if args.len() < defaults.len() {
-                        for default_expr in defaults.iter().skip(args.len()).flatten() {
-                            emit_expr(hir, model, *default_expr, b, diagnostics, method_table);
-                            final_argc += 1;
-                        }
-                    }
+            if let Some(HirExpr::Var(sym)) = hir.exprs.get(*callee)
+                && let Some(defaults) = find_fn_param_defaults(hir, *sym)
+                && args.len() < defaults.len()
+            {
+                for default_expr in defaults.iter().skip(args.len()).flatten() {
+                    emit_expr(hir, model, *default_expr, b, diagnostics, method_table);
+                    final_argc += 1;
                 }
             }
             match u8::try_from(final_argc) {
@@ -629,17 +755,32 @@ fn emit_expr(
                 }
                 match u8::try_from(args.len() + 1) {
                     Ok(argc) => b.emit(Op::CallValue(argc), span),
-                    Err(_) => diagnostics.push(Diagnostic::new("too many arguments for builtin method call", span, Severity::Error)),
+                    Err(_) => diagnostics.push(Diagnostic::new(
+                        "too many arguments for builtin method call",
+                        span,
+                        Severity::Error,
+                    )),
                 }
                 return;
             }
             let recv_ty = model.types.get(receiver).cloned().unwrap_or(Type::Unknown);
             let Type::Struct(struct_id) = recv_ty else {
-                diagnostics.push(Diagnostic::new("method call receiver is not struct", span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "method call receiver is not struct",
+                    span,
+                    Severity::Error,
+                ));
                 return;
             };
-            let Some(method_symbol) = method_table.get(&(struct_id, method.clone(), true)).copied() else {
-                diagnostics.push(Diagnostic::new(format!("unknown method '{}'", method), span, Severity::Error));
+            let Some(method_symbol) = method_table
+                .get(&(struct_id, method.clone(), true))
+                .copied()
+            else {
+                diagnostics.push(Diagnostic::new(
+                    format!("unknown method '{}'", method),
+                    span,
+                    Severity::Error,
+                ));
                 return;
             };
             b.emit(Op::Load(method_symbol), span);
@@ -649,7 +790,11 @@ fn emit_expr(
             }
             match u8::try_from(args.len() + 1) {
                 Ok(argc) => b.emit(Op::CallValue(argc), span),
-                Err(_) => diagnostics.push(Diagnostic::new("too many arguments for method call", span, Severity::Error)),
+                Err(_) => diagnostics.push(Diagnostic::new(
+                    "too many arguments for method call",
+                    span,
+                    Severity::Error,
+                )),
             }
         }
         HirExpr::StaticMethodCall {
@@ -668,7 +813,10 @@ fn emit_expr(
                     return;
                 }
             };
-            let Some(method_symbol) = method_table.get(&(struct_id, method.clone(), false)).copied() else {
+            let Some(method_symbol) = method_table
+                .get(&(struct_id, method.clone(), false))
+                .copied()
+            else {
                 diagnostics.push(Diagnostic::new(
                     format!("unknown static method '{}::{}'", type_name, method),
                     span,
@@ -695,7 +843,11 @@ fn emit_expr(
             }
             match u8::try_from(items.len()) {
                 Ok(count) => b.emit(Op::MakeTuple(count), span),
-                Err(_) => diagnostics.push(Diagnostic::new("tuple literal too large", span, Severity::Error)),
+                Err(_) => diagnostics.push(Diagnostic::new(
+                    "tuple literal too large",
+                    span,
+                    Severity::Error,
+                )),
             }
         }
         HirExpr::Array(items) => {
@@ -721,7 +873,11 @@ fn emit_expr(
             }
             match u8::try_from(entries.len()) {
                 Ok(count) => b.emit(Op::MakeMap(count), span),
-                Err(_) => diagnostics.push(Diagnostic::new("map literal too large", span, Severity::Error)),
+                Err(_) => diagnostics.push(Diagnostic::new(
+                    "map literal too large",
+                    span,
+                    Severity::Error,
+                )),
             }
         }
         HirExpr::Set(items) => {
@@ -730,7 +886,11 @@ fn emit_expr(
             }
             match u8::try_from(items.len()) {
                 Ok(count) => b.emit(Op::MakeSet(count), span),
-                Err(_) => diagnostics.push(Diagnostic::new("set literal too large", span, Severity::Error)),
+                Err(_) => diagnostics.push(Diagnostic::new(
+                    "set literal too large",
+                    span,
+                    Severity::Error,
+                )),
             }
         }
         HirExpr::TupleAccess { tuple, index } => {
@@ -787,7 +947,11 @@ fn emit_expr(
             b.emit(Op::Return, span);
             let ok_target = b.len();
             if !b.patch_jump_target(continue_at, ok_target) {
-                diagnostics.push(Diagnostic::new("failed to patch '?' continue jump", span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "failed to patch '?' continue jump",
+                    span,
+                    Severity::Error,
+                ));
             }
             b.emit(Op::TupleGet(0), span);
         }
@@ -850,16 +1014,28 @@ fn emit_expr(
             let end_jump = b.emit_placeholder_jump(span);
             let success_label = b.len();
             if !b.patch_jump_target(success_jump, success_label) {
-                diagnostics.push(Diagnostic::new("failed to patch try success jump", span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "failed to patch try success jump",
+                    span,
+                    Severity::Error,
+                ));
             }
             b.emit(Op::TupleGet(0), span);
             let end_label = b.len();
             if !b.patch_jump_target(end_jump, end_label) {
-                diagnostics.push(Diagnostic::new("failed to patch try end jump", span, Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    "failed to patch try end jump",
+                    span,
+                    Severity::Error,
+                ));
             }
         }
         HirExpr::Invalid => {
-            diagnostics.push(Diagnostic::new("invalid expression in bytecode", span, Severity::Error));
+            diagnostics.push(Diagnostic::new(
+                "invalid expression in bytecode",
+                span,
+                Severity::Error,
+            ));
         }
     }
 }
@@ -888,10 +1064,7 @@ fn compile_function_chunk(
             method_table,
         );
     }
-    b.emit(
-        Op::ConstUnit,
-        Span::new_unchecked(hir.file_id, 0, 0),
-    );
+    b.emit(Op::ConstUnit, Span::new_unchecked(hir.file_id, 0, 0));
     b.emit(Op::Return, Span::new_unchecked(hir.file_id, 0, 0));
     FunctionChunk {
         params,
@@ -904,7 +1077,10 @@ fn collect_method_table(
     table: &mut std::collections::HashMap<(SymbolId, String, bool), SymbolId>,
 ) {
     for stmt in &hir.stmts {
-        if let HirStmt::ImplBlock { target, methods, .. } = stmt {
+        if let HirStmt::ImplBlock {
+            target, methods, ..
+        } = stmt
+        {
             let Type::Struct(struct_id) = target else {
                 continue;
             };
@@ -923,12 +1099,16 @@ fn collect_method_table(
     }
 }
 
-fn resolve_struct_symbol_id_from_type_name(hir: &Hir, _model: &SemanticModel, type_name: &str) -> Option<SymbolId> {
+fn resolve_struct_symbol_id_from_type_name(
+    hir: &Hir,
+    _model: &SemanticModel,
+    type_name: &str,
+) -> Option<SymbolId> {
     for stmt in &hir.stmts {
-        if let HirStmt::StructDecl { symbol, name, .. } = stmt {
-            if name == type_name {
-                return Some(*symbol);
-            }
+        if let HirStmt::StructDecl { symbol, name, .. } = stmt
+            && name == type_name
+        {
+            return Some(*symbol);
         }
     }
     None
@@ -949,10 +1129,9 @@ fn find_fn_param_defaults(hir: &Hir, symbol: SymbolId) -> Option<&[Option<HirId>
                         param_defaults,
                         ..
                     } = method
+                        && *fn_symbol == symbol
                     {
-                        if *fn_symbol == symbol {
-                            return Some(param_defaults.as_slice());
-                        }
+                        return Some(param_defaults.as_slice());
                     }
                 }
             }
@@ -962,7 +1141,12 @@ fn find_fn_param_defaults(hir: &Hir, symbol: SymbolId) -> Option<&[Option<HirId>
     None
 }
 
-fn emit_numeric_one_const(b: &mut ChunkBuilder, span: Span, ty: &Type, diagnostics: &mut Diagnostics) {
+fn emit_numeric_one_const(
+    b: &mut ChunkBuilder,
+    span: Span,
+    ty: &Type,
+    diagnostics: &mut Diagnostics,
+) {
     match ty {
         Type::Int { signed: true, .. } => b.emit(Op::ConstI128(1), span),
         Type::Int { signed: false, .. } => b.emit(Op::ConstU128(1), span),
@@ -1006,7 +1190,8 @@ mod tests {
     fn emits_scope_ops_for_block_stmt() {
         let src = "{ x := 1; print(x) }";
         let lex_output = lex(FileId::from_u32(31), src);
-        let (ast, parser_diagnostics) = parse(FileId::from_u32(31), src.len() as u32, lex_output.tokens);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(31), src.len() as u32, lex_output.tokens);
         assert!(!parser_diagnostics.has_errors());
         let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
         assert!(!lowering_diagnostics.has_errors());
@@ -1023,7 +1208,8 @@ mod tests {
     fn emits_new_operator_ops() {
         let src = "x := ((5 % 2) == 1) && !false; y := ~3; z := 2 ** 3";
         let lex_output = lex(FileId::from_u32(32), src);
-        let (ast, parser_diagnostics) = parse(FileId::from_u32(32), src.len() as u32, lex_output.tokens);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(32), src.len() as u32, lex_output.tokens);
         assert!(!parser_diagnostics.has_errors());
         let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
         assert!(!lowering_diagnostics.has_errors());
@@ -1043,7 +1229,8 @@ mod tests {
     fn emits_if_jumps() {
         let src = "if true { x := 1 } else { x := 2 }";
         let lex_output = lex(FileId::from_u32(33), src);
-        let (ast, parser_diagnostics) = parse(FileId::from_u32(33), src.len() as u32, lex_output.tokens);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(33), src.len() as u32, lex_output.tokens);
         assert!(!parser_diagnostics.has_errors());
         let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
         assert!(!lowering_diagnostics.has_errors());
@@ -1059,7 +1246,8 @@ mod tests {
     fn emits_function_closure_and_callvalue() {
         let src = "fn add(a: i32, b: i32) -> i32 { return a + b }; f: fn(i32, i32) -> i32 = add; print(f(1, 2))";
         let lex_output = lex(FileId::from_u32(34), src);
-        let (ast, parser_diagnostics) = parse(FileId::from_u32(34), src.len() as u32, lex_output.tokens);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(34), src.len() as u32, lex_output.tokens);
         assert!(!parser_diagnostics.has_errors());
         let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
         assert!(!lowering_diagnostics.has_errors());
@@ -1075,7 +1263,8 @@ mod tests {
     fn emits_tuple_ops() {
         let src = r#"t: (i32, str) = (1, "a"); x := t.0"#;
         let lex_output = lex(FileId::from_u32(35), src);
-        let (ast, parser_diagnostics) = parse(FileId::from_u32(35), src.len() as u32, lex_output.tokens);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(35), src.len() as u32, lex_output.tokens);
         assert!(!parser_diagnostics.has_errors());
         let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
         assert!(!lowering_diagnostics.has_errors());
@@ -1091,7 +1280,8 @@ mod tests {
     fn emits_make_tuple_for_multi_return_function() {
         let src = "fn pair(a: i32, b: i32) -> (i32, i32) { return a, b }; print(pair(1, 2).0)";
         let lex_output = lex(FileId::from_u32(36), src);
-        let (ast, parser_diagnostics) = parse(FileId::from_u32(36), src.len() as u32, lex_output.tokens);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(36), src.len() as u32, lex_output.tokens);
         assert!(!parser_diagnostics.has_errors());
         let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
         assert!(!lowering_diagnostics.has_errors());
@@ -1099,9 +1289,12 @@ mod tests {
         assert!(!analysis_diagnostics.has_errors());
         let (chunk, compile_diagnostics) = compile_program(&hir, &model);
         assert!(!compile_diagnostics.has_errors());
-        assert!(chunk
-            .functions
-            .values()
-            .any(|fn_chunk| fn_chunk.chunk.code.iter().any(|op| matches!(op, Op::MakeTuple(2)))));
+        assert!(chunk.functions.values().any(|fn_chunk| {
+            fn_chunk
+                .chunk
+                .code
+                .iter()
+                .any(|op| matches!(op, Op::MakeTuple(2)))
+        }));
     }
 }

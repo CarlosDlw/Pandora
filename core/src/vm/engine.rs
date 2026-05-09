@@ -1,6 +1,14 @@
 //! Linear VM execution: intrinsics use [`SymbolOrigin::Intrinsic`];
 //! user-defined callees are rejected until closures/functions exist.
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STD;
+use csv::{ReaderBuilder as CsvReaderBuilder, WriterBuilder as CsvWriterBuilder};
+use quick_xml::Reader as XmlReader;
+use quick_xml::events::Event as XmlEvent;
+use regex::Regex;
+use serde_json::Value as JsonValue;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fs::File;
@@ -11,14 +19,6 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64_STD;
-use csv::{ReaderBuilder as CsvReaderBuilder, WriterBuilder as CsvWriterBuilder};
-use quick_xml::Reader as XmlReader;
-use quick_xml::events::Event as XmlEvent;
-use regex::Regex;
-use serde_json::Value as JsonValue;
-use sha2::{Digest, Sha256};
 
 use foundation::{
     diagnostics::{Diagnostic, Diagnostics, Severity},
@@ -27,11 +27,7 @@ use foundation::{
 
 use crate::hir::symbols::{SymbolId, SymbolOrigin, SymbolTable};
 
-use super::{
-    bytecode::Op,
-    chunk::Chunk,
-    value::Value,
-};
+use super::{bytecode::Op, chunk::Chunk, value::Value};
 
 #[derive(Debug, Clone)]
 struct CallFrame {
@@ -67,7 +63,11 @@ enum IntrinsicId {
 }
 
 impl<'a> Vm<'a> {
-    pub fn new(chunk: &'a Chunk, symbols: &'a SymbolTable, initial_env: HashMap<SymbolId, Value>) -> Self {
+    pub fn new(
+        chunk: &'a Chunk,
+        symbols: &'a SymbolTable,
+        initial_env: HashMap<SymbolId, Value>,
+    ) -> Self {
         let mut env = initial_env;
         for idx in 0..u32::MAX {
             let id = SymbolId(idx);
@@ -127,7 +127,6 @@ impl<'a> Vm<'a> {
                 diagnostics.push(d);
                 return Err(diagnostics);
             }
-
         }
 
         if !self.stack.is_empty() {
@@ -230,10 +229,13 @@ impl<'a> Vm<'a> {
                     }
                     (a, b) => {
                         return Err(Diagnostic::new(
-                            format!("range bounds must be same integer type, got {:?} and {:?}", a, b),
+                            format!(
+                                "range bounds must be same integer type, got {:?} and {:?}",
+                                a, b
+                            ),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                 }
                 self.stack.push(Value::Array(items));
@@ -251,7 +253,7 @@ impl<'a> Vm<'a> {
                             format!("array spread expects arrays, got {:?} and {:?}", a, b),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                 }
             }
@@ -305,7 +307,7 @@ impl<'a> Vm<'a> {
                             format!("index access on non-array value: {:?}", other),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                 }
             }
@@ -314,7 +316,11 @@ impl<'a> Vm<'a> {
                 match array_value {
                     Value::Array(items) => {
                         let n = i128::try_from(items.len()).map_err(|_| {
-                            Diagnostic::new("array length exceeds i128 range", span, Severity::Error)
+                            Diagnostic::new(
+                                "array length exceeds i128 range",
+                                span,
+                                Severity::Error,
+                            )
                         })?;
                         self.stack.push(Value::Int128(n));
                     }
@@ -323,7 +329,7 @@ impl<'a> Vm<'a> {
                             format!("array length on non-array value: {:?}", other),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                 }
             }
@@ -356,7 +362,7 @@ impl<'a> Vm<'a> {
                                     format!("unknown err field '{field}'"),
                                     span,
                                     Severity::Error,
-                                ))
+                                ));
                             }
                         };
                         self.stack.push(value);
@@ -382,17 +388,13 @@ impl<'a> Vm<'a> {
             }
 
             Op::Load(sym) => {
-                let v = self
-                    .env
-                    .get(sym)
-                    .cloned()
-                    .ok_or_else(|| {
-                        Diagnostic::new(
-                            "load of uninitialized or missing symbol",
-                            span,
-                            Severity::Error,
-                        )
-                    })?;
+                let v = self.env.get(sym).cloned().ok_or_else(|| {
+                    Diagnostic::new(
+                        "load of uninitialized or missing symbol",
+                        span,
+                        Severity::Error,
+                    )
+                })?;
                 self.stack.push(v);
             }
 
@@ -440,13 +442,21 @@ impl<'a> Vm<'a> {
                 let index_value = self.pop_one(span)?;
                 let index = to_usize_index(&index_value, span)?;
                 let Some(slot) = self.env.get_mut(sym) else {
-                    return Err(Diagnostic::new("array assignment target not found", span, Severity::Error));
+                    return Err(Diagnostic::new(
+                        "array assignment target not found",
+                        span,
+                        Severity::Error,
+                    ));
                 };
                 match slot {
                     Value::Array(items) => {
                         if index >= items.len() {
                             return Err(Diagnostic::new(
-                                format!("index out of bounds: index={}, len={}", index, items.len()),
+                                format!(
+                                    "index out of bounds: index={}, len={}",
+                                    index,
+                                    items.len()
+                                ),
                                 span,
                                 Severity::Error,
                             ));
@@ -458,7 +468,7 @@ impl<'a> Vm<'a> {
                             format!("index assignment on non-array value: {:?}", other),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                 }
             }
@@ -472,7 +482,8 @@ impl<'a> Vm<'a> {
                 let lhs = self.pop_one(span)?;
                 match (&lhs, &rhs) {
                     (Value::Str(_), _) | (_, Value::Str(_)) => {
-                        let result = format!("{}{}", lhs.display_for_print(), rhs.display_for_print());
+                        let result =
+                            format!("{}{}", lhs.display_for_print(), rhs.display_for_print());
                         self.stack.push(Value::Str(result));
                     }
                     _ => {
@@ -503,7 +514,7 @@ impl<'a> Vm<'a> {
                             format!("invalid operands for AddFloat: {:?} and {:?}", l, r),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                 }
             }
@@ -511,13 +522,15 @@ impl<'a> Vm<'a> {
                 let rhs = self.pop_one(span)?;
                 let lhs = self.pop_one(span)?;
                 match (lhs, rhs) {
-                    (Value::Str(a), Value::Str(b)) => self.stack.push(Value::Str(format!("{a}{b}"))),
+                    (Value::Str(a), Value::Str(b)) => {
+                        self.stack.push(Value::Str(format!("{a}{b}")))
+                    }
                     (l, r) => {
                         return Err(Diagnostic::new(
                             format!("invalid operands for StrConcat: {:?} and {:?}", l, r),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                 }
             }
@@ -551,7 +564,11 @@ impl<'a> Vm<'a> {
             Op::Shr => self.apply_shift(span, false)?,
             Op::JumpIfFalse(target) => {
                 if *target > self.chunk.code.len() {
-                    return Err(Diagnostic::new("invalid jump target", span, Severity::Error));
+                    return Err(Diagnostic::new(
+                        "invalid jump target",
+                        span,
+                        Severity::Error,
+                    ));
                 }
                 let value = self.pop_one(span)?;
                 if !is_truthy(&value) {
@@ -560,7 +577,11 @@ impl<'a> Vm<'a> {
             }
             Op::Jump(target) => {
                 if *target > self.chunk.code.len() {
-                    return Err(Diagnostic::new("invalid jump target", span, Severity::Error));
+                    return Err(Diagnostic::new(
+                        "invalid jump target",
+                        span,
+                        Severity::Error,
+                    ));
                 }
                 self.ip = *target;
             }
@@ -573,10 +594,10 @@ impl<'a> Vm<'a> {
                 });
             }
             Op::TryEnd => {
-                if let Some(last) = self.try_stack.last() {
-                    if last.call_depth == self.call_stack.len() {
-                        let _ = self.try_stack.pop();
-                    }
+                if let Some(last) = self.try_stack.last()
+                    && last.call_depth == self.call_stack.len()
+                {
+                    let _ = self.try_stack.pop();
                 }
             }
 
@@ -662,7 +683,7 @@ impl<'a> Vm<'a> {
                                 Severity::Error,
                             ));
                         }
-                        for (param, arg) in fn_chunk.params.iter().zip(args.into_iter()) {
+                        for (param, arg) in fn_chunk.params.iter().zip(args) {
                             captured.insert(*param, arg);
                         }
                         let previous = CallFrame {
@@ -698,7 +719,11 @@ impl<'a> Vm<'a> {
             }
             Op::Swap => {
                 if self.stack.len() < 2 {
-                    return Err(Diagnostic::new("stack underflow (swap)", span, Severity::Error));
+                    return Err(Diagnostic::new(
+                        "stack underflow (swap)",
+                        span,
+                        Severity::Error,
+                    ));
                 }
                 let top = self.stack.len() - 1;
                 self.stack.swap(top, top - 1);
@@ -707,7 +732,11 @@ impl<'a> Vm<'a> {
                 let message = self.pop_one(span)?;
                 let err = self.pop_one(span)?;
                 let Value::Str(message) = message else {
-                    return Err(Diagnostic::new("WrapErr requires message string", span, Severity::Error));
+                    return Err(Diagnostic::new(
+                        "WrapErr requires message string",
+                        span,
+                        Severity::Error,
+                    ));
                 };
                 let wrapped = wrap_err_value(err, message, None, "wrap".to_string(), span)?;
                 self.stack.push(wrapped);
@@ -810,7 +839,10 @@ impl<'a> Vm<'a> {
             }
             other => {
                 return Err(Diagnostic::new(
-                    format!("invalid operand for unary '-' (got {})", builtin_type_name(&other)),
+                    format!(
+                        "invalid operand for unary '-' (got {})",
+                        builtin_type_name(&other)
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -828,7 +860,10 @@ impl<'a> Vm<'a> {
                 Ok(())
             }
             other => Err(Diagnostic::new(
-                format!("invalid operand for logical '!': {}", builtin_type_name(&other)),
+                format!(
+                    "invalid operand for logical '!': {}",
+                    builtin_type_name(&other)
+                ),
                 span,
                 Severity::Error,
             )),
@@ -847,7 +882,10 @@ impl<'a> Vm<'a> {
                 Ok(())
             }
             other => Err(Diagnostic::new(
-                format!("invalid operand for bitwise '~': {}", builtin_type_name(&other)),
+                format!(
+                    "invalid operand for bitwise '~': {}",
+                    builtin_type_name(&other)
+                ),
                 span,
                 Severity::Error,
             )),
@@ -866,13 +904,21 @@ impl<'a> Vm<'a> {
         let out = match (lhs, rhs) {
             (Value::Int128(a), Value::Int128(b)) => {
                 let r = signed_int(a, b).ok_or_else(|| {
-                    Diagnostic::new("integer overflow or invalid operation", span, Severity::Error)
+                    Diagnostic::new(
+                        "integer overflow or invalid operation",
+                        span,
+                        Severity::Error,
+                    )
                 })?;
                 Value::Int128(r)
             }
             (Value::UInt128(a), Value::UInt128(b)) => {
                 let r = unsigned_int(a, b).ok_or_else(|| {
-                    Diagnostic::new("integer overflow or invalid operation", span, Severity::Error)
+                    Diagnostic::new(
+                        "integer overflow or invalid operation",
+                        span,
+                        Severity::Error,
+                    )
                 })?;
                 Value::UInt128(r)
             }
@@ -1002,9 +1048,9 @@ impl<'a> Vm<'a> {
         let ord = match (lhs, rhs) {
             (Value::Int128(a), Value::Int128(b)) => a.cmp(&b),
             (Value::UInt128(a), Value::UInt128(b)) => a.cmp(&b),
-            (Value::Float(a), Value::Float(b)) => a
-                .partial_cmp(&b)
-                .ok_or_else(|| Diagnostic::new("float comparison is invalid", span, Severity::Error))?,
+            (Value::Float(a), Value::Float(b)) => a.partial_cmp(&b).ok_or_else(|| {
+                Diagnostic::new("float comparison is invalid", span, Severity::Error)
+            })?,
             (Value::Bool(a), Value::Bool(b)) => a.cmp(&b),
             (Value::Char(a), Value::Char(b)) => a.cmp(&b),
             (Value::Str(a), Value::Str(b)) => a.cmp(&b),
@@ -1034,11 +1080,7 @@ impl<'a> Vm<'a> {
         Ok(())
     }
 
-    fn apply_logical(
-        &mut self,
-        span: Span,
-        op: fn(bool, bool) -> bool,
-    ) -> Result<(), Diagnostic> {
+    fn apply_logical(&mut self, span: Span, op: fn(bool, bool) -> bool) -> Result<(), Diagnostic> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         match (lhs, rhs) {
@@ -1092,7 +1134,9 @@ impl<'a> Vm<'a> {
                 } else {
                     a.checked_shr(shift)
                 }
-                .ok_or_else(|| Diagnostic::new("shift amount out of range", span, Severity::Error))?;
+                .ok_or_else(|| {
+                    Diagnostic::new("shift amount out of range", span, Severity::Error)
+                })?;
                 self.stack.push(Value::Int128(result));
                 Ok(())
             }
@@ -1105,7 +1149,9 @@ impl<'a> Vm<'a> {
                 } else {
                     a.checked_shr(shift)
                 }
-                .ok_or_else(|| Diagnostic::new("shift amount out of range", span, Severity::Error))?;
+                .ok_or_else(|| {
+                    Diagnostic::new("shift amount out of range", span, Severity::Error)
+                })?;
                 self.stack.push(Value::UInt128(result));
                 Ok(())
             }
@@ -1119,7 +1165,11 @@ impl<'a> Vm<'a> {
 
     fn pop_one(&mut self, span: Span) -> Result<Value, Diagnostic> {
         self.stack.pop().ok_or_else(|| {
-            Diagnostic::new("stack underflow (internal bytecode error)", span, Severity::Error)
+            Diagnostic::new(
+                "stack underflow (internal bytecode error)",
+                span,
+                Severity::Error,
+            )
         })
     }
 
@@ -1142,10 +1192,14 @@ impl<'a> Vm<'a> {
             .ok_or_else(|| Diagnostic::new("unknown intrinsic symbol", span, Severity::Error))?;
         dispatch_builtin(self, symbol.name.as_str(), args, span)
     }
-
 }
 
-fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
+fn dispatch_builtin(
+    vm: &mut Vm<'_>,
+    name: &str,
+    args: &[Value],
+    span: Span,
+) -> Result<Value, Diagnostic> {
     match name {
         "print" => {
             let line = args
@@ -1197,10 +1251,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s.clone(),
                 other => {
                     return Err(Diagnostic::new(
-                        format!("error message must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "error message must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let code = if let Some(code_value) = args.get(1) {
@@ -1227,10 +1284,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s.clone(),
                 other => {
                     return Err(Diagnostic::new(
-                        format!("panic message must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "panic message must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let code = if let Some(code_value) = args.get(1) {
@@ -1260,7 +1320,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                         format!("wrap message must be str, got {}", builtin_type_name(other)),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let code = if let Some(code_value) = args.get(2) {
@@ -1293,10 +1353,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Bool(v) => *v,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("assert condition must be bool, got {}", builtin_type_name(other)),
+                        format!(
+                            "assert condition must be bool, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             if cond {
@@ -1306,14 +1369,21 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Some(Value::Str(s)) => s.clone(),
                     Some(other) => {
                         return Err(Diagnostic::new(
-                            format!("assert message must be str, got {}", builtin_type_name(other)),
+                            format!(
+                                "assert message must be str, got {}",
+                                builtin_type_name(other)
+                            ),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                     None => "assertion failed".to_string(),
                 };
-                Err(Diagnostic::new(format!("panic: {message} (code=1)"), span, Severity::Error))
+                Err(Diagnostic::new(
+                    format!("panic: {message} (code=1)"),
+                    span,
+                    Severity::Error,
+                ))
             }
         }
         "assert_eq_i32" => {
@@ -1325,10 +1395,18 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ));
             }
             let a = as_i128(&args[0]).ok_or_else(|| {
-                Diagnostic::new("assert_eq_i32 first arg must be i32-compatible", span, Severity::Error)
+                Diagnostic::new(
+                    "assert_eq_i32 first arg must be i32-compatible",
+                    span,
+                    Severity::Error,
+                )
             })?;
             let b = as_i128(&args[1]).ok_or_else(|| {
-                Diagnostic::new("assert_eq_i32 second arg must be i32-compatible", span, Severity::Error)
+                Diagnostic::new(
+                    "assert_eq_i32 second arg must be i32-compatible",
+                    span,
+                    Severity::Error,
+                )
             })?;
             if a == b {
                 Ok(Value::Unit)
@@ -1337,14 +1415,21 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Some(Value::Str(s)) => s.clone(),
                     Some(other) => {
                         return Err(Diagnostic::new(
-                            format!("assert_eq_i32 message must be str, got {}", builtin_type_name(other)),
+                            format!(
+                                "assert_eq_i32 message must be str, got {}",
+                                builtin_type_name(other)
+                            ),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                     None => "i32 values differ".to_string(),
                 };
-                Err(Diagnostic::new(format!("panic: {message} (code=1)"), span, Severity::Error))
+                Err(Diagnostic::new(
+                    format!("panic: {message} (code=1)"),
+                    span,
+                    Severity::Error,
+                ))
             }
         }
         "assert_eq_str" => {
@@ -1359,20 +1444,26 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(v) => v,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("assert_eq_str first arg must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "assert_eq_str first arg must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let b = match &args[1] {
                 Value::Str(v) => v,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("assert_eq_str second arg must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "assert_eq_str second arg must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             if a == b {
@@ -1382,14 +1473,21 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Some(Value::Str(s)) => s.clone(),
                     Some(other) => {
                         return Err(Diagnostic::new(
-                            format!("assert_eq_str message must be str, got {}", builtin_type_name(other)),
+                            format!(
+                                "assert_eq_str message must be str, got {}",
+                                builtin_type_name(other)
+                            ),
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                     None => "str values differ".to_string(),
                 };
-                Err(Diagnostic::new(format!("panic: {message} (code=1)"), span, Severity::Error))
+                Err(Diagnostic::new(
+                    format!("panic: {message} (code=1)"),
+                    span,
+                    Severity::Error,
+                ))
             }
         }
         "sum_i32" => {
@@ -1407,7 +1505,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                         format!("sum_i32 expects array, got {}", builtin_type_name(other)),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let mut acc: i128 = 0;
@@ -1431,14 +1529,22 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(v) => v,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("str_repeat first arg must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "str_repeat first arg must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
-            let n = as_i128(times)
-                .ok_or_else(|| Diagnostic::new("str_repeat second arg must be i32-compatible", span, Severity::Error))?;
+            let n = as_i128(times).ok_or_else(|| {
+                Diagnostic::new(
+                    "str_repeat second arg must be i32-compatible",
+                    span,
+                    Severity::Error,
+                )
+            })?;
             if n <= 0 {
                 return Ok(Value::Str(String::new()));
             }
@@ -1456,23 +1562,33 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(v) => v,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("str_pad_left first arg must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "str_pad_left first arg must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let total = as_i128(&args[1]).ok_or_else(|| {
-                Diagnostic::new("str_pad_left second arg must be i32-compatible", span, Severity::Error)
+                Diagnostic::new(
+                    "str_pad_left second arg must be i32-compatible",
+                    span,
+                    Severity::Error,
+                )
             })?;
             let pad = match args.get(2) {
                 Some(Value::Str(v)) => v.as_str(),
                 Some(other) => {
                     return Err(Diagnostic::new(
-                        format!("str_pad_left pad must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "str_pad_left pad must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
                 None => " ",
             };
@@ -1490,23 +1606,33 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(v) => v,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("str_pad_right first arg must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "str_pad_right first arg must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let total = as_i128(&args[1]).ok_or_else(|| {
-                Diagnostic::new("str_pad_right second arg must be i32-compatible", span, Severity::Error)
+                Diagnostic::new(
+                    "str_pad_right second arg must be i32-compatible",
+                    span,
+                    Severity::Error,
+                )
             })?;
             let pad = match args.get(2) {
                 Some(Value::Str(v)) => v.as_str(),
                 Some(other) => {
                     return Err(Diagnostic::new(
-                        format!("str_pad_right pad must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "str_pad_right pad must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
                 None => " ",
             };
@@ -1527,7 +1653,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                         format!("count_true expects array, got {}", builtin_type_name(other)),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let mut count: i128 = 0;
@@ -1540,7 +1666,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                             "count_true array must contain bool values",
                             span,
                             Severity::Error,
-                        ))
+                        ));
                     }
                 }
             }
@@ -1549,7 +1675,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "io_read_text" | "read_text" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("io_read_text expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "io_read_text expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1558,21 +1687,30 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_read_text path must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_read_text path must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             match std::fs::read_to_string(path) {
                 Ok(content) => Ok(Value::Tuple(vec![Value::Str(content), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("io_read_text", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("io_read_text", e),
+                ])),
             }
         }
         "io_write_text" | "write_text" => {
             let [path, content] = args else {
                 return Err(Diagnostic::new(
-                    format!("io_write_text expects exactly 2 arguments, got {}", args.len()),
+                    format!(
+                        "io_write_text expects exactly 2 arguments, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1581,20 +1719,26 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_write_text path must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_write_text path must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let content = match content {
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_write_text content must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_write_text content must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             match std::fs::write(path, content) {
@@ -1605,7 +1749,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "io_append_text" | "append_text" => {
             let [path, content] = args else {
                 return Err(Diagnostic::new(
-                    format!("io_append_text expects exactly 2 arguments, got {}", args.len()),
+                    format!(
+                        "io_append_text expects exactly 2 arguments, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1614,20 +1761,26 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_append_text path must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_append_text path must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let content = match content {
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_append_text content must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_append_text content must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let res = std::fs::OpenOptions::new()
@@ -1652,10 +1805,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_exists path must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_exists path must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             Ok(Value::Bool(std::path::Path::new(path).exists()))
@@ -1663,7 +1819,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "io_remove_file" | "remove_file" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("io_remove_file expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "io_remove_file expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1672,10 +1831,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_remove_file path must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_remove_file path must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             match std::fs::remove_file(path) {
@@ -1699,13 +1861,19 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     }
                     Ok(Value::Tuple(vec![Value::Str(line), Value::Null]))
                 }
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("io_read_stdin_line", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("io_read_stdin_line", e),
+                ])),
             }
         }
         "io_stdout_write" | "stdout_write" => {
             let [text] = args else {
                 return Err(Diagnostic::new(
-                    format!("io_stdout_write expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "io_stdout_write expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1714,10 +1882,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_stdout_write text must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_stdout_write text must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             print!("{text}");
@@ -1726,7 +1897,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "io_stderr_write" | "stderr_write" => {
             let [text] = args else {
                 return Err(Diagnostic::new(
-                    format!("io_stderr_write expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "io_stderr_write expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1735,10 +1909,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("io_stderr_write text must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "io_stderr_write text must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             eprint!("{text}");
@@ -1747,7 +1924,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "stdout_writeln" => {
             let [text] = args else {
                 return Err(Diagnostic::new(
-                    format!("stdout_writeln expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "stdout_writeln expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1756,19 +1936,25 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("stdout_writeln text must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "stdout_writeln text must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
-            print!("{text}\n");
+            println!("{text}");
             Ok(Value::Unit)
         }
         "stderr_writeln" => {
             let [text] = args else {
                 return Err(Diagnostic::new(
-                    format!("stderr_writeln expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "stderr_writeln expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1777,13 +1963,16 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("stderr_writeln text must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "stderr_writeln text must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
-            eprint!("{text}\n");
+            eprintln!("{text}");
             Ok(Value::Unit)
         }
         "buffer_new" => {
@@ -1799,7 +1988,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "buffer_write" => {
             let [buffer, chunk] = args else {
                 return Err(Diagnostic::new(
-                    format!("buffer_write expects exactly 2 arguments, got {}", args.len()),
+                    format!(
+                        "buffer_write expects exactly 2 arguments, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1808,20 +2000,26 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("buffer_write buffer must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "buffer_write buffer must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let chunk = match chunk {
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("buffer_write chunk must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "buffer_write chunk must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             Ok(Value::Str(format!("{buffer}{chunk}")))
@@ -1829,7 +2027,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "buffer_writeln" => {
             let [buffer, line] = args else {
                 return Err(Diagnostic::new(
-                    format!("buffer_writeln expects exactly 2 arguments, got {}", args.len()),
+                    format!(
+                        "buffer_writeln expects exactly 2 arguments, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1838,20 +2039,26 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("buffer_writeln buffer must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "buffer_writeln buffer must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let line = match line {
                 Value::Str(s) => s,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("buffer_writeln line must be str, got {}", builtin_type_name(other)),
+                        format!(
+                            "buffer_writeln line must be str, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             Ok(Value::Str(format!("{buffer}{line}\n")))
@@ -1902,7 +2109,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_create_dir" | "create_dir" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_create_dir expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_create_dir expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1916,7 +2126,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_create_dir_all" | "create_dir_all" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_create_dir_all expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_create_dir_all expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1943,19 +2156,28 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                         match entry {
                             Ok(e) => out.push(Value::Str(e.path().to_string_lossy().to_string())),
                             Err(e) => {
-                                return Ok(Value::Tuple(vec![Value::Array(Vec::new()), io_err("fs_read_dir", e)]));
+                                return Ok(Value::Tuple(vec![
+                                    Value::Array(Vec::new()),
+                                    io_err("fs_read_dir", e),
+                                ]));
                             }
                         }
                     }
                     Ok(Value::Tuple(vec![Value::Array(out), Value::Null]))
                 }
-                Err(e) => Ok(Value::Tuple(vec![Value::Array(Vec::new()), io_err("fs_read_dir", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Array(Vec::new()),
+                    io_err("fs_read_dir", e),
+                ])),
             }
         }
         "fs_remove_file" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_remove_file expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_remove_file expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1969,7 +2191,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_remove_dir" | "remove_dir" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_remove_dir expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_remove_dir expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -1983,7 +2208,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_remove_dir_all" | "remove_dir_all" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_remove_dir_all expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_remove_dir_all expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2033,8 +2261,14 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ));
             };
             match std::env::current_dir() {
-                Ok(p) => Ok(Value::Tuple(vec![Value::Str(p.to_string_lossy().to_string()), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("fs_cwd", e)])),
+                Ok(p) => Ok(Value::Tuple(vec![
+                    Value::Str(p.to_string_lossy().to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("fs_cwd", e),
+                ])),
             }
         }
         "fs_set_cwd" | "set_cwd" => {
@@ -2054,19 +2288,30 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_path_join" | "path_join" => {
             let [a, b] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_path_join expects exactly 2 arguments, got {}", args.len()),
+                    format!(
+                        "fs_path_join expects exactly 2 arguments, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
             };
             let a = expect_str_arg(a, "fs_path_join left", span)?;
             let b = expect_str_arg(b, "fs_path_join right", span)?;
-            Ok(Value::Str(std::path::Path::new(a).join(b).to_string_lossy().to_string()))
+            Ok(Value::Str(
+                std::path::Path::new(a)
+                    .join(b)
+                    .to_string_lossy()
+                    .to_string(),
+            ))
         }
         "fs_path_parent" | "path_parent" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_path_parent expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_path_parent expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2074,7 +2319,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             let path = expect_str_arg(path, "fs_path_parent path", span)?;
             let p = std::path::Path::new(path);
             match p.parent() {
-                Some(parent) => Ok(Value::Tuple(vec![Value::Str(parent.to_string_lossy().to_string()), Value::Null])),
+                Some(parent) => Ok(Value::Tuple(vec![
+                    Value::Str(parent.to_string_lossy().to_string()),
+                    Value::Null,
+                ])),
                 None => Ok(Value::Tuple(vec![
                     Value::Str(String::new()),
                     Value::Err {
@@ -2089,7 +2337,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_path_filename" | "path_filename" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_path_filename expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_path_filename expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2097,7 +2348,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             let path = expect_str_arg(path, "fs_path_filename path", span)?;
             let p = std::path::Path::new(path);
             match p.file_name().and_then(|s| s.to_str()) {
-                Some(name) => Ok(Value::Tuple(vec![Value::Str(name.to_string()), Value::Null])),
+                Some(name) => Ok(Value::Tuple(vec![
+                    Value::Str(name.to_string()),
+                    Value::Null,
+                ])),
                 None => Ok(Value::Tuple(vec![
                     Value::Str(String::new()),
                     Value::Err {
@@ -2112,7 +2366,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_path_extension" | "path_extension" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_path_extension expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_path_extension expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2135,7 +2392,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_path_stem" | "path_stem" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_path_stem expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_path_stem expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2143,7 +2403,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             let path = expect_str_arg(path, "fs_path_stem path", span)?;
             let p = std::path::Path::new(path);
             match p.file_stem().and_then(|s| s.to_str()) {
-                Some(stem) => Ok(Value::Tuple(vec![Value::Str(stem.to_string()), Value::Null])),
+                Some(stem) => Ok(Value::Tuple(vec![
+                    Value::Str(stem.to_string()),
+                    Value::Null,
+                ])),
                 None => Ok(Value::Tuple(vec![
                     Value::Str(String::new()),
                     Value::Err {
@@ -2158,7 +2421,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_path_normalize" | "path_normalize" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_path_normalize expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_path_normalize expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2169,7 +2435,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_path_is_abs" | "path_is_abs" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_path_is_abs expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_path_is_abs expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2180,7 +2449,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_path_is_relative" | "path_is_relative" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_path_is_relative expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_path_is_relative expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2191,35 +2463,56 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         "fs_metadata_len" | "metadata_len" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_metadata_len expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_metadata_len expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
             };
             let path = expect_str_arg(path, "fs_metadata_len path", span)?;
             match std::fs::metadata(path) {
-                Ok(meta) => Ok(Value::Tuple(vec![Value::UInt128(meta.len() as u128), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("fs_metadata_len", e)])),
+                Ok(meta) => Ok(Value::Tuple(vec![
+                    Value::UInt128(meta.len() as u128),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::UInt128(0),
+                    io_err("fs_metadata_len", e),
+                ])),
             }
         }
         "fs_metadata_readonly" | "metadata_readonly" => {
             let [path] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_metadata_readonly expects exactly 1 argument, got {}", args.len()),
+                    format!(
+                        "fs_metadata_readonly expects exactly 1 argument, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
             };
             let path = expect_str_arg(path, "fs_metadata_readonly path", span)?;
             match std::fs::metadata(path) {
-                Ok(meta) => Ok(Value::Tuple(vec![Value::Bool(meta.permissions().readonly()), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Bool(false), io_err("fs_metadata_readonly", e)])),
+                Ok(meta) => Ok(Value::Tuple(vec![
+                    Value::Bool(meta.permissions().readonly()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Bool(false),
+                    io_err("fs_metadata_readonly", e),
+                ])),
             }
         }
         "fs_set_readonly" | "set_readonly" => {
             let [path, readonly] = args else {
                 return Err(Diagnostic::new(
-                    format!("fs_set_readonly expects exactly 2 arguments, got {}", args.len()),
+                    format!(
+                        "fs_set_readonly expects exactly 2 arguments, got {}",
+                        args.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -2229,10 +2522,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 Value::Bool(v) => *v,
                 other => {
                     return Err(Diagnostic::new(
-                        format!("fs_set_readonly readonly must be bool, got {}", builtin_type_name(other)),
+                        format!(
+                            "fs_set_readonly readonly must be bool, got {}",
+                            builtin_type_name(other)
+                        ),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             match std::fs::metadata(path) {
@@ -2249,28 +2545,45 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         }
         "math_pi" | "pi" => {
             let [] = args else {
-                return Err(Diagnostic::new(format!("math_pi expects 0 arguments, got {}", args.len()), span, Severity::Error));
+                return Err(Diagnostic::new(
+                    format!("math_pi expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
             };
             Ok(Value::Float(std::f64::consts::PI))
         }
         "math_e" | "e" => {
             let [] = args else {
-                return Err(Diagnostic::new(format!("math_e expects 0 arguments, got {}", args.len()), span, Severity::Error));
+                return Err(Diagnostic::new(
+                    format!("math_e expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
             };
             Ok(Value::Float(std::f64::consts::E))
         }
         "math_tau" | "tau" => {
             let [] = args else {
-                return Err(Diagnostic::new(format!("math_tau expects 0 arguments, got {}", args.len()), span, Severity::Error));
+                return Err(Diagnostic::new(
+                    format!("math_tau expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
             };
             Ok(Value::Float(std::f64::consts::TAU))
         }
         "math_abs" | "abs" | "math_sqrt" | "sqrt" | "math_exp" | "exp" | "math_log" | "log"
-        | "math_log10" | "log10" | "math_floor" | "floor" | "math_ceil" | "ceil" | "math_round" | "round"
-        | "math_trunc" | "trunc" | "math_fract" | "fract" | "math_sin" | "sin" | "math_cos" | "cos"
-        | "math_tan" | "tan" | "math_asin" | "asin" | "math_acos" | "acos" | "math_atan" | "atan" => {
+        | "math_log10" | "log10" | "math_floor" | "floor" | "math_ceil" | "ceil" | "math_round"
+        | "round" | "math_trunc" | "trunc" | "math_fract" | "fract" | "math_sin" | "sin"
+        | "math_cos" | "cos" | "math_tan" | "tan" | "math_asin" | "asin" | "math_acos" | "acos"
+        | "math_atan" | "atan" => {
             let [x] = args else {
-                return Err(Diagnostic::new(format!("{name} expects exactly 1 argument, got {}", args.len()), span, Severity::Error));
+                return Err(Diagnostic::new(
+                    format!("{name} expects exactly 1 argument, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
             };
             let x = expect_f64_arg(x, name, span)?;
             let out = match name {
@@ -2296,7 +2609,11 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         }
         "math_pow" | "pow" => {
             let [base, exp] = args else {
-                return Err(Diagnostic::new(format!("math_pow expects exactly 2 arguments, got {}", args.len()), span, Severity::Error));
+                return Err(Diagnostic::new(
+                    format!("math_pow expects exactly 2 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
             };
             let base = expect_f64_arg(base, "math_pow base", span)?;
             let exp = expect_f64_arg(exp, "math_pow exp", span)?;
@@ -2304,14 +2621,25 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
         }
         "math_rand_f64" | "rand_f64" => {
             let [] = args else {
-                return Err(Diagnostic::new(format!("math_rand_f64 expects 0 arguments, got {}", args.len()), span, Severity::Error));
+                return Err(Diagnostic::new(
+                    format!("math_rand_f64 expects 0 arguments, got {}", args.len()),
+                    span,
+                    Severity::Error,
+                ));
             };
             let n = math_next_u64();
             Ok(Value::Float((n as f64) / (u64::MAX as f64)))
         }
         "math_rand_i32" | "rand_i32" => {
             let [min, max] = args else {
-                return Err(Diagnostic::new(format!("math_rand_i32 expects exactly 2 arguments, got {}", args.len()), span, Severity::Error));
+                return Err(Diagnostic::new(
+                    format!(
+                        "math_rand_i32 expects exactly 2 arguments, got {}",
+                        args.len()
+                    ),
+                    span,
+                    Severity::Error,
+                ));
             };
             let min = expect_i32_like(min, "math_rand_i32 min", span)?;
             let max = expect_i32_like(max, "math_rand_i32 max", span)?;
@@ -2353,7 +2681,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ));
             };
             match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Ok(d) => Ok(Value::UInt128(d.as_millis() as u128)),
+                Ok(d) => Ok(Value::UInt128(d.as_millis())),
                 Err(_) => Ok(Value::UInt128(0)),
             }
         }
@@ -2378,7 +2706,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ));
             };
             let start = time_tick_start();
-            Ok(Value::UInt128(start.elapsed().as_millis() as u128))
+            Ok(Value::UInt128(start.elapsed().as_millis()))
         }
         "time_elapsed_ms" | "elapsed_ms" => {
             let [start_ms] = args else {
@@ -2389,10 +2717,11 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ));
             };
             let start_ms = expect_u64_arg(start_ms, "elapsed_ms start", span)?;
-            let now_ms = match time_tick_start().elapsed().as_millis().try_into() {
-                Ok(v) => v,
-                Err(_) => u64::MAX,
-            };
+            let now_ms = time_tick_start()
+                .elapsed()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX);
             let elapsed = now_ms.saturating_sub(start_ms);
             Ok(Value::UInt128(elapsed as u128))
         }
@@ -2405,8 +2734,14 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ));
             };
             match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Ok(d) => Ok(Value::Tuple(vec![Value::Str(format_unix_secs_iso_utc(d.as_secs())), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("time_now_iso_utc", std::io::Error::other(e.to_string()))])),
+                Ok(d) => Ok(Value::Tuple(vec![
+                    Value::Str(format_unix_secs_iso_utc(d.as_secs())),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("time_now_iso_utc", std::io::Error::other(e.to_string())),
+                ])),
             }
         }
         "time_from_unix_secs_iso_utc" | "from_unix_secs_iso_utc" => {
@@ -2418,7 +2753,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ));
             };
             let secs = expect_u64_arg(secs, "from_unix_secs_iso_utc secs", span)?;
-            Ok(Value::Tuple(vec![Value::Str(format_unix_secs_iso_utc(secs)), Value::Null]))
+            Ok(Value::Tuple(vec![
+                Value::Str(format_unix_secs_iso_utc(secs)),
+                Value::Null,
+            ]))
         }
         "os_platform" | "platform" => {
             let [] = args else {
@@ -2521,9 +2859,13 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             };
             let command = expect_str_arg(command, "exec command", span)?;
             #[cfg(target_os = "windows")]
-            let output = std::process::Command::new("cmd").args(["/C", command]).output();
+            let output = std::process::Command::new("cmd")
+                .args(["/C", command])
+                .output();
             #[cfg(not(target_os = "windows"))]
-            let output = std::process::Command::new("sh").args(["-c", command]).output();
+            let output = std::process::Command::new("sh")
+                .args(["-c", command])
+                .output();
             match output {
                 Ok(out) => {
                     let code = out.status.code().unwrap_or(-1);
@@ -2589,7 +2931,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 let status = std::process::Command::new("kill")
                     .args(["-s", &signal.to_string(), &pid.to_string()])
                     .status();
-                return match status {
+                match status {
                     Ok(s) if s.success() => Ok(Value::Null),
                     Ok(_) => Ok(Value::Err {
                         message: "kill command failed".to_string(),
@@ -2598,7 +2940,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                         cause: None,
                     }),
                     Err(e) => Ok(io_err("send_signal", e)),
-                };
+                }
             }
             #[cfg(target_os = "windows")]
             {
@@ -2659,10 +3001,7 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Value::Int128(status.code().unwrap_or(-1) as i128),
                     Value::Null,
                 ])),
-                Err(e) => Ok(Value::Tuple(vec![
-                    Value::Int128(-1),
-                    io_err("wait", e),
-                ])),
+                Err(e) => Ok(Value::Tuple(vec![Value::Int128(-1), io_err("wait", e)])),
             }
         }
         "proc_kill" | "kill" => {
@@ -3085,7 +3424,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ]));
             };
             *slot = slot.saturating_add(delta);
-            Ok(Value::Tuple(vec![Value::Int128(*slot as i128), Value::Null]))
+            Ok(Value::Tuple(vec![
+                Value::Int128(*slot as i128),
+                Value::Null,
+            ]))
         }
         "sync_channel_new" | "channel_new" => {
             let [] = args else {
@@ -3187,7 +3529,11 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             };
             match queue.pop_front() {
                 Some(v) => Ok(Value::Tuple(vec![v, Value::Bool(true), Value::Null])),
-                None => Ok(Value::Tuple(vec![Value::Null, Value::Bool(false), Value::Null])),
+                None => Ok(Value::Tuple(vec![
+                    Value::Null,
+                    Value::Bool(false),
+                    Value::Null,
+                ])),
             }
         }
         "net_dns_lookup" | "dns_lookup" => {
@@ -3207,7 +3553,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     }
                     Ok(Value::Tuple(vec![Value::Array(out), Value::Null]))
                 }
-                Err(e) => Ok(Value::Tuple(vec![Value::Array(vec![]), io_err("dns_lookup", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Array(vec![]),
+                    io_err("dns_lookup", e),
+                ])),
             }
         }
         "net_udp_bind" | "udp_bind" => {
@@ -3256,8 +3605,14 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ]));
             };
             match sock.local_addr() {
-                Ok(addr) => Ok(Value::Tuple(vec![Value::Str(addr.to_string()), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("udp_local_addr", e)])),
+                Ok(addr) => Ok(Value::Tuple(vec![
+                    Value::Str(addr.to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("udp_local_addr", e),
+                ])),
             }
         }
         "net_udp_send_to" | "udp_send_to" => {
@@ -3287,7 +3642,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             };
             match sock.send_to(payload.as_bytes(), to) {
                 Ok(n) => Ok(Value::Tuple(vec![Value::UInt128(n as u128), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("udp_send_to", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::UInt128(0),
+                    io_err("udp_send_to", e),
+                ])),
             }
         }
         "net_udp_recv_from" | "udp_recv_from" => {
@@ -3348,7 +3706,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     table.insert(id, stream);
                     Ok(Value::Tuple(vec![Value::UInt128(id as u128), Value::Null]))
                 }
-                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("tcp_connect", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::UInt128(0),
+                    io_err("tcp_connect", e),
+                ])),
             }
         }
         "net_tcp_send" | "tcp_send" => {
@@ -3410,7 +3771,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Value::Str(String::from_utf8_lossy(&buf[..n]).to_string()),
                     Value::Null,
                 ])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("tcp_recv", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("tcp_recv", e),
+                ])),
             }
         }
         "net_tcp_close" | "tcp_close" => {
@@ -3596,8 +3960,14 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                 ]));
             };
             match listener.local_addr() {
-                Ok(addr) => Ok(Value::Tuple(vec![Value::Str(addr.to_string()), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("local_addr", e)])),
+                Ok(addr) => Ok(Value::Tuple(vec![
+                    Value::Str(addr.to_string()),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("local_addr", e),
+                ])),
             }
         }
         "http_respond_once" | "respond_once" => {
@@ -3656,8 +4026,14 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             let len = expect_u64_arg(len, "random_bytes len", span)? as usize;
             let mut out = vec![0_u8; len];
             match secure_random_fill(&mut out) {
-                Ok(()) => Ok(Value::Tuple(vec![Value::Str(hex_encode(&out)), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("random_bytes", e)])),
+                Ok(()) => Ok(Value::Tuple(vec![
+                    Value::Str(hex_encode(&out)),
+                    Value::Null,
+                ])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("random_bytes", e),
+                ])),
             }
         }
         "crypto_random_u64" | "random_u64" => {
@@ -3674,7 +4050,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Value::UInt128(u64::from_le_bytes(out) as u128),
                     Value::Null,
                 ])),
-                Err(e) => Ok(Value::Tuple(vec![Value::UInt128(0), io_err("random_u64", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::UInt128(0),
+                    io_err("random_u64", e),
+                ])),
             }
         }
         "crypto_encrypt" | "encrypt" => {
@@ -3689,7 +4068,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             let key = expect_str_arg(key, "encrypt key", span)?;
             match encrypt_with_key(plain.as_bytes(), key.as_bytes()) {
                 Ok(blob) => Ok(Value::Tuple(vec![Value::Str(blob), Value::Null])),
-                Err(e) => Ok(Value::Tuple(vec![Value::Str(String::new()), io_err("encrypt", e)])),
+                Err(e) => Ok(Value::Tuple(vec![
+                    Value::Str(String::new()),
+                    io_err("encrypt", e),
+                ])),
             }
         }
         "crypto_decrypt" | "decrypt" => {
@@ -3810,7 +4192,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             for b in &mut out {
                 *b = (math_next_u64() & 0xff) as u8;
             }
-            Ok(Value::Tuple(vec![Value::Str(hex_encode(&out)), Value::Null]))
+            Ok(Value::Tuple(vec![
+                Value::Str(hex_encode(&out)),
+                Value::Null,
+            ]))
         }
         "encoding_base64_encode" | "base64_encode" => {
             let [input] = args else {
@@ -3966,7 +4351,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             let pattern = expect_str_arg(pattern, "is_match pattern", span)?;
             let input = expect_str_arg(input, "is_match input", span)?;
             match Regex::new(pattern) {
-                Ok(re) => Ok(Value::Tuple(vec![Value::Bool(re.is_match(input)), Value::Null])),
+                Ok(re) => Ok(Value::Tuple(vec![
+                    Value::Bool(re.is_match(input)),
+                    Value::Null,
+                ])),
                 Err(e) => Ok(Value::Tuple(vec![
                     Value::Bool(false),
                     Value::Err {
@@ -3990,7 +4378,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             let input = expect_str_arg(input, "find input", span)?;
             match Regex::new(pattern) {
                 Ok(re) => {
-                    let out = re.find(input).map(|m| m.as_str().to_string()).unwrap_or_default();
+                    let out = re
+                        .find(input)
+                        .map(|m| m.as_str().to_string())
+                        .unwrap_or_default();
                     Ok(Value::Tuple(vec![Value::Str(out), Value::Null]))
                 }
                 Err(e) => Ok(Value::Tuple(vec![
@@ -4235,7 +4626,9 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
             };
             let key = expect_str_arg(key, "get_env_or key", span)?;
             let default = expect_str_arg(default, "get_env_or default", span)?;
-            Ok(Value::Str(std::env::var(key).unwrap_or_else(|_| default.to_string())))
+            Ok(Value::Str(
+                std::env::var(key).unwrap_or_else(|_| default.to_string()),
+            ))
         }
         "env_set" | "set_env" => {
             let [key, value] = args else {
@@ -4386,7 +4779,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Severity::Error,
                 ));
             };
-            log_emit(LogLevel::Trace, expect_str_arg(message, "trace message", span)?);
+            log_emit(
+                LogLevel::Trace,
+                expect_str_arg(message, "trace message", span)?,
+            );
             Ok(Value::Null)
         }
         "log_debug" | "debug" => {
@@ -4397,7 +4793,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Severity::Error,
                 ));
             };
-            log_emit(LogLevel::Debug, expect_str_arg(message, "debug message", span)?);
+            log_emit(
+                LogLevel::Debug,
+                expect_str_arg(message, "debug message", span)?,
+            );
             Ok(Value::Null)
         }
         "log_info" | "info" => {
@@ -4408,7 +4807,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Severity::Error,
                 ));
             };
-            log_emit(LogLevel::Info, expect_str_arg(message, "info message", span)?);
+            log_emit(
+                LogLevel::Info,
+                expect_str_arg(message, "info message", span)?,
+            );
             Ok(Value::Null)
         }
         "log_warn" | "warn" => {
@@ -4419,7 +4821,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Severity::Error,
                 ));
             };
-            log_emit(LogLevel::Warn, expect_str_arg(message, "warn message", span)?);
+            log_emit(
+                LogLevel::Warn,
+                expect_str_arg(message, "warn message", span)?,
+            );
             Ok(Value::Null)
         }
         "log_error" | "error_msg" => {
@@ -4430,7 +4835,10 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
                     Severity::Error,
                 ));
             };
-            log_emit(LogLevel::Error, expect_str_arg(message, "error message", span)?);
+            log_emit(
+                LogLevel::Error,
+                expect_str_arg(message, "error message", span)?,
+            );
             Ok(Value::Null)
         }
         "json_parse" | "parse_json" => {
@@ -4744,7 +5152,11 @@ fn dispatch_builtin(vm: &mut Vm<'_>, name: &str, args: &[Value], span: Span) -> 
 
 fn dispatch_integer_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("integer method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "integer method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name
         .strip_prefix("__meth_is_")
@@ -4753,42 +5165,111 @@ fn dispatch_integer_method(name: &str, args: &[Value], span: Span) -> Result<Val
     let signed = matches!(recv, Value::Int128(_));
     let unsigned = matches!(recv, Value::UInt128(_));
     if !signed && !unsigned {
-        return Err(Diagnostic::new("integer method receiver must be integer", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "integer method receiver must be integer",
+            span,
+            Severity::Error,
+        ));
     }
-    let ri = match recv { Value::Int128(v) => *v, Value::UInt128(v) => *v as i128, _ => 0 };
-    let ru = match recv { Value::UInt128(v) => *v, Value::Int128(v) => *v as u128, _ => 0 };
+    let ri = match recv {
+        Value::Int128(v) => *v,
+        Value::UInt128(v) => *v as i128,
+        _ => 0,
+    };
+    let ru = match recv {
+        Value::UInt128(v) => *v,
+        Value::Int128(v) => *v as u128,
+        _ => 0,
+    };
     let ai = |idx: usize| -> Result<i128, Diagnostic> {
         match tail.get(idx) {
             Some(Value::Int128(v)) => Ok(*v),
-            Some(Value::UInt128(v)) => i128::try_from(*v).map_err(|_| Diagnostic::new("integer argument out of range", span, Severity::Error)),
-            _ => Err(Diagnostic::new("expected integer argument", span, Severity::Error)),
+            Some(Value::UInt128(v)) => i128::try_from(*v).map_err(|_| {
+                Diagnostic::new("integer argument out of range", span, Severity::Error)
+            }),
+            _ => Err(Diagnostic::new(
+                "expected integer argument",
+                span,
+                Severity::Error,
+            )),
         }
     };
     let au = |idx: usize| -> Result<u128, Diagnostic> {
         match tail.get(idx) {
             Some(Value::UInt128(v)) => Ok(*v),
             Some(Value::Int128(v)) if *v >= 0 => Ok(*v as u128),
-            _ => Err(Diagnostic::new("expected unsigned integer argument", span, Severity::Error)),
+            _ => Err(Diagnostic::new(
+                "expected unsigned integer argument",
+                span,
+                Severity::Error,
+            )),
         }
     };
-    let ret_same = |v: i128| if signed { Value::Int128(v) } else { Value::UInt128(v as u128) };
-    let ret_same_u = |v: u128| if signed { Value::Int128(v as i128) } else { Value::UInt128(v) };
+    let ret_same = |v: i128| {
+        if signed {
+            Value::Int128(v)
+        } else {
+            Value::UInt128(v as u128)
+        }
+    };
+    let ret_same_u = |v: u128| {
+        if signed {
+            Value::Int128(v as i128)
+        } else {
+            Value::UInt128(v)
+        }
+    };
     let checked = |ok: Option<Value>, label: &str| -> Value {
         if let Some(v) = ok {
             Value::Tuple(vec![v, Value::Null])
         } else {
             Value::Tuple(vec![
                 ret_same(0),
-                Value::Err { message: format!("{label} overflow"), code: 1, origin: "checked".to_string(), cause: None },
+                Value::Err {
+                    message: format!("{label} overflow"),
+                    code: 1,
+                    origin: "checked".to_string(),
+                    cause: None,
+                },
             ])
         }
     };
     let out = match method {
-        "add" => if signed { ret_same(ri + ai(0)?) } else { ret_same_u(ru + au(0)?) },
-        "sub" => if signed { ret_same(ri - ai(0)?) } else { ret_same_u(ru - au(0)?) },
-        "mul" => if signed { ret_same(ri * ai(0)?) } else { ret_same_u(ru * au(0)?) },
-        "div" => if signed { ret_same(ri / ai(0)?) } else { ret_same_u(ru / au(0)?) },
-        "mod" => if signed { ret_same(ri % ai(0)?) } else { ret_same_u(ru % au(0)?) },
+        "add" => {
+            if signed {
+                ret_same(ri + ai(0)?)
+            } else {
+                ret_same_u(ru + au(0)?)
+            }
+        }
+        "sub" => {
+            if signed {
+                ret_same(ri - ai(0)?)
+            } else {
+                ret_same_u(ru - au(0)?)
+            }
+        }
+        "mul" => {
+            if signed {
+                ret_same(ri * ai(0)?)
+            } else {
+                ret_same_u(ru * au(0)?)
+            }
+        }
+        "div" => {
+            if signed {
+                ret_same(ri / ai(0)?)
+            } else {
+                ret_same_u(ru / au(0)?)
+            }
+        }
+        "mod" => {
+            if signed {
+                ret_same(ri % ai(0)?)
+            } else {
+                ret_same_u(ru % au(0)?)
+            }
+        }
         "neg" => ret_same(-ri),
         "abs" => ret_same(ri.abs()),
         "and" => ret_same_u(ru & au(0)?),
@@ -4806,7 +5287,11 @@ fn dispatch_integer_method(name: &str, args: &[Value], span: Span) -> Result<Val
         "gt" => Value::Bool(if signed { ri > ai(0)? } else { ru > au(0)? }),
         "ge" => Value::Bool(if signed { ri >= ai(0)? } else { ru >= au(0)? }),
         "cmp" => {
-            let ord = if signed { ri.cmp(&ai(0)?) } else { ru.cmp(&au(0)?) };
+            let ord = if signed {
+                ri.cmp(&ai(0)?)
+            } else {
+                ru.cmp(&au(0)?)
+            };
             let v = match ord {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
@@ -4814,42 +5299,138 @@ fn dispatch_integer_method(name: &str, args: &[Value], span: Span) -> Result<Val
             };
             Value::Int128(v)
         }
-        "min" => if signed { ret_same(ri.min(ai(0)?)) } else { ret_same_u(ru.min(au(0)?)) },
-        "max" => if signed { ret_same(ri.max(ai(0)?)) } else { ret_same_u(ru.max(au(0)?)) },
-        "clamp" => if signed { ret_same(ri.clamp(ai(0)?, ai(1)?)) } else { ret_same_u(ru.clamp(au(0)?, au(1)?)) },
+        "min" => {
+            if signed {
+                ret_same(ri.min(ai(0)?))
+            } else {
+                ret_same_u(ru.min(au(0)?))
+            }
+        }
+        "max" => {
+            if signed {
+                ret_same(ri.max(ai(0)?))
+            } else {
+                ret_same_u(ru.max(au(0)?))
+            }
+        }
+        "clamp" => {
+            if signed {
+                ret_same(ri.clamp(ai(0)?, ai(1)?))
+            } else {
+                ret_same_u(ru.clamp(au(0)?, au(1)?))
+            }
+        }
         "is_zero" => Value::Bool(if signed { ri == 0 } else { ru == 0 }),
         "is_even" => Value::Bool(if signed { ri % 2 == 0 } else { ru % 2 == 0 }),
         "is_odd" => Value::Bool(if signed { ri % 2 != 0 } else { ru % 2 != 0 }),
-        "checked_add" => checked(if signed { ri.checked_add(ai(0)?).map(Value::Int128) } else { ru.checked_add(au(0)?).map(Value::UInt128) }, "checked_add"),
-        "checked_sub" => checked(if signed { ri.checked_sub(ai(0)?).map(Value::Int128) } else { ru.checked_sub(au(0)?).map(Value::UInt128) }, "checked_sub"),
-        "checked_mul" => checked(if signed { ri.checked_mul(ai(0)?).map(Value::Int128) } else { ru.checked_mul(au(0)?).map(Value::UInt128) }, "checked_mul"),
-        "checked_div" => checked(if signed { ri.checked_div(ai(0)?).map(Value::Int128) } else { ru.checked_div(au(0)?).map(Value::UInt128) }, "checked_div"),
-        "wrapping_add" => if signed { ret_same(ri.wrapping_add(ai(0)?)) } else { ret_same_u(ru.wrapping_add(au(0)?)) },
-        "wrapping_sub" => if signed { ret_same(ri.wrapping_sub(ai(0)?)) } else { ret_same_u(ru.wrapping_sub(au(0)?)) },
-        "saturating_add" => if signed { ret_same(ri.saturating_add(ai(0)?)) } else { ret_same_u(ru.saturating_add(au(0)?)) },
-        "saturating_sub" => if signed { ret_same(ri.saturating_sub(ai(0)?)) } else { ret_same_u(ru.saturating_sub(au(0)?)) },
-        "to_i32" => Value::Int128(i128::from(i32::try_from(ri).map_err(|_| Diagnostic::new("to_i32 overflow", span, Severity::Error))?)),
-        "to_u32" => Value::UInt128(u128::from(u32::try_from(ru).map_err(|_| Diagnostic::new("to_u32 overflow", span, Severity::Error))?)),
+        "checked_add" => checked(
+            if signed {
+                ri.checked_add(ai(0)?).map(Value::Int128)
+            } else {
+                ru.checked_add(au(0)?).map(Value::UInt128)
+            },
+            "checked_add",
+        ),
+        "checked_sub" => checked(
+            if signed {
+                ri.checked_sub(ai(0)?).map(Value::Int128)
+            } else {
+                ru.checked_sub(au(0)?).map(Value::UInt128)
+            },
+            "checked_sub",
+        ),
+        "checked_mul" => checked(
+            if signed {
+                ri.checked_mul(ai(0)?).map(Value::Int128)
+            } else {
+                ru.checked_mul(au(0)?).map(Value::UInt128)
+            },
+            "checked_mul",
+        ),
+        "checked_div" => checked(
+            if signed {
+                ri.checked_div(ai(0)?).map(Value::Int128)
+            } else {
+                ru.checked_div(au(0)?).map(Value::UInt128)
+            },
+            "checked_div",
+        ),
+        "wrapping_add" => {
+            if signed {
+                ret_same(ri.wrapping_add(ai(0)?))
+            } else {
+                ret_same_u(ru.wrapping_add(au(0)?))
+            }
+        }
+        "wrapping_sub" => {
+            if signed {
+                ret_same(ri.wrapping_sub(ai(0)?))
+            } else {
+                ret_same_u(ru.wrapping_sub(au(0)?))
+            }
+        }
+        "saturating_add" => {
+            if signed {
+                ret_same(ri.saturating_add(ai(0)?))
+            } else {
+                ret_same_u(ru.saturating_add(au(0)?))
+            }
+        }
+        "saturating_sub" => {
+            if signed {
+                ret_same(ri.saturating_sub(ai(0)?))
+            } else {
+                ret_same_u(ru.saturating_sub(au(0)?))
+            }
+        }
+        "to_i32" => {
+            Value::Int128(i128::from(i32::try_from(ri).map_err(|_| {
+                Diagnostic::new("to_i32 overflow", span, Severity::Error)
+            })?))
+        }
+        "to_u32" => {
+            Value::UInt128(u128::from(u32::try_from(ru).map_err(|_| {
+                Diagnostic::new("to_u32 overflow", span, Severity::Error)
+            })?))
+        }
         "to_f32" => Value::Float(if signed { ri as f64 } else { ru as f64 }),
         "to_bool" => Value::Bool(if signed { ri != 0 } else { ru != 0 }),
         "to_str" => Value::Str(recv.display_for_print()),
-        _ => return Err(Diagnostic::new(format!("unknown integer method '{method}'"), span, Severity::Error)),
+        _ => {
+            return Err(Diagnostic::new(
+                format!("unknown integer method '{method}'"),
+                span,
+                Severity::Error,
+            ));
+        }
     };
     Ok(out)
 }
 
 fn dispatch_float_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("float method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "float method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let Value::Float(r) = recv else {
-        return Err(Diagnostic::new("float method receiver must be float", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "float method receiver must be float",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name.strip_prefix("__meth_f_").unwrap_or(name);
     let af = |idx: usize| -> Result<f64, Diagnostic> {
         match tail.get(idx) {
             Some(Value::Float(v)) => Ok(*v),
-            _ => Err(Diagnostic::new("expected float argument", span, Severity::Error)),
+            _ => Err(Diagnostic::new(
+                "expected float argument",
+                span,
+                Severity::Error,
+            )),
         }
     };
     let out = match method {
@@ -4864,7 +5445,13 @@ fn dispatch_float_method(name: &str, args: &[Value], span: Span) -> Result<Value
         "gt" => Value::Bool(*r > af(0)?),
         "cmp" => {
             let rhs = af(0)?;
-            let cmp = if *r < rhs { -1 } else if *r > rhs { 1 } else { 0 };
+            let cmp = if *r < rhs {
+                -1
+            } else if *r > rhs {
+                1
+            } else {
+                0
+            };
             Value::Int128(cmp)
         }
         "abs" => Value::Float(r.abs()),
@@ -4889,7 +5476,11 @@ fn dispatch_float_method(name: &str, args: &[Value], span: Span) -> Result<Value
         "is_finite" => Value::Bool(r.is_finite()),
         "to_i32" => {
             if !r.is_finite() {
-                return Err(Diagnostic::new("to_i32 requires finite float", span, Severity::Error));
+                return Err(Diagnostic::new(
+                    "to_i32 requires finite float",
+                    span,
+                    Severity::Error,
+                ));
             }
             if *r < i32::MIN as f64 || *r > i32::MAX as f64 {
                 return Err(Diagnostic::new("to_i32 overflow", span, Severity::Error));
@@ -4897,23 +5488,41 @@ fn dispatch_float_method(name: &str, args: &[Value], span: Span) -> Result<Value
             Value::Int128(i128::from(*r as i32))
         }
         "to_str" => Value::Str(recv.display_for_print()),
-        _ => return Err(Diagnostic::new(format!("unknown float method '{method}'"), span, Severity::Error)),
+        _ => {
+            return Err(Diagnostic::new(
+                format!("unknown float method '{method}'"),
+                span,
+                Severity::Error,
+            ));
+        }
     };
     Ok(out)
 }
 
 fn dispatch_bool_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("bool method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "bool method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let Value::Bool(r) = recv else {
-        return Err(Diagnostic::new("bool method receiver must be bool", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "bool method receiver must be bool",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name.strip_prefix("__meth_b_").unwrap_or(name);
     let ab = |idx: usize| -> Result<bool, Diagnostic> {
         match tail.get(idx) {
             Some(Value::Bool(v)) => Ok(*v),
-            _ => Err(Diagnostic::new("expected bool argument", span, Severity::Error)),
+            _ => Err(Diagnostic::new(
+                "expected bool argument",
+                span,
+                Severity::Error,
+            )),
         }
     };
     let out = match method {
@@ -4924,23 +5533,41 @@ fn dispatch_bool_method(name: &str, args: &[Value], span: Span) -> Result<Value,
         "eq" => Value::Bool(*r == ab(0)?),
         "to_i32" => Value::Int128(if *r { 1 } else { 0 }),
         "to_str" => Value::Str(recv.display_for_print()),
-        _ => return Err(Diagnostic::new(format!("unknown bool method '{method}'"), span, Severity::Error)),
+        _ => {
+            return Err(Diagnostic::new(
+                format!("unknown bool method '{method}'"),
+                span,
+                Severity::Error,
+            ));
+        }
     };
     Ok(out)
 }
 
 fn dispatch_char_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("char method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "char method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let Value::Char(r) = recv else {
-        return Err(Diagnostic::new("char method receiver must be char", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "char method receiver must be char",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name.strip_prefix("__meth_c_").unwrap_or(name);
     let ac = |idx: usize| -> Result<char, Diagnostic> {
         match tail.get(idx) {
             Some(Value::Char(v)) => Ok(*v),
-            _ => Err(Diagnostic::new("expected char argument", span, Severity::Error)),
+            _ => Err(Diagnostic::new(
+                "expected char argument",
+                span,
+                Severity::Error,
+            )),
         }
     };
     let out = match method {
@@ -4953,34 +5580,54 @@ fn dispatch_char_method(name: &str, args: &[Value], span: Span) -> Result<Value,
         "to_lower" => Value::Char(r.to_ascii_lowercase()),
         "to_i32" => Value::Int128((*r as u32) as i128),
         "to_str" => Value::Str(recv.display_for_print()),
-        _ => return Err(Diagnostic::new(format!("unknown char method '{method}'"), span, Severity::Error)),
+        _ => {
+            return Err(Diagnostic::new(
+                format!("unknown char method '{method}'"),
+                span,
+                Severity::Error,
+            ));
+        }
     };
     Ok(out)
 }
 
 fn dispatch_str_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("str method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "str method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let Value::Str(s) = recv else {
-        return Err(Diagnostic::new("str method receiver must be str", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "str method receiver must be str",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name.strip_prefix("__meth_s_").unwrap_or(name);
     let astr = |idx: usize| -> Result<&str, Diagnostic> {
         match tail.get(idx) {
             Some(Value::Str(v)) => Ok(v.as_str()),
-            _ => Err(Diagnostic::new("expected str argument", span, Severity::Error)),
+            _ => Err(Diagnostic::new(
+                "expected str argument",
+                span,
+                Severity::Error,
+            )),
         }
     };
     let aidx = |idx: usize| -> Result<usize, Diagnostic> {
         match tail.get(idx) {
-            Some(Value::UInt128(v)) => usize::try_from(*v).map_err(|_| {
-                Diagnostic::new("index does not fit usize", span, Severity::Error)
-            }),
-            Some(Value::Int128(v)) if *v >= 0 => usize::try_from(*v).map_err(|_| {
-                Diagnostic::new("index does not fit usize", span, Severity::Error)
-            }),
-            _ => Err(Diagnostic::new("expected u64-like index argument", span, Severity::Error)),
+            Some(Value::UInt128(v)) => usize::try_from(*v)
+                .map_err(|_| Diagnostic::new("index does not fit usize", span, Severity::Error)),
+            Some(Value::Int128(v)) if *v >= 0 => usize::try_from(*v)
+                .map_err(|_| Diagnostic::new("index does not fit usize", span, Severity::Error)),
+            _ => Err(Diagnostic::new(
+                "expected u64-like index argument",
+                span,
+                Severity::Error,
+            )),
         }
     };
 
@@ -4995,7 +5642,11 @@ fn dispatch_str_method(name: &str, args: &[Value], span: Span) -> Result<Value, 
                 None => Value::Tuple(vec![
                     Value::Char('\0'),
                     Value::Err {
-                        message: format!("char_at index out of bounds: index={}, len={}", i, s.chars().count()),
+                        message: format!(
+                            "char_at index out of bounds: index={}, len={}",
+                            i,
+                            s.chars().count()
+                        ),
                         code: 1,
                         origin: "char_at".to_string(),
                         cause: None,
@@ -5014,7 +5665,12 @@ fn dispatch_str_method(name: &str, args: &[Value], span: Span) -> Result<Value, 
             let chars: Vec<char> = s.chars().collect();
             if start > end || end > chars.len() {
                 return Err(Diagnostic::new(
-                    format!("invalid slice bounds: start={}, end={}, len={}", start, end, chars.len()),
+                    format!(
+                        "invalid slice bounds: start={}, end={}, len={}",
+                        start,
+                        end,
+                        chars.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
@@ -5057,17 +5713,31 @@ fn dispatch_str_method(name: &str, args: &[Value], span: Span) -> Result<Value, 
                 },
             ]),
         },
-        _ => return Err(Diagnostic::new(format!("unknown str method '{method}'"), span, Severity::Error)),
+        _ => {
+            return Err(Diagnostic::new(
+                format!("unknown str method '{method}'"),
+                span,
+                Severity::Error,
+            ));
+        }
     };
     Ok(out)
 }
 
 fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("array method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "array method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let Value::Array(items) = recv else {
-        return Err(Diagnostic::new("array method receiver must be array", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "array method receiver must be array",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name.strip_prefix("__meth_a_").unwrap_or(name);
     let aidx = |idx: usize| -> Result<usize, Diagnostic> {
@@ -5076,7 +5746,11 @@ fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value
                 .map_err(|_| Diagnostic::new("index too large", span, Severity::Error)),
             Some(Value::Int128(v)) if *v >= 0 => usize::try_from(*v)
                 .map_err(|_| Diagnostic::new("index too large", span, Severity::Error)),
-            _ => Err(Diagnostic::new("expected u64-like index argument", span, Severity::Error)),
+            _ => Err(Diagnostic::new(
+                "expected u64-like index argument",
+                span,
+                Severity::Error,
+            )),
         }
     };
     let out = match method {
@@ -5089,7 +5763,11 @@ fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value
                 None => Value::Tuple(vec![
                     Value::Null,
                     Value::Err {
-                        message: format!("get index out of bounds: index={}, len={}", i, items.len()),
+                        message: format!(
+                            "get index out of bounds: index={}, len={}",
+                            i,
+                            items.len()
+                        ),
                         code: 1,
                         origin: "get".to_string(),
                         cause: None,
@@ -5128,7 +5806,11 @@ fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value
         "insert" => {
             let i = aidx(0)?;
             let Some(v) = tail.get(1) else {
-                return Err(Diagnostic::new("insert expects value", span, Severity::Error));
+                return Err(Diagnostic::new(
+                    "insert expects value",
+                    span,
+                    Severity::Error,
+                ));
             };
             let mut arr = items.clone();
             if i > arr.len() {
@@ -5148,7 +5830,11 @@ fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value
                 Value::Tuple(vec![
                     Value::Null,
                     Value::Err {
-                        message: format!("remove index out of bounds: index={}, len={}", i, arr.len()),
+                        message: format!(
+                            "remove index out of bounds: index={}, len={}",
+                            i,
+                            arr.len()
+                        ),
                         code: 1,
                         origin: "remove".to_string(),
                         cause: None,
@@ -5163,12 +5849,20 @@ fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value
             let Some(v) = tail.first() else {
                 return Err(Diagnostic::new("find expects value", span, Severity::Error));
             };
-            let idx = items.iter().position(|x| x == v).map(|i| i as i128).unwrap_or(-1);
+            let idx = items
+                .iter()
+                .position(|x| x == v)
+                .map(|i| i as i128)
+                .unwrap_or(-1);
             Value::Int128(idx)
         }
         "contains" => {
             let Some(v) = tail.first() else {
-                return Err(Diagnostic::new("contains expects value", span, Severity::Error));
+                return Err(Diagnostic::new(
+                    "contains expects value",
+                    span,
+                    Severity::Error,
+                ));
             };
             Value::Bool(items.iter().any(|x| x == v))
         }
@@ -5187,14 +5881,25 @@ fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value
             let end = aidx(1)?;
             if start > end || end > items.len() {
                 return Err(Diagnostic::new(
-                    format!("invalid slice bounds: start={}, end={}, len={}", start, end, items.len()),
+                    format!(
+                        "invalid slice bounds: start={}, end={}, len={}",
+                        start,
+                        end,
+                        items.len()
+                    ),
                     span,
                     Severity::Error,
                 ));
             }
             Value::Array(items[start..end].to_vec())
         }
-        _ => return Err(Diagnostic::new(format!("unknown array method '{method}'"), span, Severity::Error)),
+        _ => {
+            return Err(Diagnostic::new(
+                format!("unknown array method '{method}'"),
+                span,
+                Severity::Error,
+            ));
+        }
     };
     Ok(out)
 }
@@ -5206,7 +5911,11 @@ fn dispatch_function_method(
     span: Span,
 ) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("function method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "function method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name.strip_prefix("__meth_fn_").unwrap_or(name);
     match method {
@@ -5218,12 +5927,20 @@ fn dispatch_function_method(
         "arity" => match recv {
             Value::Function { function, .. } => Ok(Value::UInt128(function.params.len() as u128)),
             Value::Builtin(_) => Ok(Value::UInt128(0)),
-            _ => Err(Diagnostic::new("arity receiver must be function", span, Severity::Error)),
+            _ => Err(Diagnostic::new(
+                "arity receiver must be function",
+                span,
+                Severity::Error,
+            )),
         },
         "bind" => Ok(recv.clone()),
         "compose" => {
             let Some(Value::Function { .. } | Value::Builtin(_)) = tail.first() else {
-                return Err(Diagnostic::new("compose expects function argument", span, Severity::Error));
+                return Err(Diagnostic::new(
+                    "compose expects function argument",
+                    span,
+                    Severity::Error,
+                ));
             };
             Ok(recv.clone())
         }
@@ -5243,10 +5960,18 @@ fn dispatch_map_method(
     span: Span,
 ) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("map method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "map method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let Value::Map(entries) = recv else {
-        return Err(Diagnostic::new("map method receiver must be map", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "map method receiver must be map",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name.strip_prefix("__meth_m_").unwrap_or(name);
     let map = entries.clone();
@@ -5259,13 +5984,23 @@ fn dispatch_map_method(
             .and_then(|k| find_idx(&map, k).map(|i| map[i].1.clone()))
             .unwrap_or(Value::Null),
         "get_or" => {
-            let k = tail.first().ok_or_else(|| Diagnostic::new("get_or expects key", span, Severity::Error))?;
-            let d = tail.get(1).ok_or_else(|| Diagnostic::new("get_or expects default", span, Severity::Error))?;
-            find_idx(&map, k).map(|i| map[i].1.clone()).unwrap_or_else(|| d.clone())
+            let k = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("get_or expects key", span, Severity::Error))?;
+            let d = tail
+                .get(1)
+                .ok_or_else(|| Diagnostic::new("get_or expects default", span, Severity::Error))?;
+            find_idx(&map, k)
+                .map(|i| map[i].1.clone())
+                .unwrap_or_else(|| d.clone())
         }
         "get_or_insert" => {
-            let k = tail.first().ok_or_else(|| Diagnostic::new("get_or_insert expects key", span, Severity::Error))?;
-            let d = tail.get(1).ok_or_else(|| Diagnostic::new("get_or_insert expects default", span, Severity::Error))?;
+            let k = tail.first().ok_or_else(|| {
+                Diagnostic::new("get_or_insert expects key", span, Severity::Error)
+            })?;
+            let d = tail.get(1).ok_or_else(|| {
+                Diagnostic::new("get_or_insert expects default", span, Severity::Error)
+            })?;
             if let Some(i) = find_idx(&map, k) {
                 map[i].1.clone()
             } else {
@@ -5273,12 +6008,18 @@ fn dispatch_map_method(
             }
         }
         "contains_key" => {
-            let k = tail.first().ok_or_else(|| Diagnostic::new("contains_key expects key", span, Severity::Error))?;
+            let k = tail.first().ok_or_else(|| {
+                Diagnostic::new("contains_key expects key", span, Severity::Error)
+            })?;
             Value::Bool(find_idx(&map, k).is_some())
         }
         "insert" => {
-            let k = tail.first().ok_or_else(|| Diagnostic::new("insert expects key", span, Severity::Error))?;
-            let _v = tail.get(1).ok_or_else(|| Diagnostic::new("insert expects value", span, Severity::Error))?;
+            let k = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("insert expects key", span, Severity::Error))?;
+            let _v = tail
+                .get(1)
+                .ok_or_else(|| Diagnostic::new("insert expects value", span, Severity::Error))?;
             if let Some(i) = find_idx(&map, k) {
                 map[i].1.clone()
             } else {
@@ -5286,12 +6027,18 @@ fn dispatch_map_method(
             }
         }
         "remove" => {
-            let k = tail.first().ok_or_else(|| Diagnostic::new("remove expects key", span, Severity::Error))?;
-            find_idx(&map, k).map(|i| map[i].1.clone()).unwrap_or(Value::Null)
+            let k = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("remove expects key", span, Severity::Error))?;
+            find_idx(&map, k)
+                .map(|i| map[i].1.clone())
+                .unwrap_or(Value::Null)
         }
         "clear" => Value::Unit,
         "update" => {
-            let k = tail.first().ok_or_else(|| Diagnostic::new("update expects key", span, Severity::Error))?;
+            let k = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("update expects key", span, Severity::Error))?;
             if let Some(i) = find_idx(&map, k) {
                 map[i].1.clone()
             } else {
@@ -5306,7 +6053,9 @@ fn dispatch_map_method(
                 .collect(),
         ),
         "merge" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("merge expects other map", span, Severity::Error))?;
+            let other = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("merge expects other map", span, Severity::Error))?;
             if let Value::Map(other_entries) = other {
                 let mut merged = map.clone();
                 for (k, v) in other_entries {
@@ -5318,11 +6067,17 @@ fn dispatch_map_method(
                 }
                 Value::Map(merged)
             } else {
-                return Err(Diagnostic::new("merge expects map argument", span, Severity::Error));
+                return Err(Diagnostic::new(
+                    "merge expects map argument",
+                    span,
+                    Severity::Error,
+                ));
             }
         }
         "merge_with" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("merge_with expects other map", span, Severity::Error))?;
+            let other = tail.first().ok_or_else(|| {
+                Diagnostic::new("merge_with expects other map", span, Severity::Error)
+            })?;
             if let Value::Map(other_entries) = other {
                 let mut merged = map.clone();
                 for (k, v_other) in other_entries {
@@ -5334,29 +6089,51 @@ fn dispatch_map_method(
                 }
                 Value::Map(merged)
             } else {
-                return Err(Diagnostic::new("merge_with expects map argument", span, Severity::Error));
+                return Err(Diagnostic::new(
+                    "merge_with expects map argument",
+                    span,
+                    Severity::Error,
+                ));
             }
         }
         "clone" => Value::Map(map.clone()),
         "eq" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("eq expects map argument", span, Severity::Error))?;
+            let other = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("eq expects map argument", span, Severity::Error))?;
             Value::Bool(matches!(other, Value::Map(o) if o == &map))
         }
         "ne" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("ne expects map argument", span, Severity::Error))?;
+            let other = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("ne expects map argument", span, Severity::Error))?;
             Value::Bool(!matches!(other, Value::Map(o) if o == &map))
         }
-        _ => return Err(Diagnostic::new(format!("unknown map method '{method}'"), span, Severity::Error)),
+        _ => {
+            return Err(Diagnostic::new(
+                format!("unknown map method '{method}'"),
+                span,
+                Severity::Error,
+            ));
+        }
     };
     Ok(out)
 }
 
 fn dispatch_set_method(name: &str, args: &[Value], span: Span) -> Result<Value, Diagnostic> {
     let [recv, tail @ ..] = args else {
-        return Err(Diagnostic::new("set method missing receiver", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "set method missing receiver",
+            span,
+            Severity::Error,
+        ));
     };
     let Value::Set(items) = recv else {
-        return Err(Diagnostic::new("set method receiver must be set", span, Severity::Error));
+        return Err(Diagnostic::new(
+            "set method receiver must be set",
+            span,
+            Severity::Error,
+        ));
     };
     let method = name.strip_prefix("__meth_set_").unwrap_or(name);
     let mut set = items.clone();
@@ -5365,23 +6142,37 @@ fn dispatch_set_method(name: &str, args: &[Value], span: Span) -> Result<Value, 
         "len" => Value::UInt128(set.len() as u128),
         "is_empty" => Value::Bool(set.is_empty()),
         "contains" => {
-            let v = tail.first().ok_or_else(|| Diagnostic::new("contains expects value", span, Severity::Error))?;
+            let v = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("contains expects value", span, Severity::Error))?;
             Value::Bool(contains(&set, v))
         }
         "insert" => {
-            let v = tail.first().ok_or_else(|| Diagnostic::new("insert expects value", span, Severity::Error))?;
+            let v = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("insert expects value", span, Severity::Error))?;
             let fresh = !contains(&set, v);
             Value::Bool(fresh)
         }
         "remove" => {
-            let v = tail.first().ok_or_else(|| Diagnostic::new("remove expects value", span, Severity::Error))?;
+            let v = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("remove expects value", span, Severity::Error))?;
             Value::Bool(contains(&set, v))
         }
         "clear" => Value::Unit,
         "values" => Value::Array(set.clone()),
         "union" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("union expects set argument", span, Severity::Error))?;
-            let Value::Set(other_set) = other else { return Err(Diagnostic::new("union expects set argument", span, Severity::Error)); };
+            let other = tail.first().ok_or_else(|| {
+                Diagnostic::new("union expects set argument", span, Severity::Error)
+            })?;
+            let Value::Set(other_set) = other else {
+                return Err(Diagnostic::new(
+                    "union expects set argument",
+                    span,
+                    Severity::Error,
+                ));
+            };
             for v in other_set {
                 if !contains(&set, v) {
                     set.push(v.clone());
@@ -5390,18 +6181,50 @@ fn dispatch_set_method(name: &str, args: &[Value], span: Span) -> Result<Value, 
             Value::Set(set)
         }
         "intersection" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("intersection expects set argument", span, Severity::Error))?;
-            let Value::Set(other_set) = other else { return Err(Diagnostic::new("intersection expects set argument", span, Severity::Error)); };
+            let other = tail.first().ok_or_else(|| {
+                Diagnostic::new("intersection expects set argument", span, Severity::Error)
+            })?;
+            let Value::Set(other_set) = other else {
+                return Err(Diagnostic::new(
+                    "intersection expects set argument",
+                    span,
+                    Severity::Error,
+                ));
+            };
             Value::Set(set.into_iter().filter(|v| contains(other_set, v)).collect())
         }
         "difference" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("difference expects set argument", span, Severity::Error))?;
-            let Value::Set(other_set) = other else { return Err(Diagnostic::new("difference expects set argument", span, Severity::Error)); };
-            Value::Set(set.into_iter().filter(|v| !contains(other_set, v)).collect())
+            let other = tail.first().ok_or_else(|| {
+                Diagnostic::new("difference expects set argument", span, Severity::Error)
+            })?;
+            let Value::Set(other_set) = other else {
+                return Err(Diagnostic::new(
+                    "difference expects set argument",
+                    span,
+                    Severity::Error,
+                ));
+            };
+            Value::Set(
+                set.into_iter()
+                    .filter(|v| !contains(other_set, v))
+                    .collect(),
+            )
         }
         "symmetric_difference" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("symmetric_difference expects set argument", span, Severity::Error))?;
-            let Value::Set(other_set) = other else { return Err(Diagnostic::new("symmetric_difference expects set argument", span, Severity::Error)); };
+            let other = tail.first().ok_or_else(|| {
+                Diagnostic::new(
+                    "symmetric_difference expects set argument",
+                    span,
+                    Severity::Error,
+                )
+            })?;
+            let Value::Set(other_set) = other else {
+                return Err(Diagnostic::new(
+                    "symmetric_difference expects set argument",
+                    span,
+                    Severity::Error,
+                ));
+            };
             let mut out = Vec::new();
             for v in &set {
                 if !contains(other_set, v) {
@@ -5416,48 +6239,83 @@ fn dispatch_set_method(name: &str, args: &[Value], span: Span) -> Result<Value, 
             Value::Set(out)
         }
         "is_subset" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("is_subset expects set argument", span, Severity::Error))?;
-            let Value::Set(other_set) = other else { return Err(Diagnostic::new("is_subset expects set argument", span, Severity::Error)); };
+            let other = tail.first().ok_or_else(|| {
+                Diagnostic::new("is_subset expects set argument", span, Severity::Error)
+            })?;
+            let Value::Set(other_set) = other else {
+                return Err(Diagnostic::new(
+                    "is_subset expects set argument",
+                    span,
+                    Severity::Error,
+                ));
+            };
             Value::Bool(set.iter().all(|v| contains(other_set, v)))
         }
         "is_superset" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("is_superset expects set argument", span, Severity::Error))?;
-            let Value::Set(other_set) = other else { return Err(Diagnostic::new("is_superset expects set argument", span, Severity::Error)); };
+            let other = tail.first().ok_or_else(|| {
+                Diagnostic::new("is_superset expects set argument", span, Severity::Error)
+            })?;
+            let Value::Set(other_set) = other else {
+                return Err(Diagnostic::new(
+                    "is_superset expects set argument",
+                    span,
+                    Severity::Error,
+                ));
+            };
             Value::Bool(other_set.iter().all(|v| contains(&set, v)))
         }
         "is_disjoint" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("is_disjoint expects set argument", span, Severity::Error))?;
-            let Value::Set(other_set) = other else { return Err(Diagnostic::new("is_disjoint expects set argument", span, Severity::Error)); };
+            let other = tail.first().ok_or_else(|| {
+                Diagnostic::new("is_disjoint expects set argument", span, Severity::Error)
+            })?;
+            let Value::Set(other_set) = other else {
+                return Err(Diagnostic::new(
+                    "is_disjoint expects set argument",
+                    span,
+                    Severity::Error,
+                ));
+            };
             Value::Bool(set.iter().all(|v| !contains(other_set, v)))
         }
         "clone" => Value::Set(set.clone()),
         "eq" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("eq expects set argument", span, Severity::Error))?;
+            let other = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("eq expects set argument", span, Severity::Error))?;
             Value::Bool(matches!(other, Value::Set(o) if o == &set))
         }
         "ne" => {
-            let other = tail.first().ok_or_else(|| Diagnostic::new("ne expects set argument", span, Severity::Error))?;
+            let other = tail
+                .first()
+                .ok_or_else(|| Diagnostic::new("ne expects set argument", span, Severity::Error))?;
             Value::Bool(!matches!(other, Value::Set(o) if o == &set))
         }
-        _ => return Err(Diagnostic::new(format!("unknown set method '{method}'"), span, Severity::Error)),
+        _ => {
+            return Err(Diagnostic::new(
+                format!("unknown set method '{method}'"),
+                span,
+                Severity::Error,
+            ));
+        }
     };
     Ok(out)
 }
 
-
 fn err_value_from_panic(diagnostic: &Diagnostic) -> Value {
-    let msg = diagnostic.message.strip_prefix("panic: ").unwrap_or(&diagnostic.message);
-    if let Some((message, code_part)) = msg.rsplit_once(" (code=") {
-        if let Some(raw_code) = code_part.strip_suffix(')') {
-            if let Ok(code) = raw_code.parse::<i32>() {
-                return Value::Err {
-                    message: message.to_string(),
-                    code,
-                    origin: "panic".to_string(),
-                    cause: None,
-                };
-            }
-        }
+    let msg = diagnostic
+        .message
+        .strip_prefix("panic: ")
+        .unwrap_or(&diagnostic.message);
+    if let Some((message, code_part)) = msg.rsplit_once(" (code=")
+        && let Some(raw_code) = code_part.strip_suffix(')')
+        && let Ok(code) = raw_code.parse::<i32>()
+    {
+        return Value::Err {
+            message: message.to_string(),
+            code,
+            origin: "panic".to_string(),
+            cause: None,
+        };
     }
     Value::Err {
         message: msg.to_string(),
@@ -5500,7 +6358,11 @@ fn canonical_type_name(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Builtin(_) | Value::Function { .. } => "fn(any) -> any".to_string(),
         Value::Tuple(items) => {
-            let inner = items.iter().map(canonical_type_name).collect::<Vec<_>>().join(", ");
+            let inner = items
+                .iter()
+                .map(canonical_type_name)
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("({inner})")
         }
         Value::Array(items) => {
@@ -5553,7 +6415,10 @@ fn to_usize_index(value: &Value, span: Span) -> Result<usize, Diagnostic> {
     match value {
         Value::Int128(i) => usize::try_from(*i).map_err(|_| {
             Diagnostic::new(
-                format!("array index must be non-negative usize-compatible int, got {}", i),
+                format!(
+                    "array index must be non-negative usize-compatible int, got {}",
+                    i
+                ),
                 span,
                 Severity::Error,
             )
@@ -5566,7 +6431,10 @@ fn to_usize_index(value: &Value, span: Span) -> Result<usize, Diagnostic> {
             )
         }),
         other => Err(Diagnostic::new(
-            format!("array index must be integer, got {}", builtin_type_name(other)),
+            format!(
+                "array index must be integer, got {}",
+                builtin_type_name(other)
+            ),
             span,
             Severity::Error,
         )),
@@ -5618,7 +6486,7 @@ fn wrap_err_value(
                         format!("error-like struct `{type_name}` must have `message: str`"),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let base_code = match fields.get("code") {
@@ -5641,7 +6509,7 @@ fn wrap_err_value(
                         format!("error-like struct `{type_name}` must have `code: i32`"),
                         span,
                         Severity::Error,
-                    ))
+                    ));
                 }
             };
             let is_propagation_wrap = message == "propagated by ?";
@@ -5690,7 +6558,10 @@ fn coerce_i32_code(value: &Value, span: Span, fn_name: &str) -> Result<i32, Diag
             )
         }),
         other => Err(Diagnostic::new(
-            format!("{fn_name} code must be i32-compatible, got {}", builtin_type_name(other)),
+            format!(
+                "{fn_name} code must be i32-compatible, got {}",
+                builtin_type_name(other)
+            ),
             span,
             Severity::Error,
         )),
@@ -5731,13 +6602,24 @@ fn expect_f64_arg(value: &Value, label: &str, span: Span) -> Result<f64, Diagnos
 fn expect_i32_like(value: &Value, label: &str, span: Span) -> Result<i32, Diagnostic> {
     match value {
         Value::Int128(v) => i32::try_from(*v).map_err(|_| {
-            Diagnostic::new(format!("{label} is out of i32 range"), span, Severity::Error)
+            Diagnostic::new(
+                format!("{label} is out of i32 range"),
+                span,
+                Severity::Error,
+            )
         }),
         Value::UInt128(v) => i32::try_from(*v).map_err(|_| {
-            Diagnostic::new(format!("{label} is out of i32 range"), span, Severity::Error)
+            Diagnostic::new(
+                format!("{label} is out of i32 range"),
+                span,
+                Severity::Error,
+            )
         }),
         other => Err(Diagnostic::new(
-            format!("{label} must be i32-compatible, got {}", builtin_type_name(other)),
+            format!(
+                "{label} must be i32-compatible, got {}",
+                builtin_type_name(other)
+            ),
             span,
             Severity::Error,
         )),
@@ -5747,13 +6629,24 @@ fn expect_i32_like(value: &Value, label: &str, span: Span) -> Result<i32, Diagno
 fn expect_u64_arg(value: &Value, label: &str, span: Span) -> Result<u64, Diagnostic> {
     match value {
         Value::UInt128(v) => u64::try_from(*v).map_err(|_| {
-            Diagnostic::new(format!("{label} is out of u64 range"), span, Severity::Error)
+            Diagnostic::new(
+                format!("{label} is out of u64 range"),
+                span,
+                Severity::Error,
+            )
         }),
         Value::Int128(v) if *v >= 0 => u64::try_from(*v).map_err(|_| {
-            Diagnostic::new(format!("{label} is out of u64 range"), span, Severity::Error)
+            Diagnostic::new(
+                format!("{label} is out of u64 range"),
+                span,
+                Severity::Error,
+            )
         }),
         other => Err(Diagnostic::new(
-            format!("{label} must be u64-compatible, got {}", builtin_type_name(other)),
+            format!(
+                "{label} must be u64-compatible, got {}",
+                builtin_type_name(other)
+            ),
             span,
             Severity::Error,
         )),
@@ -5922,7 +6815,10 @@ fn parse_http_headers(raw: &str) -> Value {
             break;
         }
         if let Some((k, v)) = line.split_once(':') {
-            entries.push((Value::Str(k.trim().to_string()), Value::Str(v.trim().to_string())));
+            entries.push((
+                Value::Str(k.trim().to_string()),
+                Value::Str(v.trim().to_string()),
+            ));
         }
     }
     Value::Map(entries)
@@ -5938,8 +6834,12 @@ fn parse_http_response(raw: &str) -> Result<(i32, String, Value, String), String
         .next()
         .ok_or_else(|| "invalid HTTP response: missing status line".to_string())?;
     let mut parts = status_line.splitn(3, ' ');
-    let _version = parts.next().ok_or_else(|| "invalid status line".to_string())?;
-    let code_str = parts.next().ok_or_else(|| "invalid status line".to_string())?;
+    let _version = parts
+        .next()
+        .ok_or_else(|| "invalid status line".to_string())?;
+    let code_str = parts
+        .next()
+        .ok_or_else(|| "invalid status line".to_string())?;
     let reason = parts.next().unwrap_or("").to_string();
     let code = code_str
         .parse::<i32>()
@@ -5958,9 +6858,18 @@ fn parse_http_request(raw: &str) -> Result<(String, String, String, Value, Strin
         .next()
         .ok_or_else(|| "invalid HTTP request: missing request line".to_string())?;
     let mut parts = request_line.splitn(3, ' ');
-    let method = parts.next().ok_or_else(|| "invalid request line".to_string())?.to_string();
-    let path = parts.next().ok_or_else(|| "invalid request line".to_string())?.to_string();
-    let version = parts.next().ok_or_else(|| "invalid request line".to_string())?.to_string();
+    let method = parts
+        .next()
+        .ok_or_else(|| "invalid request line".to_string())?
+        .to_string();
+    let path = parts
+        .next()
+        .ok_or_else(|| "invalid request line".to_string())?
+        .to_string();
+    let version = parts
+        .next()
+        .ok_or_else(|| "invalid request line".to_string())?
+        .to_string();
     let headers = parse_http_headers(&lines.collect::<Vec<_>>().join("\n"));
     Ok((method, path, version, headers, body.to_string()))
 }
@@ -6064,7 +6973,11 @@ fn encrypt_with_key(plain: &[u8], key: &[u8]) -> std::io::Result<String> {
     let mut nonce = [0_u8; 12];
     secure_random_fill(&mut nonce)?;
     let stream = keystream_bytes(key, &nonce, plain.len());
-    let cipher: Vec<u8> = plain.iter().zip(stream.iter()).map(|(p, k)| p ^ k).collect();
+    let cipher: Vec<u8> = plain
+        .iter()
+        .zip(stream.iter())
+        .map(|(p, k)| p ^ k)
+        .collect();
     Ok(format!("{}:{}", hex_encode(&nonce), hex_encode(&cipher)))
 }
 
@@ -6075,7 +6988,11 @@ fn decrypt_with_key(blob: &str, key: &[u8]) -> Result<String, String> {
     let nonce = hex_decode(nonce_hex)?;
     let cipher = hex_decode(cipher_hex)?;
     let stream = keystream_bytes(key, &nonce, cipher.len());
-    let plain: Vec<u8> = cipher.iter().zip(stream.iter()).map(|(c, k)| c ^ k).collect();
+    let plain: Vec<u8> = cipher
+        .iter()
+        .zip(stream.iter())
+        .map(|(c, k)| c ^ k)
+        .collect();
     String::from_utf8(plain).map_err(|_| "decrypted data is not valid utf-8".to_string())
 }
 
@@ -6451,15 +7368,30 @@ fn parse_url_basic(raw: &str) -> Result<Value, String> {
         return Err("url host is empty".to_string());
     }
     Ok(Value::Map(vec![
-        (Value::Str("scheme".to_string()), Value::Str(scheme.to_string())),
+        (
+            Value::Str("scheme".to_string()),
+            Value::Str(scheme.to_string()),
+        ),
         (Value::Str("host".to_string()), Value::Str(host.to_string())),
         (Value::Str("path".to_string()), Value::Str(path.to_string())),
-        (Value::Str("query".to_string()), Value::Str(query.to_string())),
-        (Value::Str("fragment".to_string()), Value::Str(fragment.to_string())),
+        (
+            Value::Str("query".to_string()),
+            Value::Str(query.to_string()),
+        ),
+        (
+            Value::Str("fragment".to_string()),
+            Value::Str(fragment.to_string()),
+        ),
     ]))
 }
 
-fn build_url_basic(scheme: &str, host: &str, path: &str, query: &str, fragment: &str) -> Result<String, String> {
+fn build_url_basic(
+    scheme: &str,
+    host: &str,
+    path: &str,
+    query: &str,
+    fragment: &str,
+) -> Result<String, String> {
     if scheme.is_empty() {
         return Err("url scheme cannot be empty".to_string());
     }
@@ -6512,8 +7444,10 @@ fn url_decode_component_basic(input: &str) -> Result<String, String> {
                 if i + 2 >= bytes.len() {
                     return Err("incomplete percent-encoding".to_string());
                 }
-                let hi = hex_val(bytes[i + 1]).ok_or_else(|| "invalid percent-encoding".to_string())?;
-                let lo = hex_val(bytes[i + 2]).ok_or_else(|| "invalid percent-encoding".to_string())?;
+                let hi =
+                    hex_val(bytes[i + 1]).ok_or_else(|| "invalid percent-encoding".to_string())?;
+                let lo =
+                    hex_val(bytes[i + 2]).ok_or_else(|| "invalid percent-encoding".to_string())?;
                 out.push((hi << 4) | lo);
                 i += 3;
             }
@@ -6779,7 +7713,10 @@ mod tests {
         let local = symbols.define(
             root,
             "local".to_string(),
-            crate::analyzer::Type::Int { signed: true, bits: 32 },
+            crate::analyzer::Type::Int {
+                signed: true,
+                bits: 32,
+            },
             crate::hir::SymbolOrigin::User,
             false,
         );
@@ -6794,7 +7731,10 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let err = execute(&chunk, &symbols).expect_err("missing local after exit");
-        assert!(err.iter().any(|d| d.message.contains("load of uninitialized or missing symbol")));
+        assert!(err.iter().any(|d| {
+            d.message
+                .contains("load of uninitialized or missing symbol")
+        }));
     }
 
     #[test]
@@ -6804,7 +7744,10 @@ mod tests {
         let outer = symbols.define(
             root,
             "outer".to_string(),
-            crate::analyzer::Type::Int { signed: true, bits: 32 },
+            crate::analyzer::Type::Int {
+                signed: true,
+                bits: 32,
+            },
             crate::hir::SymbolOrigin::User,
             false,
         );
@@ -6812,7 +7755,10 @@ mod tests {
         let inner = symbols.define(
             inner_scope,
             "outer".to_string(),
-            crate::analyzer::Type::Int { signed: true, bits: 32 },
+            crate::analyzer::Type::Int {
+                signed: true,
+                bits: 32,
+            },
             crate::hir::SymbolOrigin::User,
             false,
         );
@@ -6916,7 +7862,10 @@ mod tests {
         let chunk = b.finish();
         let symbols = SymbolTable::new();
         let err = execute(&chunk, &symbols).expect_err("invalid jump");
-        assert!(err.iter().any(|d| d.message.contains("invalid jump target")));
+        assert!(
+            err.iter()
+                .any(|d| d.message.contains("invalid jump target"))
+        );
     }
 
     #[test]
@@ -7130,7 +8079,10 @@ mod tests {
         let arr = symbols.define(
             root,
             "arr".to_string(),
-            crate::analyzer::Type::Array(Box::new(crate::analyzer::Type::Int { signed: true, bits: 32 })),
+            crate::analyzer::Type::Array(Box::new(crate::analyzer::Type::Int {
+                signed: true,
+                bits: 32,
+            })),
             crate::hir::SymbolOrigin::User,
             false,
         );
@@ -7162,7 +8114,10 @@ mod tests {
         b.emit(Op::Return, s);
         let symbols = SymbolTable::new();
         let err = execute(&b.finish(), &symbols).expect_err("array get oob");
-        assert!(err.iter().any(|d| d.message.contains("index out of bounds")));
+        assert!(
+            err.iter()
+                .any(|d| d.message.contains("index out of bounds"))
+        );
     }
 
     #[test]

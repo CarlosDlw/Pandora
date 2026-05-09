@@ -1,12 +1,8 @@
-use foundation::{
-    diagnostics::Diagnostics,
-    frontend::PandoraFrontend,
-    ids::FileId,
-};
+use foundation::{diagnostics::Diagnostics, frontend::PandoraFrontend, ids::FileId};
 
 use crate::{
     analyzer::analyze_with_registry,
-    builtins::{default_registry, BuiltinRegistry},
+    builtins::{BuiltinRegistry, default_registry},
     lexer::lex,
     lowering::lower_with_registry,
     parser::parse,
@@ -19,7 +15,11 @@ pub fn compile_file(file_id: FileId, source: &str) -> Diagnostics {
     compile_file_with_registry(file_id, source, &default_registry())
 }
 
-pub fn compile_file_with_registry(file_id: FileId, source: &str, registry: &BuiltinRegistry) -> Diagnostics {
+pub fn compile_file_with_registry(
+    file_id: FileId,
+    source: &str,
+    registry: &BuiltinRegistry,
+) -> Diagnostics {
     let _core_std = embedded_core_std_pbc();
     let lex_output = lex(file_id, source);
     let mut diagnostics = lex_output.diagnostics;
@@ -65,10 +65,10 @@ impl PandoraFrontend for CoreFrontend {
         source: &str,
         builtins: Option<&std::sync::Arc<dyn std::any::Any + Send + Sync>>,
     ) -> Diagnostics {
-        if let Some(any_registry) = builtins {
-            if let Some(registry) = any_registry.downcast_ref::<BuiltinRegistry>() {
-                return compile_file_with_registry(file_id, source, registry);
-            }
+        if let Some(any_registry) = builtins
+            && let Some(registry) = any_registry.downcast_ref::<BuiltinRegistry>()
+        {
+            return compile_file_with_registry(file_id, source, registry);
         }
         compile_file(file_id, source)
     }

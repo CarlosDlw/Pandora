@@ -57,15 +57,29 @@ pub enum HirExpr {
     Str(String),
     Char(char),
     Var(SymbolId),
-    Unary { op: UnaryOp, operand: HirId },
-    Binary { op: BinOp, lhs: HirId, rhs: HirId },
-    Range { start: HirId, end: HirId, inclusive: bool },
+    Unary {
+        op: UnaryOp,
+        operand: HirId,
+    },
+    Binary {
+        op: BinOp,
+        lhs: HirId,
+        rhs: HirId,
+    },
+    Range {
+        start: HirId,
+        end: HirId,
+        inclusive: bool,
+    },
     IncDec {
         symbol: SymbolId,
         op: IncDecOp,
         position: IncDecPosition,
     },
-    Call { callee: HirId, args: Vec<HirId> },
+    Call {
+        callee: HirId,
+        args: Vec<HirId>,
+    },
     MethodCall {
         receiver: HirId,
         method: String,
@@ -85,12 +99,20 @@ pub enum HirExpr {
         field: String,
     },
     Tuple(Vec<HirId>),
-    TupleAccess { tuple: HirId, index: usize },
+    TupleAccess {
+        tuple: HirId,
+        index: usize,
+    },
     Array(Vec<HirArrayItem>),
     Map(Vec<(HirId, HirId)>),
     Set(Vec<HirId>),
-    ArrayAccess { array: HirId, index: HirId },
-    Propagate { expr: HirId },
+    ArrayAccess {
+        array: HirId,
+        index: HirId,
+    },
+    Propagate {
+        expr: HirId,
+    },
     TryCatch {
         try_expr: HirId,
         err_symbol: SymbolId,
@@ -129,7 +151,12 @@ pub enum HirStmt {
     TraitDecl {
         symbol: SymbolId,
         name: String,
-        methods: Vec<(String, Vec<crate::analyzer::Type>, crate::analyzer::Type, bool)>,
+        methods: Vec<(
+            String,
+            Vec<crate::analyzer::Type>,
+            crate::analyzer::Type,
+            bool,
+        )>,
         span: Span,
     },
     ImplBlock {

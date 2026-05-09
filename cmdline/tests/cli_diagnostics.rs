@@ -58,7 +58,8 @@ fn ast_mode_returns_error_for_parser_diagnostic() {
 #[test]
 fn check_mode_reports_block_scope_violation() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"{ name: str = \"carlos\" }\nprint(name)\n").expect("write");
+    std::io::Write::write_all(&mut file, b"{ name: str = \"carlos\" }\nprint(name)\n")
+        .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
@@ -81,10 +82,7 @@ fn ast_mode_reports_missing_block_closer() {
         .arg("--ast")
         .assert()
         .code(1)
-        .stderr(
-            contains("error: expected '}'")
-                .and(contains("close the block with '}'")),
-        );
+        .stderr(contains("error: expected '}'").and(contains("close the block with '}'")));
 }
 
 #[test]
@@ -187,7 +185,9 @@ fn check_mode_reports_return_without_value_in_non_unit_fn() {
         .arg("--check")
         .assert()
         .code(1)
-        .stderr(contains("error: return without value requires unit return type"));
+        .stderr(contains(
+            "error: return without value requires unit return type",
+        ));
 }
 
 #[test]
@@ -206,7 +206,8 @@ fn check_mode_reports_tuple_index_out_of_range() {
 #[test]
 fn check_mode_reports_tuple_destructure_arity_mismatch() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"t: (i32, i32) = (1, 2);\n(a, b, c) := t\n").expect("write");
+    std::io::Write::write_all(&mut file, b"t: (i32, i32) = (1, 2);\n(a, b, c) := t\n")
+        .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
@@ -219,15 +220,20 @@ fn check_mode_reports_tuple_destructure_arity_mismatch() {
 #[test]
 fn check_mode_reports_struct_literal_missing_field() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"struct Point { x: i32, y: i32 }\np: Point = Point { x: 1 }\n")
-        .expect("write");
+    std::io::Write::write_all(
+        &mut file,
+        b"struct Point { x: i32, y: i32 }\np: Point = Point { x: 1 }\n",
+    )
+    .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
         .arg("--check")
         .assert()
         .code(1)
-        .stderr(contains("error: missing field 'y' in struct literal 'Point'"));
+        .stderr(contains(
+            "error: missing field 'y' in struct literal 'Point'",
+        ));
 }
 
 #[test]
@@ -250,20 +256,27 @@ fn check_mode_reports_incomplete_trait_impl() {
 #[test]
 fn check_mode_reports_multi_return_on_non_tuple_fn() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"fn bad(a: i32, b: i32) -> i32 { return a, b }\n").expect("write");
+    std::io::Write::write_all(
+        &mut file,
+        b"fn bad(a: i32, b: i32) -> i32 { return a, b }\n",
+    )
+    .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
         .arg("--check")
         .assert()
         .code(1)
-        .stderr(contains("error: multiple return values are allowed only for functions returning tuple"));
+        .stderr(contains(
+            "error: multiple return values are allowed only for functions returning tuple",
+        ));
 }
 
 #[test]
 fn check_mode_reports_invalid_array_index_type() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"arr: [i32] = [1,2,3]\nprint(arr[true])\n").expect("write");
+    std::io::Write::write_all(&mut file, b"arr: [i32] = [1,2,3]\nprint(arr[true])\n")
+        .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
@@ -276,7 +289,11 @@ fn check_mode_reports_invalid_array_index_type() {
 #[test]
 fn check_mode_reports_non_trailing_optional_parameter() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"fn bad(a: i32 = 1, b: i32) -> i32 { return a + b }\n").expect("write");
+    std::io::Write::write_all(
+        &mut file,
+        b"fn bad(a: i32 = 1, b: i32) -> i32 { return a + b }\n",
+    )
+    .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
@@ -315,7 +332,11 @@ fn check_mode_reports_range_with_non_integer_bounds() {
 #[test]
 fn check_mode_reports_for_in_binding_mismatch() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"arr := [1, 2, 3]\nfor x: bool in arr { print(x) }\n").expect("write");
+    std::io::Write::write_all(
+        &mut file,
+        b"arr := [1, 2, 3]\nfor x: bool in arr { print(x) }\n",
+    )
+    .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
@@ -339,7 +360,9 @@ fn check_mode_reports_tuple_fn_returning_single_tuple_symbol() {
         .arg("--check")
         .assert()
         .code(1)
-        .stderr(contains("error: tuple return must use explicit positional values"));
+        .stderr(contains(
+            "error: tuple return must use explicit positional values",
+        ));
 }
 
 #[test]
@@ -362,7 +385,8 @@ fn check_mode_reports_tuple_return_arity_mismatch() {
 #[test]
 fn check_mode_reports_error_builtin_invalid_args() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"a := error(1); b := error(\"x\", true)\n").expect("write");
+    std::io::Write::write_all(&mut file, b"a := error(1); b := error(\"x\", true)\n")
+        .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
@@ -387,8 +411,9 @@ fn check_mode_reports_question_outside_fallible_function() {
         .assert()
         .code(1)
         .stderr(
-            contains("operator '?' requires current function return type to be (T, err)")
-                .and(contains("change the function return type to `(T, err)` when using '?'")),
+            contains("operator '?' requires current function return type to be (T, err)").and(
+                contains("change the function return type to `(T, err)` when using '?'"),
+            ),
         );
 }
 
@@ -407,8 +432,9 @@ fn check_mode_reports_try_catch_binding_non_err_type() {
         .assert()
         .code(1)
         .stderr(
-            contains("catch binding type must be err-like")
-                .and(contains("declare catch binding as `catch(e: err)` or an error-like type with message/code")),
+            contains("catch binding type must be err-like").and(contains(
+                "declare catch binding as `catch(e: err)` or an error-like type with message/code",
+            )),
         );
 }
 
@@ -543,11 +569,7 @@ fn check_mode_reports_function_method_arity_mismatch() {
 #[test]
 fn check_mode_reports_map_key_non_hashable_type() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(
-        &mut file,
-        b"m: map[[i32]]i32 = {[1,2]: 10}\n",
-    )
-    .expect("write");
+    std::io::Write::write_all(&mut file, b"m: map[[i32]]i32 = {[1,2]: 10}\n").expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
@@ -598,6 +620,35 @@ fn check_mode_reports_from_import_missing_names() {
         .assert()
         .code(1)
         .stderr(contains("expected imported symbol name"));
+}
+
+#[test]
+fn check_mode_reports_unknown_stdlib_module() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"import \"std/does_not_exist\" as missing\n")
+        .expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains("unknown stdlib module 'std/does_not_exist'"));
+}
+
+#[test]
+fn check_mode_reports_from_import_symbol_not_exported_by_module() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"from \"std/http\" import read_text\n").expect("write");
+    Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--check")
+        .assert()
+        .code(1)
+        .stderr(contains(
+            "symbol 'read_text' is not exported by module 'std/http'",
+        ));
 }
 
 #[test]
@@ -915,7 +966,8 @@ fn check_mode_reports_regex_is_match_invalid_arg_type() {
 #[test]
 fn check_mode_reports_internal_regex_intrinsic_forbidden() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(&mut file, b"print(regex_is_match(\"a+\", \"aaa\"))\n").expect("write");
+    std::io::Write::write_all(&mut file, b"print(regex_is_match(\"a+\", \"aaa\"))\n")
+        .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())

@@ -18,8 +18,7 @@ fn default_mode_executes_when_no_dump_flags_are_set() {
 
 #[test]
 fn runs_example_001_simple() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/001_simple.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/001_simple.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -89,11 +88,8 @@ print(is_even(10), is_odd(7))
 #[test]
 fn allows_null_literal_assignment_to_typed_values() {
     let mut file = NamedTempFile::new().expect("temp file");
-    std::io::Write::write_all(
-        &mut file,
-        b"x: i32 = null; y: bool = null; print(x, y)\n",
-    )
-    .expect("write");
+    std::io::Write::write_all(&mut file, b"x: i32 = null; y: bool = null; print(x, y)\n")
+        .expect("write");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
@@ -129,8 +125,8 @@ fn ast_mode_prints_ast_root() {
 
 #[test]
 fn runs_example_003_operators_and_literals() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/003_operators_and_numeric_literals.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/003_operators_and_numeric_literals.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -145,8 +141,7 @@ fn runs_example_003_operators_and_literals() {
 
 #[test]
 fn runs_example_004_if_else() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/004_if_else.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/004_if_else.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -168,16 +163,13 @@ fn runs_example_005_while_break_continue() {
         .arg(&path)
         .assert()
         .success()
-        .stdout(
-            contains("sum of odd numbers below 8: 16")
-                .and(contains("done")),
-        );
+        .stdout(contains("sum of odd numbers below 8: 16").and(contains("done")));
 }
 
 #[test]
 fn runs_example_006_compound_assign_and_string_concat() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/006_compound_assign_and_string_concat.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/006_compound_assign_and_string_concat.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -251,8 +243,7 @@ fn runs_example_010_nested_capture() {
 
 #[test]
 fn runs_example_011_unit_return() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/011_unit_return.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/011_unit_return.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -267,8 +258,7 @@ fn runs_example_011_unit_return() {
 
 #[test]
 fn runs_example_012_tuples_basics() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/012_tuples_basics.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/012_tuples_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -295,23 +285,19 @@ fn runs_example_013_tuples_destructuring() {
 
 #[test]
 fn runs_example_014_tuples_nested() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/014_tuples_nested.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/014_tuples_nested.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
         .assert()
         .success()
-        .stdout(
-            contains("2 a")
-                .and(contains("true"))
-                .and(contains("true")),
-        );
+        .stdout(contains("2 a").and(contains("true")).and(contains("true")));
 }
 
 #[test]
 fn runs_example_015_structs_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/015_structs_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/015_structs_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -333,8 +319,8 @@ fn runs_example_016_traits_impls() {
 
 #[test]
 fn runs_example_017_structs_with_existing_features() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/017_structs_with_existing_features.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/017_structs_with_existing_features.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -506,8 +492,8 @@ fn runs_example_027_array_spread() {
 
 #[test]
 fn runs_example_028_optional_params_typeof() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/028_optional_params_typeof.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/028_optional_params_typeof.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -553,8 +539,8 @@ fn runs_example_030_for_in_arrays() {
 
 #[test]
 fn runs_example_031_integer_methods_basics() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/031_integer_methods_basics.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/031_integer_methods_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -587,8 +573,8 @@ fn runs_example_032_integer_methods_checked_and_convert() {
 
 #[test]
 fn runs_example_033_float_methods_math_trig() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/033_float_methods_math_trig.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/033_float_methods_math_trig.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -603,8 +589,8 @@ fn runs_example_033_float_methods_math_trig() {
 
 #[test]
 fn runs_example_034_float_methods_state_convert() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/034_float_methods_state_convert.pand");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/034_float_methods_state_convert.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -625,10 +611,7 @@ fn runs_example_035_bool_methods() {
         .arg(&path)
         .assert()
         .success()
-        .stdout(
-            contains("false true true false false")
-                .and(contains("1 0 true false")),
-        );
+        .stdout(contains("false true true false false").and(contains("1 0 true false")));
 }
 
 #[test]
@@ -649,7 +632,8 @@ fn runs_example_036_char_methods() {
 
 #[test]
 fn runs_example_037_str_methods_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/037_str_methods_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/037_str_methods_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -667,7 +651,8 @@ fn runs_example_037_str_methods_basics() {
 
 #[test]
 fn runs_example_038_str_methods_convert() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/038_str_methods_convert.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/038_str_methods_convert.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -701,8 +686,8 @@ fn runs_example_039_array_methods_access_search_utils() {
 
 #[test]
 fn runs_example_040_array_methods_modify() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../examples/040_array_methods_modify.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/040_array_methods_modify.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -717,17 +702,14 @@ fn runs_example_040_array_methods_modify() {
 
 #[test]
 fn runs_example_041_function_methods() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/041_function_methods.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/041_function_methods.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
         .assert()
         .success()
-        .stdout(
-            contains("2")
-                .and(contains("5"))
-                .and(contains("<fn>")),
-        );
+        .stdout(contains("2").and(contains("5")).and(contains("<fn>")));
 }
 
 #[test]
@@ -763,7 +745,8 @@ fn runs_example_043_set_methods() {
 
 #[test]
 fn runs_example_044_import_alias_basic() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/044_import_alias_basic.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/044_import_alias_basic.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -774,7 +757,8 @@ fn runs_example_044_import_alias_basic() {
 
 #[test]
 fn runs_example_045_from_import_basic() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/045_from_import_basic.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/045_from_import_basic.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -785,7 +769,8 @@ fn runs_example_045_from_import_basic() {
 
 #[test]
 fn runs_example_046_std_core_foundation() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/046_std_core_foundation.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/046_std_core_foundation.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -836,7 +821,8 @@ fn runs_example_048_std_fs_basics() {
 
 #[test]
 fn runs_example_049_std_math_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/049_std_math_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/049_std_math_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -856,16 +842,14 @@ fn runs_example_049_std_math_basics() {
 
 #[test]
 fn runs_example_050_std_time_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/050_std_time_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/050_std_time_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
         .assert()
         .success()
-        .stdout(
-            contains("true true true true true")
-                .and(contains("true true true true")),
-        );
+        .stdout(contains("true true true true true").and(contains("true true true true")));
 }
 
 #[test]
@@ -886,7 +870,8 @@ fn runs_example_051_std_os_basics() {
 
 #[test]
 fn runs_example_052_std_proc_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/052_std_proc_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/052_std_proc_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -902,21 +887,20 @@ fn runs_example_052_std_proc_basics() {
 
 #[test]
 fn runs_example_053_std_thread_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/053_std_thread_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/053_std_thread_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
         .assert()
         .success()
-        .stdout(
-            contains("true true true true")
-                .and(contains("true true true true true")),
-        );
+        .stdout(contains("true true true true").and(contains("true true true true true")));
 }
 
 #[test]
 fn runs_example_054_std_sync_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/054_std_sync_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/054_std_sync_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -932,7 +916,8 @@ fn runs_example_054_std_sync_basics() {
 
 #[test]
 fn runs_example_055_std_net_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/055_std_net_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/055_std_net_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -948,7 +933,8 @@ fn runs_example_055_std_net_basics() {
 
 #[test]
 fn runs_example_056_std_http_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/056_std_http_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/056_std_http_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -963,7 +949,8 @@ fn runs_example_056_std_http_basics() {
 
 #[test]
 fn runs_example_057_std_crypto_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/057_std_crypto_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/057_std_crypto_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -978,7 +965,8 @@ fn runs_example_057_std_crypto_basics() {
 
 #[test]
 fn runs_example_058_std_rand_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/058_std_rand_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/058_std_rand_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -993,7 +981,8 @@ fn runs_example_058_std_rand_basics() {
 
 #[test]
 fn runs_example_059_std_encoding_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/059_std_encoding_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/059_std_encoding_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1009,7 +998,8 @@ fn runs_example_059_std_encoding_basics() {
 
 #[test]
 fn runs_example_060_std_regex_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/060_std_regex_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/060_std_regex_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1026,7 +1016,8 @@ fn runs_example_060_std_regex_basics() {
 
 #[test]
 fn runs_example_061_std_cli_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/061_std_cli_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/061_std_cli_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1043,7 +1034,8 @@ fn runs_example_061_std_cli_basics() {
 
 #[test]
 fn runs_example_062_std_env_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/062_std_env_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/062_std_env_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1058,7 +1050,8 @@ fn runs_example_062_std_env_basics() {
 
 #[test]
 fn runs_example_063_std_log_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/063_std_log_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/063_std_log_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1070,7 +1063,9 @@ fn runs_example_063_std_log_basics() {
                 .and(contains("[APP] [INFO] inf"))
                 .and(contains("[APP] [WARN] wrn"))
                 .and(contains("[APP] [ERROR] err"))
-                .and(contains("{\"level\":\"INFO\",\"prefix\":\"[APP]\",\"msg\":\"json_mode\"}"))
+                .and(contains(
+                    "{\"level\":\"INFO\",\"prefix\":\"[APP]\",\"msg\":\"json_mode\"}",
+                ))
                 .and(contains("true true true true"))
                 .and(contains("true true true true true true true")),
         );
@@ -1078,7 +1073,8 @@ fn runs_example_063_std_log_basics() {
 
 #[test]
 fn runs_example_064_std_json_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/064_std_json_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/064_std_json_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1094,7 +1090,8 @@ fn runs_example_064_std_json_basics() {
 
 #[test]
 fn runs_example_065_std_xml_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/065_std_xml_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/065_std_xml_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1110,7 +1107,8 @@ fn runs_example_065_std_xml_basics() {
 
 #[test]
 fn runs_example_066_std_csv_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/066_std_csv_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/066_std_csv_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1126,7 +1124,8 @@ fn runs_example_066_std_csv_basics() {
 
 #[test]
 fn runs_example_067_std_path_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/067_std_path_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/067_std_path_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1143,7 +1142,8 @@ fn runs_example_067_std_path_basics() {
 
 #[test]
 fn runs_example_068_std_mime_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/068_std_mime_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/068_std_mime_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)
@@ -1158,7 +1158,8 @@ fn runs_example_068_std_mime_basics() {
 
 #[test]
 fn runs_example_069_std_url_basics() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/069_std_url_basics.pand");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/069_std_url_basics.pand");
     Command::cargo_bin("pandora")
         .expect("binary")
         .arg(&path)

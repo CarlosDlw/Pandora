@@ -12,10 +12,7 @@ pub enum Type {
     Err,
     Unknown,
     Any,
-    Function {
-        params: Vec<Type>,
-        ret: Box<Type>,
-    },
+    Function { params: Vec<Type>, ret: Box<Type> },
     Tuple(Vec<Type>),
     Array(Box<Type>),
     Map(Box<Type>, Box<Type>),

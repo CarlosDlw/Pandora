@@ -33,7 +33,9 @@ impl Parser {
         let mut left = self.parse_prefix();
 
         loop {
-            if self.current().is_some_and(|t| t.kind == TokenKind::LeftParen)
+            if self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::LeftParen)
                 && Precedence::Highest >= min_prec
             {
                 left = self.parse_call_suffix(left);
@@ -45,14 +47,18 @@ impl Parser {
                 left = self.parse_dot_suffix(left);
                 continue;
             }
-            if self.current().is_some_and(|t| t.kind == TokenKind::LeftBracket)
+            if self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::LeftBracket)
                 && Precedence::Highest >= min_prec
             {
                 left = self.parse_array_access_bracket_suffix(left);
                 continue;
             }
 
-            if self.current().is_some_and(|t| t.kind == TokenKind::PlusPlus || t.kind == TokenKind::MinusMinus)
+            if self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::PlusPlus || t.kind == TokenKind::MinusMinus)
                 && Precedence::Highest >= min_prec
             {
                 let token = self.current().expect("checked above").clone();
@@ -71,7 +77,9 @@ impl Parser {
                 });
                 continue;
             }
-            if self.current().is_some_and(|t| t.kind == TokenKind::Question)
+            if self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::Question)
                 && Precedence::Highest >= min_prec
             {
                 let token = self.current().expect("checked above").clone();
@@ -143,14 +151,22 @@ impl Parser {
                     span: token.span,
                 });
                 if self.identifier_name_from_node(ident) == "set"
-                    && self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace)
+                    && self
+                        .current()
+                        .is_some_and(|t| t.kind == TokenKind::LeftBrace)
                 {
                     return self.parse_set_literal_suffix(token.span);
                 }
-                if self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
+                if self
+                    .current()
+                    .is_some_and(|t| t.kind == TokenKind::LeftBrace)
+                {
                     return self.parse_struct_literal_suffix(ident);
                 }
-                if self.current().is_some_and(|t| t.kind == TokenKind::DoubleColon) {
+                if self
+                    .current()
+                    .is_some_and(|t| t.kind == TokenKind::DoubleColon)
+                {
                     return self.parse_static_method_call_suffix(ident);
                 }
                 ident
@@ -276,7 +292,10 @@ impl Parser {
                         items.push(self.parse_expression());
                     }
                     if !self.consume_if(TokenKind::RightParen) {
-                        let err_span = merge_pair(open_span, self.node_span(*items.last().expect("non-empty")));
+                        let err_span = merge_pair(
+                            open_span,
+                            self.node_span(*items.last().expect("non-empty")),
+                        );
                         self.push_error("expected ')' after tuple literal", err_span);
                     }
                     let span = merge_pair(open_span, self.previous_span_or(open_span));
@@ -304,7 +323,10 @@ impl Parser {
         self.bump();
         let try_expr = self.parse_expression_bp(Precedence::Lowest);
         if !self.consume_if(TokenKind::Catch) {
-            self.push_error("expected 'catch' after try expression", self.current_span_or_eof());
+            self.push_error(
+                "expected 'catch' after try expression",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
         if !self.consume_if(TokenKind::LeftParen) {
@@ -331,11 +353,20 @@ impl Parser {
         }
         let err_ty = self.parse_type_ref();
         if !self.consume_if(TokenKind::RightParen) {
-            self.push_error("expected ')' after catch binding", self.current_span_or_eof());
+            self.push_error(
+                "expected ')' after catch binding",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
-        if !self.current().is_some_and(|t| t.kind == TokenKind::LeftBrace) {
-            self.push_error("expected '{' before catch block", self.current_span_or_eof());
+        if !self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::LeftBrace)
+        {
+            self.push_error(
+                "expected '{' before catch block",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(start);
         }
         let catch_block = self.parse_block_stmt();
@@ -362,7 +393,9 @@ impl Parser {
             TokenKind::Less => Some((BinaryOp::Less, Precedence::Comparison, false)),
             TokenKind::LessEqual => Some((BinaryOp::LessEqual, Precedence::Comparison, false)),
             TokenKind::Greater => Some((BinaryOp::Greater, Precedence::Comparison, false)),
-            TokenKind::GreaterEqual => Some((BinaryOp::GreaterEqual, Precedence::Comparison, false)),
+            TokenKind::GreaterEqual => {
+                Some((BinaryOp::GreaterEqual, Precedence::Comparison, false))
+            }
             TokenKind::ShiftLeft => Some((BinaryOp::ShiftLeft, Precedence::Shift, false)),
             TokenKind::ShiftRight => Some((BinaryOp::ShiftRight, Precedence::Shift, false)),
             TokenKind::Plus => Some((BinaryOp::Add, Precedence::Sum, false)),
@@ -397,14 +430,14 @@ impl Parser {
                 break;
             }
 
-            self.push_error("expected ',' or ')' in argument list", self.current_span_or_eof());
+            self.push_error(
+                "expected ',' or ')' in argument list",
+                self.current_span_or_eof(),
+            );
             break;
         }
 
-        let end = args
-            .last()
-            .map(|id| self.node_span(*id))
-            .unwrap_or(open);
+        let end = args.last().map(|id| self.node_span(*id)).unwrap_or(open);
         let span = merge_pair(self.node_span(callee), end);
         self.insert_node(AstNode::CallExpr { callee, args, span })
     }
@@ -424,11 +457,18 @@ impl Parser {
                     return self.invalid_node(token.span);
                 };
                 let span = merge_pair(self.node_span(base), token.span);
-                self.insert_node(AstNode::TupleAccess { tuple: base, index, span })
+                self.insert_node(AstNode::TupleAccess {
+                    tuple: base,
+                    index,
+                    span,
+                })
             }
             TokenKind::Identifier => {
                 self.bump();
-                if self.current().is_some_and(|t| t.kind == TokenKind::LeftParen) {
+                if self
+                    .current()
+                    .is_some_and(|t| t.kind == TokenKind::LeftParen)
+                {
                     return self.parse_method_call_suffix(base, token.lexeme, token.span);
                 }
                 let span = merge_pair(self.node_span(base), token.span);
@@ -448,13 +488,19 @@ impl Parser {
     fn parse_array_access_bracket_suffix(&mut self, base: ArenaId) -> ArenaId {
         let open_span = self.current_span_or_eof();
         self.bump();
-        if self.current().is_some_and(|t| t.kind == TokenKind::RightBracket) {
+        if self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::RightBracket)
+        {
             self.push_error("expected index expression inside brackets", open_span);
             return self.invalid_node(open_span);
         }
         let index = self.parse_expression();
         if !self.consume_if(TokenKind::RightBracket) {
-            self.push_error("expected ']' after index expression", self.current_span_or_eof());
+            self.push_error(
+                "expected ']' after index expression",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(open_span);
         }
         let span = merge_pair(self.node_span(base), self.node_span(index));
@@ -479,7 +525,10 @@ impl Parser {
                 items.push(ArrayItem::Expr(self.parse_expression()));
             }
             if self.consume_if(TokenKind::Comma) {
-                if self.current().is_some_and(|t| t.kind == TokenKind::RightBracket) {
+                if self
+                    .current()
+                    .is_some_and(|t| t.kind == TokenKind::RightBracket)
+                {
                     break;
                 }
                 continue;
@@ -487,7 +536,10 @@ impl Parser {
             break;
         }
         if !self.consume_if(TokenKind::RightBracket) {
-            self.push_error("expected ']' after array literal", self.current_span_or_eof());
+            self.push_error(
+                "expected ']' after array literal",
+                self.current_span_or_eof(),
+            );
         }
         let span = merge_pair(open_span, self.previous_span_or(open_span));
         self.insert_node(AstNode::ArrayLiteral { items, span })
@@ -506,13 +558,19 @@ impl Parser {
         loop {
             let key = self.parse_expression();
             if !self.consume_if(TokenKind::Colon) {
-                self.push_error("expected ':' between map key and value", self.current_span_or_eof());
+                self.push_error(
+                    "expected ':' between map key and value",
+                    self.current_span_or_eof(),
+                );
                 return self.invalid_node(open_span);
             }
             let value = self.parse_expression();
             entries.push((key, value));
             if self.consume_if(TokenKind::Comma) {
-                if self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+                if self
+                    .current()
+                    .is_some_and(|t| t.kind == TokenKind::RightBrace)
+                {
                     break;
                 }
                 continue;
@@ -539,7 +597,10 @@ impl Parser {
         loop {
             items.push(self.parse_expression());
             if self.consume_if(TokenKind::Comma) {
-                if self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+                if self
+                    .current()
+                    .is_some_and(|t| t.kind == TokenKind::RightBrace)
+                {
                     break;
                 }
                 continue;
@@ -558,17 +619,27 @@ impl Parser {
         let open = self.current_span_or_eof();
         self.bump();
         let mut fields = Vec::new();
-        while self.current().is_some() && !self.current().is_some_and(|t| t.kind == TokenKind::RightBrace) {
+        while self.current().is_some()
+            && !self
+                .current()
+                .is_some_and(|t| t.kind == TokenKind::RightBrace)
+        {
             let field_tok = match self.current() {
                 Some(t) if t.kind == TokenKind::Identifier => t.clone(),
                 _ => {
-                    self.push_error("expected field name in struct literal", self.current_span_or_eof());
+                    self.push_error(
+                        "expected field name in struct literal",
+                        self.current_span_or_eof(),
+                    );
                     return self.invalid_node(open);
                 }
             };
             self.bump();
             if !self.consume_if(TokenKind::Colon) {
-                self.push_error("expected ':' after field name in struct literal", self.current_span_or_eof());
+                self.push_error(
+                    "expected ':' after field name in struct literal",
+                    self.current_span_or_eof(),
+                );
                 return self.invalid_node(open);
             }
             let expr = self.parse_expression();
@@ -579,7 +650,10 @@ impl Parser {
             break;
         }
         if !self.consume_if(TokenKind::RightBrace) {
-            self.push_error("expected '}' after struct literal fields", self.current_span_or_eof());
+            self.push_error(
+                "expected '}' after struct literal fields",
+                self.current_span_or_eof(),
+            );
         }
         let span = merge_pair(self.node_span(type_ident), self.previous_span_or(open));
         self.insert_node(AstNode::StructLiteralExpr {
@@ -598,7 +672,10 @@ impl Parser {
         let _open = self.current_span_or_eof();
         self.bump();
         let mut args = Vec::new();
-        if !self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+        if !self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::RightParen)
+        {
             loop {
                 args.push(self.parse_expression());
                 if self.consume_if(TokenKind::Comma) {
@@ -608,7 +685,10 @@ impl Parser {
             }
         }
         if !self.consume_if(TokenKind::RightParen) {
-            self.push_error("expected ')' after method arguments", self.current_span_or_eof());
+            self.push_error(
+                "expected ')' after method arguments",
+                self.current_span_or_eof(),
+            );
         }
         let span = merge_pair(self.node_span(receiver), self.previous_span_or(method_span));
         self.insert_node(AstNode::MethodCallExpr {
@@ -631,11 +711,17 @@ impl Parser {
         };
         self.bump();
         if !self.consume_if(TokenKind::LeftParen) {
-            self.push_error("expected '(' after static method name", self.current_span_or_eof());
+            self.push_error(
+                "expected '(' after static method name",
+                self.current_span_or_eof(),
+            );
             return self.invalid_node(method_tok.span);
         }
         let mut args = Vec::new();
-        if !self.current().is_some_and(|t| t.kind == TokenKind::RightParen) {
+        if !self
+            .current()
+            .is_some_and(|t| t.kind == TokenKind::RightParen)
+        {
             loop {
                 args.push(self.parse_expression());
                 if self.consume_if(TokenKind::Comma) {
@@ -645,10 +731,16 @@ impl Parser {
             }
         }
         if !self.consume_if(TokenKind::RightParen) {
-            self.push_error("expected ')' after static method arguments", self.current_span_or_eof());
+            self.push_error(
+                "expected ')' after static method arguments",
+                self.current_span_or_eof(),
+            );
         }
         let type_name = self.identifier_name_from_node(type_ident);
-        let span = merge_pair(self.node_span(type_ident), self.previous_span_or(method_tok.span));
+        let span = merge_pair(
+            self.node_span(type_ident),
+            self.previous_span_or(method_tok.span),
+        );
         self.insert_node(AstNode::StaticMethodCallExpr {
             type_name,
             method: method_tok.lexeme,
@@ -658,7 +750,10 @@ impl Parser {
     }
 }
 
-fn merge_pair(left: foundation::span::Span, right: foundation::span::Span) -> foundation::span::Span {
+fn merge_pair(
+    left: foundation::span::Span,
+    right: foundation::span::Span,
+) -> foundation::span::Span {
     foundation::span::Span::new_unchecked(left.file_id(), left.start(), right.end())
 }
 
