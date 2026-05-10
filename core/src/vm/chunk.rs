@@ -1,5 +1,6 @@
 use foundation::span::Span;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
+use std::sync::Arc;
 
 use crate::hir::symbols::SymbolId;
 use crate::vm::bytecode::Op;
@@ -10,6 +11,7 @@ pub struct Chunk {
     pub code: Vec<Op>,
     pub spans: Vec<Span>,
     pub functions: HashMap<SymbolId, FunctionChunk>,
+    pub struct_field_slots: HashMap<String, HashMap<String, usize>>,
 }
 
 impl Chunk {
@@ -23,7 +25,7 @@ impl Chunk {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionChunk {
     pub params: Vec<SymbolId>,
-    pub chunk: Chunk,
+    pub chunk: Arc<Chunk>,
 }
 
 /// Builder-only emission path — never mutate [`Chunk::code`] manually from outside [`ChunkBuilder::emit`].
@@ -32,6 +34,7 @@ pub struct ChunkBuilder {
     code: Vec<Op>,
     spans: Vec<Span>,
     functions: HashMap<SymbolId, FunctionChunk>,
+    struct_field_slots: HashMap<String, HashMap<String, usize>>,
 }
 
 impl ChunkBuilder {
@@ -47,6 +50,10 @@ impl ChunkBuilder {
 
     pub fn define_function(&mut self, symbol: SymbolId, function: FunctionChunk) {
         self.functions.insert(symbol, function);
+    }
+
+    pub fn set_struct_field_slots(&mut self, slots: HashMap<String, HashMap<String, usize>>) {
+        self.struct_field_slots = slots;
     }
 
     pub fn emit_placeholder_jump_if_false(&mut self, span: Span) -> usize {
@@ -96,6 +103,7 @@ impl ChunkBuilder {
             code: std::mem::take(&mut self.code),
             spans: std::mem::take(&mut self.spans),
             functions: std::mem::take(&mut self.functions),
+            struct_field_slots: std::mem::take(&mut self.struct_field_slots),
         }
     }
 

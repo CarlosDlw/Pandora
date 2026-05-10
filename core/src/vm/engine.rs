@@ -7,17 +7,18 @@ use csv::{ReaderBuilder as CsvReaderBuilder, WriterBuilder as CsvWriterBuilder};
 use quick_xml::Reader as XmlReader;
 use quick_xml::events::Event as XmlEvent;
 use regex::Regex;
+use rustc_hash::FxHashMap as HashMap;
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use foundation::{
@@ -31,10 +32,17 @@ use super::{bytecode::Op, chunk::Chunk, value::Value};
 
 #[derive(Debug, Clone)]
 struct CallFrame {
-    chunk: Chunk,
+    chunk: Arc<Chunk>,
     ip: usize,
-    env: HashMap<SymbolId, Value>,
+    locals: Vec<(SymbolId, Value)>,
     scope_frames: Vec<Vec<SymbolId>>,
+    current_function: Option<FunctionContext>,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionContext {
+    function: Arc<crate::vm::chunk::FunctionChunk>,
+    self_symbol: Option<SymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,11 +54,13 @@ struct TryContext {
 }
 
 pub struct Vm<'a> {
-    chunk: Chunk,
+    chunk: Arc<Chunk>,
     ip: usize,
     stack: Vec<Value>,
-    env: HashMap<SymbolId, Value>,
+    locals: Vec<(SymbolId, Value)>,
+    globals: RefCell<HashMap<SymbolId, Value>>,
     scope_frames: Vec<Vec<SymbolId>>,
+    current_function: Option<FunctionContext>,
     symbols: &'a SymbolTable,
     intrinsic_ids: HashMap<SymbolId, IntrinsicId>,
     call_stack: Vec<CallFrame>,
@@ -68,17 +78,8 @@ impl<'a> Vm<'a> {
         symbols: &'a SymbolTable,
         initial_env: HashMap<SymbolId, Value>,
     ) -> Self {
-        let mut env = initial_env;
-        for idx in 0..u32::MAX {
-            let id = SymbolId(idx);
-            let Some(symbol) = symbols.symbol(id) else {
-                break;
-            };
-            if symbol.origin == SymbolOrigin::Intrinsic {
-                env.entry(id).or_insert(Value::Builtin(id));
-            }
-        }
-        let mut intrinsic_ids = HashMap::new();
+        let mut globals = initial_env;
+        let mut intrinsic_ids = HashMap::default();
         for idx in 0..u32::MAX {
             let id = SymbolId(idx);
             let Some(symbol) = symbols.symbol(id) else {
@@ -86,14 +87,17 @@ impl<'a> Vm<'a> {
             };
             if symbol.origin == SymbolOrigin::Intrinsic {
                 intrinsic_ids.insert(id, IntrinsicId::Known);
+                globals.entry(id).or_insert(Value::Builtin(id));
             }
         }
         Self {
-            chunk: chunk.clone(),
+            chunk: Arc::new(chunk.clone()),
             ip: 0,
             stack: Vec::new(),
-            env,
+            locals: Vec::new(),
+            globals: RefCell::new(globals),
             scope_frames: vec![Vec::new()],
+            current_function: None,
             symbols,
             intrinsic_ids,
             call_stack: Vec::new(),
@@ -106,6 +110,30 @@ impl<'a> Vm<'a> {
         let mut diagnostics = Diagnostics::new();
 
         loop {
+            let active_chunk = Arc::clone(&self.chunk);
+
+            while self.ip < active_chunk.code.len() {
+                let op = &active_chunk.code[self.ip];
+                let span = active_chunk.spans[self.ip];
+                self.ip += 1;
+
+                if let Err(d) = self.step_op(op, span) {
+                    if self.recoverable_panic(&d) && self.recover_from_panic(&d) {
+                        break;
+                    }
+                    diagnostics.push(d);
+                    return Err(diagnostics);
+                }
+
+                if !Arc::ptr_eq(&active_chunk, &self.chunk) {
+                    break;
+                }
+            }
+
+            if !Arc::ptr_eq(&active_chunk, &self.chunk) {
+                continue;
+            }
+
             if self.ip >= self.chunk.code.len() {
                 match self.return_from_call_frame() {
                     Ok(true) => continue,
@@ -115,17 +143,6 @@ impl<'a> Vm<'a> {
                         return Err(diagnostics);
                     }
                 }
-            }
-            let op = self.chunk.code[self.ip].clone();
-            let span = self.chunk.spans[self.ip];
-            self.ip += 1;
-
-            if let Err(d) = self.step_op(&op, span) {
-                if self.recoverable_panic(&d) && self.recover_from_panic(&d) {
-                    continue;
-                }
-                diagnostics.push(d);
-                return Err(diagnostics);
             }
         }
 
@@ -141,6 +158,48 @@ impl<'a> Vm<'a> {
             return Err(diagnostics);
         }
         Ok(())
+    }
+
+    fn locals_get(&self, sym: SymbolId) -> Option<Value> {
+        self.locals
+            .iter()
+            .rev()
+            .find(|(local_sym, _)| *local_sym == sym)
+            .map(|(_, value)| value.clone())
+    }
+
+    fn locals_get_mut(&mut self, sym: SymbolId) -> Option<&mut Value> {
+        let index = self
+            .locals
+            .iter()
+            .rposition(|(local_sym, _)| *local_sym == sym)?;
+        Some(&mut self.locals[index].1)
+    }
+
+    fn locals_insert(&mut self, sym: SymbolId, value: Value) {
+        if let Some(index) = self
+            .locals
+            .iter()
+            .rposition(|(local_sym, _)| *local_sym == sym)
+        {
+            self.locals[index].1 = value;
+        } else {
+            self.locals.push((sym, value));
+        }
+    }
+
+    fn locals_remove(&mut self, sym: SymbolId) {
+        if let Some(index) = self
+            .locals
+            .iter()
+            .rposition(|(local_sym, _)| *local_sym == sym)
+        {
+            self.locals.remove(index);
+        }
+    }
+
+    fn snapshot_locals(&self) -> HashMap<SymbolId, Value> {
+        self.locals.iter().cloned().collect()
     }
 
     fn last_chunk_span(&self) -> Span {
@@ -333,15 +392,95 @@ impl<'a> Vm<'a> {
                     }
                 }
             }
-            Op::MakeStruct(type_name, field_names) => {
-                let mut fields = HashMap::new();
-                for field in field_names.iter().rev() {
-                    fields.insert(field.clone(), self.pop_one(span)?);
+            Op::MakeStruct(type_name, field_count) => {
+                let field_count = *field_count as usize;
+                let mut fields = Vec::with_capacity(field_count);
+                for _ in 0..field_count {
+                    fields.push(self.pop_one(span)?);
                 }
+                fields.reverse();
                 self.stack.push(Value::StructInstance {
                     type_name: type_name.clone(),
                     fields,
                 });
+            }
+            Op::StructLoadSlot(sym, slot) => {
+                if let Some((_, value)) = self
+                    .locals
+                    .iter()
+                    .rev()
+                    .find(|(local_sym, _)| *local_sym == *sym)
+                {
+                    match value {
+                        Value::StructInstance { fields, .. } => {
+                            let value = fields.get(*slot).cloned().ok_or_else(|| {
+                                Diagnostic::new(
+                                    format!("unknown struct field slot '{}'", slot),
+                                    span,
+                                    Severity::Error,
+                                )
+                            })?;
+                            self.stack.push(value);
+                        }
+                        other => {
+                            return Err(Diagnostic::new(
+                                format!("field access on non-struct value: {:?}", other),
+                                span,
+                                Severity::Error,
+                            ));
+                        }
+                    }
+                } else {
+                    let globals = self.globals.borrow();
+                    let Some(value) = globals.get(sym) else {
+                        return Err(Diagnostic::new(
+                            "load of uninitialized or missing symbol",
+                            span,
+                            Severity::Error,
+                        ));
+                    };
+                    match value {
+                        Value::StructInstance { fields, .. } => {
+                            let value = fields.get(*slot).cloned().ok_or_else(|| {
+                                Diagnostic::new(
+                                    format!("unknown struct field slot '{}'", slot),
+                                    span,
+                                    Severity::Error,
+                                )
+                            })?;
+                            self.stack.push(value);
+                        }
+                        other => {
+                            return Err(Diagnostic::new(
+                                format!("field access on non-struct value: {:?}", other),
+                                span,
+                                Severity::Error,
+                            ));
+                        }
+                    }
+                }
+            }
+            Op::StructGetSlot(slot) => {
+                let base = self.pop_one(span)?;
+                match base {
+                    Value::StructInstance { fields, .. } => {
+                        let value = fields.get(*slot).cloned().ok_or_else(|| {
+                            Diagnostic::new(
+                                format!("unknown struct field slot '{}'", slot),
+                                span,
+                                Severity::Error,
+                            )
+                        })?;
+                        self.stack.push(value);
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("field access on non-struct value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                }
             }
             Op::StructGet(field) => {
                 let base = self.pop_one(span)?;
@@ -367,10 +506,23 @@ impl<'a> Vm<'a> {
                         };
                         self.stack.push(value);
                     }
-                    Value::StructInstance { fields, .. } => {
-                        let value = fields.get(field).cloned().ok_or_else(|| {
+                    Value::StructInstance { type_name, fields } => {
+                        let slot = self
+                            .chunk
+                            .struct_field_slots
+                            .get(type_name.as_str())
+                            .and_then(|slots| slots.get(field.as_str()))
+                            .copied()
+                            .ok_or_else(|| {
+                                Diagnostic::new(
+                                    format!("unknown struct field '{field}'"),
+                                    span,
+                                    Severity::Error,
+                                )
+                            })?;
+                        let value = fields.get(slot).cloned().ok_or_else(|| {
                             Diagnostic::new(
-                                format!("unknown struct field '{field}'"),
+                                format!("unknown struct field slot '{}'", slot),
                                 span,
                                 Severity::Error,
                             )
@@ -386,6 +538,33 @@ impl<'a> Vm<'a> {
                     }
                 }
             }
+            Op::StructSetSlot(slot) => {
+                let value = self.pop_one(span)?;
+                let base = self.pop_one(span)?;
+                match base {
+                    Value::StructInstance {
+                        type_name,
+                        mut fields,
+                    } => {
+                        let Some(target) = fields.get_mut(*slot) else {
+                            return Err(Diagnostic::new(
+                                format!("unknown struct field slot '{}'", slot),
+                                span,
+                                Severity::Error,
+                            ));
+                        };
+                        *target = value;
+                        self.stack.push(Value::StructInstance { type_name, fields });
+                    }
+                    other => {
+                        return Err(Diagnostic::new(
+                            format!("field assignment on non-struct value: {:?}", other),
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                }
+            }
             Op::StructSet(field) => {
                 let value = self.pop_one(span)?;
                 let base = self.pop_one(span)?;
@@ -394,7 +573,27 @@ impl<'a> Vm<'a> {
                         type_name,
                         mut fields,
                     } => {
-                        fields.insert(field.clone(), value);
+                        let slot = self
+                            .chunk
+                            .struct_field_slots
+                            .get(type_name.as_str())
+                            .and_then(|slots| slots.get(field.as_str()))
+                            .copied()
+                            .ok_or_else(|| {
+                                Diagnostic::new(
+                                    format!("unknown struct field '{field}'"),
+                                    span,
+                                    Severity::Error,
+                                )
+                            })?;
+                        let Some(target) = fields.get_mut(slot) else {
+                            return Err(Diagnostic::new(
+                                format!("unknown struct field slot '{}'", slot),
+                                span,
+                                Severity::Error,
+                            ));
+                        };
+                        *target = value;
                         self.stack.push(Value::StructInstance { type_name, fields });
                     }
                     other => {
@@ -408,19 +607,41 @@ impl<'a> Vm<'a> {
             }
 
             Op::Load(sym) => {
-                let v = self.env.get(sym).cloned().ok_or_else(|| {
-                    Diagnostic::new(
+                let v = if let Some(v) = self.locals_get(*sym) {
+                    v
+                } else if let Some(v) = self.globals.borrow().get(sym).cloned() {
+                    v
+                } else if let Some(current_function) = self.current_function.as_ref() {
+                    if current_function.self_symbol == Some(*sym) {
+                        Value::Function {
+                            function: Arc::clone(&current_function.function),
+                            captured: Arc::new(self.snapshot_locals()),
+                            self_symbol: current_function.self_symbol,
+                        }
+                    } else {
+                        return Err(Diagnostic::new(
+                            "load of uninitialized or missing symbol",
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                } else {
+                    return Err(Diagnostic::new(
                         "load of uninitialized or missing symbol",
                         span,
                         Severity::Error,
-                    )
-                })?;
+                    ));
+                };
                 self.stack.push(v);
             }
 
             Op::Bind(sym) => {
                 let v = self.pop_one(span)?;
-                self.env.insert(*sym, v);
+                let is_global_scope = self.call_stack.is_empty() && self.scope_frames.len() == 1;
+                if is_global_scope {
+                    self.globals.borrow_mut().insert(*sym, v.clone());
+                }
+                self.locals_insert(*sym, v);
                 if let Some(frame) = self.scope_frames.last_mut() {
                     frame.push(*sym);
                 }
@@ -430,8 +651,8 @@ impl<'a> Vm<'a> {
                     Diagnostic::new("function body not found", span, Severity::Error)
                 })?;
                 self.stack.push(Value::Function {
-                    function: Box::new(function),
-                    captured: self.env.clone(),
+                    function: Arc::new(function),
+                    captured: Arc::new(self.snapshot_locals()),
                     self_symbol: Some(*sym),
                 });
             }
@@ -455,41 +676,254 @@ impl<'a> Vm<'a> {
                     ));
                 }
                 let v = self.pop_one(span)?;
-                self.env.insert(*sym, v);
+                let is_global_scope = self.call_stack.is_empty() && self.scope_frames.len() == 1;
+                if let Some(slot) = self.locals_get_mut(*sym) {
+                    *slot = v;
+                } else if is_global_scope || self.globals.borrow().contains_key(sym) {
+                    self.globals.borrow_mut().insert(*sym, v);
+                } else {
+                    self.locals_insert(*sym, v);
+                }
             }
             Op::ArrayAssign(sym) => {
                 let value = self.pop_one(span)?;
                 let index_value = self.pop_one(span)?;
                 let index = to_usize_index(&index_value, span)?;
-                let Some(slot) = self.env.get_mut(sym) else {
+                let is_global_scope = self.call_stack.is_empty() && self.scope_frames.len() == 1;
+                if let Some(slot) = self.locals_get_mut(*sym) {
+                    match slot {
+                        Value::Array(items) => {
+                            if index >= items.len() {
+                                return Err(Diagnostic::new(
+                                    format!(
+                                        "index out of bounds: index={}, len={}",
+                                        index,
+                                        items.len()
+                                    ),
+                                    span,
+                                    Severity::Error,
+                                ));
+                            }
+                            items[index] = value;
+                        }
+                        other => {
+                            return Err(Diagnostic::new(
+                                format!("index assignment on non-array value: {:?}", other),
+                                span,
+                                Severity::Error,
+                            ));
+                        }
+                    }
+                } else if is_global_scope || self.globals.borrow().contains_key(sym) {
+                    let mut globals = self.globals.borrow_mut();
+                    let Some(slot) = globals.get_mut(sym) else {
+                        return Err(Diagnostic::new(
+                            "array assignment target not found",
+                            span,
+                            Severity::Error,
+                        ));
+                    };
+                    match slot {
+                        Value::Array(items) => {
+                            if index >= items.len() {
+                                return Err(Diagnostic::new(
+                                    format!(
+                                        "index out of bounds: index={}, len={}",
+                                        index,
+                                        items.len()
+                                    ),
+                                    span,
+                                    Severity::Error,
+                                ));
+                            }
+                            items[index] = value;
+                        }
+                        other => {
+                            return Err(Diagnostic::new(
+                                format!("index assignment on non-array value: {:?}", other),
+                                span,
+                                Severity::Error,
+                            ));
+                        }
+                    }
+                } else {
                     return Err(Diagnostic::new(
                         "array assignment target not found",
                         span,
                         Severity::Error,
                     ));
-                };
-                match slot {
-                    Value::Array(items) => {
-                        if index >= items.len() {
+                }
+            }
+            Op::StructAssignSlot(sym, slot) => {
+                let value = self.pop_one(span)?;
+                let is_global_scope = self.call_stack.is_empty() && self.scope_frames.len() == 1;
+                if let Some(target) = self.locals_get_mut(*sym) {
+                    match target {
+                        Value::StructInstance { fields, .. } => {
+                            let Some(field_target) = fields.get_mut(*slot) else {
+                                return Err(Diagnostic::new(
+                                    format!("unknown struct field slot '{}'", slot),
+                                    span,
+                                    Severity::Error,
+                                ));
+                            };
+                            *field_target = value;
+                        }
+                        other => {
                             return Err(Diagnostic::new(
-                                format!(
-                                    "index out of bounds: index={}, len={}",
-                                    index,
-                                    items.len()
-                                ),
+                                format!("field assignment on non-struct value: {:?}", other),
                                 span,
                                 Severity::Error,
                             ));
                         }
-                        items[index] = value;
                     }
-                    other => {
+                } else if is_global_scope || self.globals.borrow().contains_key(sym) {
+                    let mut globals = self.globals.borrow_mut();
+                    let Some(target) = globals.get_mut(sym) else {
                         return Err(Diagnostic::new(
-                            format!("index assignment on non-array value: {:?}", other),
+                            "field assignment target not found",
                             span,
                             Severity::Error,
                         ));
+                    };
+                    match target {
+                        Value::StructInstance { fields, .. } => {
+                            let Some(field_target) = fields.get_mut(*slot) else {
+                                return Err(Diagnostic::new(
+                                    format!("unknown struct field slot '{}'", slot),
+                                    span,
+                                    Severity::Error,
+                                ));
+                            };
+                            *field_target = value;
+                        }
+                        other => {
+                            return Err(Diagnostic::new(
+                                format!("field assignment on non-struct value: {:?}", other),
+                                span,
+                                Severity::Error,
+                            ));
+                        }
                     }
+                } else {
+                    return Err(Diagnostic::new(
+                        "field assignment target not found",
+                        span,
+                        Severity::Error,
+                    ));
+                }
+            }
+            Op::StructAssign(sym, field) => {
+                let value = self.pop_one(span)?;
+                let is_global_scope = self.call_stack.is_empty() && self.scope_frames.len() == 1;
+                if let Some(local_index) = self
+                    .locals
+                    .iter()
+                    .rposition(|(local_sym, _)| *local_sym == *sym)
+                {
+                    let slot = {
+                        let current = &self.locals[local_index].1;
+                        let Value::StructInstance { type_name, .. } = current else {
+                            return Err(Diagnostic::new(
+                                format!("field assignment on non-struct value: {:?}", current),
+                                span,
+                                Severity::Error,
+                            ));
+                        };
+                        self.chunk
+                            .struct_field_slots
+                            .get(type_name.as_str())
+                            .and_then(|slots| slots.get(field.as_str()))
+                            .copied()
+                            .ok_or_else(|| {
+                                Diagnostic::new(
+                                    format!("unknown struct field '{}'", field),
+                                    span,
+                                    Severity::Error,
+                                )
+                            })?
+                    };
+
+                    let target = &mut self.locals[local_index].1;
+                    let Value::StructInstance { fields, .. } = target else {
+                        return Err(Diagnostic::new(
+                            format!("field assignment on non-struct value: {:?}", target),
+                            span,
+                            Severity::Error,
+                        ));
+                    };
+                    let Some(field_target) = fields.get_mut(slot) else {
+                        return Err(Diagnostic::new(
+                            format!("unknown struct field slot '{}'", slot),
+                            span,
+                            Severity::Error,
+                        ));
+                    };
+                    *field_target = value;
+                } else if is_global_scope || self.globals.borrow().contains_key(sym) {
+                    let slot = {
+                        let globals = self.globals.borrow();
+                        let Some(current) = globals.get(sym) else {
+                            return Err(Diagnostic::new(
+                                "field assignment target not found",
+                                span,
+                                Severity::Error,
+                            ));
+                        };
+                        let Value::StructInstance { type_name, .. } = current else {
+                            return Err(Diagnostic::new(
+                                format!("field assignment on non-struct value: {:?}", current),
+                                span,
+                                Severity::Error,
+                            ));
+                        };
+                        self.chunk
+                            .struct_field_slots
+                            .get(type_name.as_str())
+                            .and_then(|slots| slots.get(field.as_str()))
+                            .copied()
+                            .ok_or_else(|| {
+                                Diagnostic::new(
+                                    format!("unknown struct field '{}'", field),
+                                    span,
+                                    Severity::Error,
+                                )
+                            })?
+                    };
+
+                    let mut globals = self.globals.borrow_mut();
+                    let Some(target) = globals.get_mut(sym) else {
+                        return Err(Diagnostic::new(
+                            "field assignment target not found",
+                            span,
+                            Severity::Error,
+                        ));
+                    };
+                    match target {
+                        Value::StructInstance { fields, .. } => {
+                            let Some(field_target) = fields.get_mut(slot) else {
+                                return Err(Diagnostic::new(
+                                    format!("unknown struct field slot '{}'", slot),
+                                    span,
+                                    Severity::Error,
+                                ));
+                            };
+                            *field_target = value;
+                        }
+                        other => {
+                            return Err(Diagnostic::new(
+                                format!("field assignment on non-struct value: {:?}", other),
+                                span,
+                                Severity::Error,
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(Diagnostic::new(
+                        "field assignment target not found",
+                        span,
+                        Severity::Error,
+                    ));
                 }
             }
 
@@ -560,14 +994,80 @@ impl<'a> Vm<'a> {
                 |a, b| a.checked_sub(b),
                 |a, b| Some(a - b),
             )?,
+            Op::SubInt => self.apply_bin_checked(
+                span,
+                |a, b| a.checked_sub(b),
+                |a, b| a.checked_sub(b),
+                |_, _| None,
+            )?,
             Op::Mul => self.apply_bin_checked(
                 span,
                 |a, b| a.checked_mul(b),
                 |a, b| a.checked_mul(b),
                 |a, b| Some(a * b),
             )?,
+            Op::MulInt => self.apply_bin_checked(
+                span,
+                |a, b| a.checked_mul(b),
+                |a, b| a.checked_mul(b),
+                |_, _| None,
+            )?,
             Op::Div => self.apply_div(span)?,
+            Op::DivInt => {
+                let rhs = self.pop_one(span)?;
+                let lhs = self.pop_one(span)?;
+                let out = match (lhs, rhs) {
+                    (Value::Int128(a), Value::Int128(b)) => {
+                        if b == 0 {
+                            return Err(Diagnostic::new("division by zero", span, Severity::Error));
+                        }
+                        Value::Int128(a.checked_div(b).ok_or_else(|| {
+                            Diagnostic::new("integer division overflow", span, Severity::Error)
+                        })?)
+                    }
+                    (Value::UInt128(a), Value::UInt128(b)) => {
+                        if b == 0 {
+                            return Err(Diagnostic::new("division by zero", span, Severity::Error));
+                        }
+                        Value::UInt128(a / b)
+                    }
+                    (l, r) => {
+                        return Err(Diagnostic::new(
+                            format!("invalid operands for DivInt: {:?} and {:?}", l, r),
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                };
+                self.stack.push(out);
+            }
             Op::Mod => self.apply_mod(span)?,
+            Op::ModInt => {
+                let rhs = self.pop_one(span)?;
+                let lhs = self.pop_one(span)?;
+                let out = match (lhs, rhs) {
+                    (Value::Int128(a), Value::Int128(b)) => {
+                        if b == 0 {
+                            return Err(Diagnostic::new("modulo by zero", span, Severity::Error));
+                        }
+                        Value::Int128(a % b)
+                    }
+                    (Value::UInt128(a), Value::UInt128(b)) => {
+                        if b == 0 {
+                            return Err(Diagnostic::new("modulo by zero", span, Severity::Error));
+                        }
+                        Value::UInt128(a % b)
+                    }
+                    (l, r) => {
+                        return Err(Diagnostic::new(
+                            format!("invalid operands for ModInt: {:?} and {:?}", l, r),
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                };
+                self.stack.push(out);
+            }
             Op::Pow => self.apply_pow(span)?,
             Op::Eq => self.apply_eq(span)?,
             Op::Ne => self.apply_ne(span)?,
@@ -623,11 +1123,26 @@ impl<'a> Vm<'a> {
 
             Op::Call(sym, argc) => {
                 let argc = *argc as usize;
-                let mut args = Vec::with_capacity(argc);
-                for _ in 0..argc {
-                    args.push(self.pop_one(span)?);
-                }
-                args.reverse();
+                let args = match argc {
+                    0 => Vec::new(),
+                    1 => {
+                        let arg0 = self.pop_one(span)?;
+                        vec![arg0]
+                    }
+                    2 => {
+                        let arg1 = self.pop_one(span)?;
+                        let arg0 = self.pop_one(span)?;
+                        vec![arg0, arg1]
+                    }
+                    _ => {
+                        let mut args = Vec::with_capacity(argc);
+                        for _ in 0..argc {
+                            args.push(self.pop_one(span)?);
+                        }
+                        args.reverse();
+                        args
+                    }
+                };
 
                 let symbol = self.symbols.symbol(*sym).ok_or_else(|| {
                     Diagnostic::new("unknown symbol id in call", span, Severity::Error)
@@ -644,88 +1159,55 @@ impl<'a> Vm<'a> {
                 let ret = self.dispatch_intrinsic(*sym, &args, span)?;
                 self.stack.push(ret);
             }
+            Op::CallDirect(sym, argc) => {
+                let argc = *argc as usize;
+                let args = match argc {
+                    0 => Vec::new(),
+                    1 => {
+                        let arg0 = self.pop_one(span)?;
+                        vec![arg0]
+                    }
+                    2 => {
+                        let arg1 = self.pop_one(span)?;
+                        let arg0 = self.pop_one(span)?;
+                        vec![arg0, arg1]
+                    }
+                    _ => {
+                        let mut args = Vec::with_capacity(argc);
+                        for _ in 0..argc {
+                            args.push(self.pop_one(span)?);
+                        }
+                        args.reverse();
+                        args
+                    }
+                };
+                let callee = self.resolve_symbol_for_call(*sym, span)?;
+                self.invoke_callee(callee, args, argc, span)?;
+            }
             Op::CallValue(argc) => {
                 let argc = *argc as usize;
-                let mut args = Vec::with_capacity(argc);
-                for _ in 0..argc {
-                    args.push(self.pop_one(span)?);
-                }
-                args.reverse();
+                let args = match argc {
+                    0 => Vec::new(),
+                    1 => {
+                        let arg0 = self.pop_one(span)?;
+                        vec![arg0]
+                    }
+                    2 => {
+                        let arg1 = self.pop_one(span)?;
+                        let arg0 = self.pop_one(span)?;
+                        vec![arg0, arg1]
+                    }
+                    _ => {
+                        let mut args = Vec::with_capacity(argc);
+                        for _ in 0..argc {
+                            args.push(self.pop_one(span)?);
+                        }
+                        args.reverse();
+                        args
+                    }
+                };
                 let callee = self.pop_one(span)?;
-                match callee {
-                    Value::Builtin(sym) => {
-                        let _symbol = self.symbols.symbol(sym).ok_or_else(|| {
-                            Diagnostic::new("unknown builtin symbol", span, Severity::Error)
-                        })?;
-                        let ret = self.dispatch_intrinsic(sym, &args, span)?;
-                        self.stack.push(ret);
-                    }
-                    Value::Function {
-                        function,
-                        mut captured,
-                        self_symbol,
-                    } => {
-                        for (sym, value) in &self.env {
-                            if captured.contains_key(sym) {
-                                continue;
-                            }
-                            let should_link = self
-                                .symbols
-                                .symbol(*sym)
-                                .map(|s| {
-                                    s.origin == SymbolOrigin::Intrinsic
-                                        || matches!(s.ty, crate::analyzer::Type::Function { .. })
-                                })
-                                .unwrap_or(false);
-                            if should_link {
-                                captured.insert(*sym, value.clone());
-                            }
-                        }
-                        if let Some(sym) = self_symbol {
-                            captured.insert(
-                                sym,
-                                Value::Function {
-                                    function: function.clone(),
-                                    captured: captured.clone(),
-                                    self_symbol: Some(sym),
-                                },
-                            );
-                        }
-                        let fn_chunk = *function;
-                        if fn_chunk.params.len() != argc {
-                            return Err(Diagnostic::new(
-                                format!(
-                                    "invalid argument count: expected {}, got {}",
-                                    fn_chunk.params.len(),
-                                    argc
-                                ),
-                                span,
-                                Severity::Error,
-                            ));
-                        }
-                        for (param, arg) in fn_chunk.params.iter().zip(args) {
-                            captured.insert(*param, arg);
-                        }
-                        let previous = CallFrame {
-                            chunk: self.chunk.clone(),
-                            ip: self.ip,
-                            env: std::mem::take(&mut self.env),
-                            scope_frames: std::mem::take(&mut self.scope_frames),
-                        };
-                        self.call_stack.push(previous);
-                        self.chunk = fn_chunk.chunk;
-                        self.ip = 0;
-                        self.env = captured;
-                        self.scope_frames = vec![Vec::new()];
-                    }
-                    other => {
-                        return Err(Diagnostic::new(
-                            format!("attempted call on non-function value: {:?}", other),
-                            span,
-                            Severity::Error,
-                        ));
-                    }
-                }
+                self.invoke_callee(callee, args, argc, span)?;
             }
 
             Op::Pop => {
@@ -758,7 +1240,14 @@ impl<'a> Vm<'a> {
                         Severity::Error,
                     ));
                 };
-                let wrapped = wrap_err_value(err, message, None, "wrap".to_string(), span)?;
+                let wrapped = wrap_err_value(
+                    err,
+                    message,
+                    None,
+                    "wrap".to_string(),
+                    span,
+                    &self.chunk.struct_field_slots,
+                )?;
                 self.stack.push(wrapped);
             }
 
@@ -776,7 +1265,7 @@ impl<'a> Vm<'a> {
                 }
                 let frame = self.scope_frames.pop().expect("checked len");
                 for sym in frame.into_iter().rev() {
-                    self.env.remove(&sym);
+                    self.locals_remove(sym);
                 }
             }
 
@@ -792,8 +1281,9 @@ impl<'a> Vm<'a> {
             let ret = self.stack.pop().unwrap_or(Value::Unit);
             self.chunk = frame.chunk;
             self.ip = frame.ip;
-            self.env = frame.env;
+            self.locals = frame.locals;
             self.scope_frames = frame.scope_frames;
+            self.current_function = frame.current_function;
             self.stack.push(ret);
             self.try_stack
                 .retain(|ctx| ctx.call_depth <= self.call_stack.len());
@@ -825,8 +1315,9 @@ impl<'a> Vm<'a> {
             };
             self.chunk = frame.chunk;
             self.ip = frame.ip;
-            self.env = frame.env;
+            self.locals = frame.locals;
             self.scope_frames = frame.scope_frames;
+            self.current_function = frame.current_function;
         }
 
         self.stack.truncate(ctx.stack_len);
@@ -835,7 +1326,7 @@ impl<'a> Vm<'a> {
                 break;
             };
             for sym in frame {
-                self.env.remove(&sym);
+                self.locals_remove(sym);
             }
         }
         self.ip = ctx.handler_ip;
@@ -1193,6 +1684,114 @@ impl<'a> Vm<'a> {
         })
     }
 
+    fn resolve_symbol_for_call(&mut self, sym: SymbolId, span: Span) -> Result<Value, Diagnostic> {
+        if let Some(v) = self.locals_get(sym) {
+            return Ok(v);
+        }
+        if let Some(v) = self.globals.borrow().get(&sym).cloned() {
+            return Ok(v);
+        }
+        if let Some(current_function) = self.current_function.as_ref()
+            && current_function.self_symbol == Some(sym)
+        {
+            return Ok(Value::Function {
+                function: Arc::clone(&current_function.function),
+                captured: Arc::new(self.snapshot_locals()),
+                self_symbol: current_function.self_symbol,
+            });
+        }
+        Err(Diagnostic::new(
+            "load of uninitialized or missing symbol",
+            span,
+            Severity::Error,
+        ))
+    }
+
+    fn invoke_callee(
+        &mut self,
+        callee: Value,
+        args: Vec<Value>,
+        argc: usize,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
+        match callee {
+            Value::Builtin(sym) => {
+                let _symbol = self.symbols.symbol(sym).ok_or_else(|| {
+                    Diagnostic::new("unknown builtin symbol", span, Severity::Error)
+                })?;
+                let ret = self.dispatch_intrinsic(sym, &args, span)?;
+                self.stack.push(ret);
+                Ok(())
+            }
+            Value::Function {
+                function,
+                captured,
+                self_symbol,
+            } => {
+                let fn_chunk = Arc::clone(&function);
+                if fn_chunk.params.len() != argc {
+                    return Err(Diagnostic::new(
+                        format!(
+                            "invalid argument count: expected {}, got {}",
+                            fn_chunk.params.len(),
+                            argc
+                        ),
+                        span,
+                        Severity::Error,
+                    ));
+                }
+
+                let next_locals = if captured.is_empty() {
+                    let mut locals = Vec::with_capacity(argc);
+                    for (param, arg) in fn_chunk.params.iter().zip(args.into_iter()) {
+                        locals.push((*param, arg));
+                    }
+                    locals
+                } else {
+                    let mut locals = Vec::with_capacity(captured.len() + argc);
+                    for (sym, value) in captured.iter() {
+                        locals.push((*sym, value.clone()));
+                    }
+                    for (param, arg) in fn_chunk.params.iter().zip(args.into_iter()) {
+                        if let Some(idx) = locals
+                            .iter()
+                            .rposition(|(local_sym, _)| *local_sym == *param)
+                        {
+                            locals[idx].1 = arg;
+                        } else {
+                            locals.push((*param, arg));
+                        }
+                    }
+                    locals
+                };
+
+                let current_function = self_symbol.map(|sym| FunctionContext {
+                    function: Arc::clone(&function),
+                    self_symbol: Some(sym),
+                });
+                let previous = CallFrame {
+                    chunk: self.chunk.clone(),
+                    ip: self.ip,
+                    locals: std::mem::take(&mut self.locals),
+                    scope_frames: std::mem::take(&mut self.scope_frames),
+                    current_function: self.current_function.take(),
+                };
+                self.call_stack.push(previous);
+                self.chunk = Arc::clone(&fn_chunk.chunk);
+                self.ip = 0;
+                self.locals = next_locals;
+                self.scope_frames = vec![Vec::new()];
+                self.current_function = current_function;
+                Ok(())
+            }
+            other => Err(Diagnostic::new(
+                format!("attempted call on non-function value: {:?}", other),
+                span,
+                Severity::Error,
+            )),
+        }
+    }
+
     fn dispatch_intrinsic(
         &mut self,
         symbol_id: SymbolId,
@@ -1348,7 +1947,14 @@ fn dispatch_builtin(
             } else {
                 None
             };
-            wrap_err_value(base_err, message, code, "wrap".to_string(), span)
+            wrap_err_value(
+                base_err,
+                message,
+                code,
+                "wrap".to_string(),
+                span,
+                &vm.chunk.struct_field_slots,
+            )
         }
         "typeof" => {
             let [arg] = args else {
@@ -6467,6 +7073,7 @@ fn wrap_err_value(
     code_override: Option<i32>,
     origin: String,
     span: Span,
+    struct_field_slots: &HashMap<String, HashMap<String, usize>>,
 ) -> Result<Value, Diagnostic> {
     match base_err {
         Value::Err {
@@ -6499,7 +7106,21 @@ fn wrap_err_value(
             })
         }
         Value::StructInstance { type_name, fields } => {
-            let base_message = match fields.get("message") {
+            let Some(type_slots) = struct_field_slots.get(type_name.as_str()) else {
+                return Err(Diagnostic::new(
+                    format!("unknown struct type '{}'", type_name),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let Some(message_slot) = type_slots.get("message").copied() else {
+                return Err(Diagnostic::new(
+                    format!("error-like struct `{type_name}` must have `message: str`"),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let base_message = match fields.get(message_slot) {
                 Some(Value::Str(s)) => s.clone(),
                 _ => {
                     return Err(Diagnostic::new(
@@ -6509,7 +7130,14 @@ fn wrap_err_value(
                     ));
                 }
             };
-            let base_code = match fields.get("code") {
+            let Some(code_slot) = type_slots.get("code").copied() else {
+                return Err(Diagnostic::new(
+                    format!("error-like struct `{type_name}` must have `code: i32`"),
+                    span,
+                    Severity::Error,
+                ));
+            };
+            let base_code = match fields.get(code_slot) {
                 Some(Value::Int128(n)) => i32::try_from(*n).map_err(|_| {
                     Diagnostic::new(
                         format!("error-like struct `{type_name}` has code outside i32 range"),
@@ -6680,7 +7308,7 @@ fn time_tick_start() -> &'static Instant {
 
 fn proc_table() -> &'static Mutex<HashMap<u32, Child>> {
     static CHILDREN: OnceLock<Mutex<HashMap<u32, Child>>> = OnceLock::new();
-    CHILDREN.get_or_init(|| Mutex::new(HashMap::new()))
+    CHILDREN.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn proc_take_child(pid: u64, span: Span) -> Result<Option<Child>, Diagnostic> {
@@ -6726,7 +7354,7 @@ fn spawn_shell_command(command: &str) -> std::io::Result<Child> {
 
 fn thread_table() -> &'static Mutex<HashMap<u64, std::thread::JoinHandle<i32>>> {
     static THREADS: OnceLock<Mutex<HashMap<u64, std::thread::JoinHandle<i32>>>> = OnceLock::new();
-    THREADS.get_or_init(|| Mutex::new(HashMap::new()))
+    THREADS.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn next_thread_id() -> u64 {
@@ -6736,7 +7364,7 @@ fn next_thread_id() -> u64 {
 
 fn mutex_table() -> &'static Mutex<HashMap<u64, bool>> {
     static MUTEXES: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
-    MUTEXES.get_or_init(|| Mutex::new(HashMap::new()))
+    MUTEXES.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn next_mutex_id() -> u64 {
@@ -6746,7 +7374,7 @@ fn next_mutex_id() -> u64 {
 
 fn sync_mutex_table() -> &'static Mutex<HashMap<u64, bool>> {
     static SYNC_MUTEXES: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
-    SYNC_MUTEXES.get_or_init(|| Mutex::new(HashMap::new()))
+    SYNC_MUTEXES.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn next_sync_mutex_id() -> u64 {
@@ -6756,7 +7384,7 @@ fn next_sync_mutex_id() -> u64 {
 
 fn atomic_table() -> &'static Mutex<HashMap<u64, i64>> {
     static ATOMICS: OnceLock<Mutex<HashMap<u64, i64>>> = OnceLock::new();
-    ATOMICS.get_or_init(|| Mutex::new(HashMap::new()))
+    ATOMICS.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn next_atomic_id() -> u64 {
@@ -6766,7 +7394,7 @@ fn next_atomic_id() -> u64 {
 
 fn channel_table() -> &'static Mutex<HashMap<u64, VecDeque<Value>>> {
     static CHANNELS: OnceLock<Mutex<HashMap<u64, VecDeque<Value>>>> = OnceLock::new();
-    CHANNELS.get_or_init(|| Mutex::new(HashMap::new()))
+    CHANNELS.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn next_channel_id() -> u64 {
@@ -6800,7 +7428,7 @@ fn expect_i64_like(value: &Value, label: &str, span: Span) -> Result<i64, Diagno
 
 fn udp_socket_table() -> &'static Mutex<HashMap<u64, UdpSocket>> {
     static UDP_SOCKETS: OnceLock<Mutex<HashMap<u64, UdpSocket>>> = OnceLock::new();
-    UDP_SOCKETS.get_or_init(|| Mutex::new(HashMap::new()))
+    UDP_SOCKETS.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn next_udp_socket_id() -> u64 {
@@ -6810,7 +7438,7 @@ fn next_udp_socket_id() -> u64 {
 
 fn tcp_stream_table() -> &'static Mutex<HashMap<u64, TcpStream>> {
     static TCP_STREAMS: OnceLock<Mutex<HashMap<u64, TcpStream>>> = OnceLock::new();
-    TCP_STREAMS.get_or_init(|| Mutex::new(HashMap::new()))
+    TCP_STREAMS.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn next_tcp_stream_id() -> u64 {
@@ -6820,7 +7448,7 @@ fn next_tcp_stream_id() -> u64 {
 
 fn http_listener_table() -> &'static Mutex<HashMap<u64, TcpListener>> {
     static HTTP_LISTENERS: OnceLock<Mutex<HashMap<u64, TcpListener>>> = OnceLock::new();
-    HTTP_LISTENERS.get_or_init(|| Mutex::new(HashMap::new()))
+    HTTP_LISTENERS.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 fn next_http_listener_id() -> u64 {
@@ -7680,7 +8308,7 @@ fn str_pad_impl(s: &str, total: i128, pad: &str, left: bool) -> String {
 /// Run a full program chunk. Requires `chunk.invariant_holds()` and terminates with [`Op::Return`].
 pub fn execute(chunk: &Chunk, symbols: &SymbolTable) -> Result<(), Diagnostics> {
     debug_assert!(chunk.invariant_holds());
-    let mut vm = Vm::new(chunk, symbols, HashMap::new());
+    let mut vm = Vm::new(chunk, symbols, HashMap::default());
     vm.run()
 }
 

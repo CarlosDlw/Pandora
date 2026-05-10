@@ -13,6 +13,13 @@ print("Hello, Pandora")
 
 - Static type checking (with diagnostics)
 - Bytecode-based execution on a VM
+- Slot-based struct field access and assignment in VM hot paths
+- Direct symbol-target struct field assignment path (no load+assign roundtrip)
+- Direct symbol-slot struct field load path to avoid full-struct clone on read
+- Short-arity function call fast paths in VM dispatch
+- No-capture function call frame setup optimized for parameter binding
+- Static call-site direct dispatch opcode (CallDirect)
+- Typed integer arithmetic opcode emission for hot binary ops
 - Struct field assignment (for example, `state.debug = false`)
 - Named struct types inside array annotations (for example, `[ByteOp]`)
 - Relational comparisons across integer widths/signs (for example, `i32 < u32`)

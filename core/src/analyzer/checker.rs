@@ -18,6 +18,7 @@ use foundation::{
 pub struct SemanticModel {
     pub types: HashMap<HirId, AnalyzerType>,
     pub method_builtin_targets: HashMap<HirId, SymbolId>,
+    pub symbol_types: HashMap<SymbolId, AnalyzerType>,
 }
 
 pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnostics) {
@@ -44,6 +45,7 @@ pub fn analyze_with_registry(
         builtins: registry,
     };
     checker.check_program();
+    checker.snapshot_symbol_types();
     (checker.model, checker.diagnostics)
 }
 
@@ -67,6 +69,16 @@ struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
+    fn snapshot_symbol_types(&mut self) {
+        for idx in 0..self.symbols.symbol_count() {
+            let symbol_id = SymbolId(idx as u32);
+            let Some(symbol) = self.symbols.symbol(symbol_id) else {
+                continue;
+            };
+            self.model.symbol_types.insert(symbol_id, symbol.ty.clone());
+        }
+    }
+
     fn check_program(&mut self) {
         self.collect_function_param_requirements();
         for stmt in &self.hir.stmts {
@@ -1679,7 +1691,9 @@ impl<'a> Checker<'a> {
         right_ty: AnalyzerType,
         span: Span,
     ) -> AnalyzerType {
-        if matches!(left_ty, AnalyzerType::Int { .. }) && matches!(right_ty, AnalyzerType::Int { .. }) {
+        if matches!(left_ty, AnalyzerType::Int { .. })
+            && matches!(right_ty, AnalyzerType::Int { .. })
+        {
             return AnalyzerType::Bool;
         }
 

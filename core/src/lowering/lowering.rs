@@ -959,7 +959,8 @@ impl<'a> Lowering<'a> {
                             let inner_ty = match map_type_name(inner) {
                                 Some(ty) => ty,
                                 None => {
-                                    if let Some(symbol) = self.symbols.resolve(self.current_scope, inner)
+                                    if let Some(symbol) =
+                                        self.symbols.resolve(self.current_scope, inner)
                                     {
                                         self.symbols
                                             .symbol(symbol)

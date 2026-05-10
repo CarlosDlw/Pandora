@@ -1,5 +1,8 @@
 //! Lower [`Hir`] + [`crate::analyzer::SemanticModel`] into [`Chunk`] (no AST dependency).
 
+use rustc_hash::FxHashMap;
+use std::sync::Arc;
+
 use foundation::{
     diagnostics::{Diagnostic, Diagnostics, Severity},
     span::Span,
@@ -24,6 +27,7 @@ pub fn compile_program(hir: &Hir, model: &SemanticModel) -> (Chunk, Diagnostics)
     let mut diagnostics = Diagnostics::new();
     let mut loop_stack = Vec::new();
     let mut scope_depth = 0usize;
+    builder.set_struct_field_slots(collect_struct_field_slots(hir));
     let mut method_table: std::collections::HashMap<(SymbolId, String, bool), SymbolId> =
         std::collections::HashMap::new();
     collect_method_table(hir, &mut method_table);
@@ -177,10 +181,19 @@ fn emit_stmt(
             value,
             span,
         } => {
-            b.emit(Op::Load(*symbol), *span);
             emit_expr(hir, model, *value, b, diagnostics, method_table);
-            b.emit(Op::StructSet(field.clone()), *span);
-            b.emit(Op::Assign(*symbol), *span);
+            let symbol_ty = model
+                .symbol_types
+                .get(symbol)
+                .cloned()
+                .unwrap_or(Type::Unknown);
+            if let Type::Struct(struct_id) = symbol_ty
+                && let Some(slot) = struct_field_slot_by_id(hir, struct_id, field)
+            {
+                b.emit(Op::StructAssignSlot(*symbol, slot), *span);
+            } else {
+                b.emit(Op::StructAssign(*symbol, field.clone()), *span);
+            }
         }
         HirStmt::Expr { expr, span } => {
             emit_expr(hir, model, *expr, b, diagnostics, method_table);
@@ -683,10 +696,50 @@ fn emit_expr(
                         b.emit(Op::Add, span_merge);
                     }
                 }
-                BinOp::Subtract => b.emit(Op::Sub, span_merge),
-                BinOp::Multiply => b.emit(Op::Mul, span_merge),
-                BinOp::Divide => b.emit(Op::Div, span_merge),
-                BinOp::Modulo => b.emit(Op::Mod, span_merge),
+                BinOp::Subtract => {
+                    let specialized = match (&lhs_ty, &rhs_ty) {
+                        (Type::Int { .. }, Type::Int { .. }) => Some(Op::SubInt),
+                        _ => None,
+                    };
+                    if let Some(op) = specialized {
+                        b.emit(op, span_merge);
+                    } else {
+                        b.emit(Op::Sub, span_merge);
+                    }
+                }
+                BinOp::Multiply => {
+                    let specialized = match (&lhs_ty, &rhs_ty) {
+                        (Type::Int { .. }, Type::Int { .. }) => Some(Op::MulInt),
+                        _ => None,
+                    };
+                    if let Some(op) = specialized {
+                        b.emit(op, span_merge);
+                    } else {
+                        b.emit(Op::Mul, span_merge);
+                    }
+                }
+                BinOp::Divide => {
+                    let specialized = match (&lhs_ty, &rhs_ty) {
+                        (Type::Int { .. }, Type::Int { .. }) => Some(Op::DivInt),
+                        _ => None,
+                    };
+                    if let Some(op) = specialized {
+                        b.emit(op, span_merge);
+                    } else {
+                        b.emit(Op::Div, span_merge);
+                    }
+                }
+                BinOp::Modulo => {
+                    let specialized = match (&lhs_ty, &rhs_ty) {
+                        (Type::Int { .. }, Type::Int { .. }) => Some(Op::ModInt),
+                        _ => None,
+                    };
+                    if let Some(op) = specialized {
+                        b.emit(op, span_merge);
+                    } else {
+                        b.emit(Op::Mod, span_merge);
+                    }
+                }
                 BinOp::Power => b.emit(Op::Pow, span_merge),
                 BinOp::Equal => b.emit(Op::Eq, span_merge),
                 BinOp::NotEqual => b.emit(Op::Ne, span_merge),
@@ -713,7 +766,13 @@ fn emit_expr(
             b.emit(Op::MakeRange(*inclusive), span);
         }
         HirExpr::Call { callee, args } => {
-            emit_expr(hir, model, *callee, b, diagnostics, method_table);
+            let direct_callee = match hir.exprs.get(*callee) {
+                Some(HirExpr::Var(sym)) => Some(*sym),
+                _ => None,
+            };
+            if direct_callee.is_none() {
+                emit_expr(hir, model, *callee, b, diagnostics, method_table);
+            }
             for a in args {
                 emit_expr(hir, model, *a, b, diagnostics, method_table);
             }
@@ -728,7 +787,13 @@ fn emit_expr(
                 }
             }
             match u8::try_from(final_argc) {
-                Ok(argc) => b.emit(Op::CallValue(argc), span),
+                Ok(argc) => {
+                    if let Some(sym) = direct_callee {
+                        b.emit(Op::CallDirect(sym, argc), span);
+                    } else {
+                        b.emit(Op::CallValue(argc), span);
+                    }
+                }
                 Err(_) => {
                     diagnostics.push(Diagnostic::new(
                         "too many arguments for call (u8 overflow)",
@@ -739,20 +804,59 @@ fn emit_expr(
             }
         }
         HirExpr::StructLiteral { type_name, fields } => {
-            for (_, value) in fields {
-                emit_expr(hir, model, *value, b, diagnostics, method_table);
+            match struct_field_order_for_type(hir, type_name) {
+                Some(field_order) => {
+                    for field_name in &field_order {
+                        let Some((_, value_id)) =
+                            fields.iter().find(|(name, _)| name == field_name)
+                        else {
+                            diagnostics.push(Diagnostic::new(
+                                format!(
+                                    "missing struct field '{}' for '{}'",
+                                    field_name, type_name
+                                ),
+                                span,
+                                Severity::Error,
+                            ));
+                            return;
+                        };
+                        emit_expr(hir, model, *value_id, b, diagnostics, method_table);
+                    }
+                    match u8::try_from(field_order.len()) {
+                        Ok(field_count) => {
+                            b.emit(Op::MakeStruct(type_name.clone(), field_count), span)
+                        }
+                        Err(_) => diagnostics.push(Diagnostic::new(
+                            format!("struct '{}' has too many fields", type_name),
+                            span,
+                            Severity::Error,
+                        )),
+                    }
+                }
+                None => diagnostics.push(Diagnostic::new(
+                    format!("unknown struct type '{}'", type_name),
+                    span,
+                    Severity::Error,
+                )),
             }
-            b.emit(
-                Op::MakeStruct(
-                    type_name.clone(),
-                    fields.iter().map(|(n, _)| n.clone()).collect(),
-                ),
-                span,
-            );
         }
         HirExpr::FieldAccess { base, field } => {
-            emit_expr(hir, model, *base, b, diagnostics, method_table);
-            b.emit(Op::StructGet(field.clone()), span);
+            let base_ty = model.types.get(base).cloned().unwrap_or(Type::Unknown);
+            if let Type::Struct(struct_id) = base_ty
+                && let Some(slot) = struct_field_slot_by_id(hir, struct_id, field)
+                && let Some(HirExpr::Var(sym)) = hir.exprs.get(*base)
+            {
+                b.emit(Op::StructLoadSlot(*sym, slot), span);
+            } else {
+                emit_expr(hir, model, *base, b, diagnostics, method_table);
+                if let Type::Struct(struct_id) = model.types.get(base).cloned().unwrap_or(Type::Unknown)
+                    && let Some(slot) = struct_field_slot_by_id(hir, struct_id, field)
+                {
+                    b.emit(Op::StructGetSlot(slot), span);
+                    return;
+                }
+                b.emit(Op::StructGet(field.clone()), span);
+            }
         }
         HirExpr::MethodCall {
             receiver,
@@ -863,17 +967,33 @@ fn emit_expr(
             }
         }
         HirExpr::Array(items) => {
-            b.emit(Op::MakeArray(0), span);
-            for item in items {
-                match item {
-                    HirArrayItem::Expr(item_expr) => {
+            if items.iter().all(|item| matches!(item, HirArrayItem::Expr(_))) {
+                for item in items {
+                    if let HirArrayItem::Expr(item_expr) = item {
                         emit_expr(hir, model, *item_expr, b, diagnostics, method_table);
-                        b.emit(Op::MakeArray(1), span);
-                        b.emit(Op::ArrayExtend, span);
                     }
-                    HirArrayItem::SpreadExpr(item_expr) => {
-                        emit_expr(hir, model, *item_expr, b, diagnostics, method_table);
-                        b.emit(Op::ArrayExtend, span);
+                }
+                match u8::try_from(items.len()) {
+                    Ok(count) => b.emit(Op::MakeArray(count), span),
+                    Err(_) => diagnostics.push(Diagnostic::new(
+                        "array literal too large",
+                        span,
+                        Severity::Error,
+                    )),
+                }
+            } else {
+                b.emit(Op::MakeArray(0), span);
+                for item in items {
+                    match item {
+                        HirArrayItem::Expr(item_expr) => {
+                            emit_expr(hir, model, *item_expr, b, diagnostics, method_table);
+                            b.emit(Op::MakeArray(1), span);
+                            b.emit(Op::ArrayExtend, span);
+                        }
+                        HirArrayItem::SpreadExpr(item_expr) => {
+                            emit_expr(hir, model, *item_expr, b, diagnostics, method_table);
+                            b.emit(Op::ArrayExtend, span);
+                        }
                     }
                 }
             }
@@ -1062,6 +1182,7 @@ fn compile_function_chunk(
     method_table: &std::collections::HashMap<(SymbolId, String, bool), SymbolId>,
 ) -> FunctionChunk {
     let mut b = ChunkBuilder::new();
+    b.set_struct_field_slots(collect_struct_field_slots(hir));
     let mut loop_stack = Vec::new();
     let mut scope_depth = 0usize;
     for stmt in body {
@@ -1080,8 +1201,52 @@ fn compile_function_chunk(
     b.emit(Op::Return, Span::new_unchecked(hir.file_id, 0, 0));
     FunctionChunk {
         params,
-        chunk: b.finish(),
+        chunk: Arc::new(b.finish()),
     }
+}
+
+fn collect_struct_field_slots(hir: &Hir) -> FxHashMap<String, FxHashMap<String, usize>> {
+    let mut map = FxHashMap::default();
+    for stmt in &hir.stmts {
+        if let HirStmt::StructDecl { name, fields, .. } = stmt {
+            let mut slots = FxHashMap::default();
+            for (slot, (field_name, _)) in fields.iter().enumerate() {
+                slots.insert(field_name.clone(), slot);
+            }
+            map.insert(name.clone(), slots);
+        }
+    }
+    map
+}
+
+fn struct_field_order_for_type(hir: &Hir, type_name: &str) -> Option<Vec<String>> {
+    for stmt in &hir.stmts {
+        if let HirStmt::StructDecl { name, fields, .. } = stmt
+            && name == type_name
+        {
+            return Some(
+                fields
+                    .iter()
+                    .map(|(field_name, _)| field_name.clone())
+                    .collect(),
+            );
+        }
+    }
+    None
+}
+
+fn struct_field_slot_by_id(hir: &Hir, struct_id: SymbolId, field: &str) -> Option<usize> {
+    for stmt in &hir.stmts {
+        if let HirStmt::StructDecl { symbol, fields, .. } = stmt
+            && *symbol == struct_id
+        {
+            return fields
+                .iter()
+                .enumerate()
+                .find_map(|(idx, (name, _))| if name == field { Some(idx) } else { None });
+        }
+    }
+    None
 }
 
 fn collect_method_table(
@@ -1229,7 +1394,12 @@ mod tests {
         assert!(!analysis_diagnostics.has_errors());
         let (chunk, compile_diagnostics) = compile_program(&hir, &model);
         assert!(!compile_diagnostics.has_errors());
-        assert!(chunk.code.iter().any(|op| matches!(op, Op::Mod)));
+        assert!(
+            chunk
+                .code
+                .iter()
+                .any(|op| matches!(op, Op::Mod | Op::ModInt))
+        );
         assert!(chunk.code.iter().any(|op| matches!(op, Op::Eq)));
         assert!(chunk.code.iter().any(|op| matches!(op, Op::LogicalAnd)));
         assert!(chunk.code.iter().any(|op| matches!(op, Op::Not)));
@@ -1268,7 +1438,10 @@ mod tests {
         let (chunk, compile_diagnostics) = compile_program(&hir, &model);
         assert!(!compile_diagnostics.has_errors());
         assert!(chunk.code.iter().any(|op| matches!(op, Op::MakeClosure(_))));
-        assert!(chunk.code.iter().any(|op| matches!(op, Op::CallValue(_))));
+        assert!(chunk
+            .code
+            .iter()
+            .any(|op| matches!(op, Op::CallValue(_) | Op::CallDirect(_, _))));
     }
 
     #[test]

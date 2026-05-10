@@ -97,4 +97,8 @@ impl SymbolTable {
         let scope = self.scopes.get(scope_id.0 as usize)?;
         scope.symbols.get(name).copied()
     }
+
+    pub fn symbol_count(&self) -> usize {
+        self.symbols.len()
+    }
 }

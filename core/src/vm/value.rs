@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
+use std::sync::Arc;
 
 use crate::hir::symbols::SymbolId;
 use crate::vm::chunk::FunctionChunk;
@@ -19,8 +20,8 @@ pub enum Value {
     Null,
     Builtin(SymbolId),
     Function {
-        function: Box<FunctionChunk>,
-        captured: HashMap<SymbolId, Value>,
+        function: Arc<FunctionChunk>,
+        captured: Arc<HashMap<SymbolId, Value>>,
         self_symbol: Option<SymbolId>,
     },
     Tuple(Vec<Value>),
@@ -35,7 +36,7 @@ pub enum Value {
     },
     StructInstance {
         type_name: String,
-        fields: HashMap<String, Value>,
+        fields: Vec<Value>,
     },
 }
 

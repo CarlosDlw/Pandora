@@ -1741,7 +1741,10 @@ mod tests {
         let lex_out = lex(FileId::from_u32(311), source);
         let (ast, diagnostics) = parse(FileId::from_u32(311), source.len() as u32, lex_out.tokens);
         assert!(!diagnostics.has_errors());
-        assert!(matches!(ast.get(ast.roots[2]), Some(AstNode::IfStmt { .. })));
+        assert!(matches!(
+            ast.get(ast.roots[2]),
+            Some(AstNode::IfStmt { .. })
+        ));
     }
 
     #[test]
