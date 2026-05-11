@@ -2161,7 +2161,7 @@ fn dispatch_builtin(
                     Severity::Error,
                 ));
             };
-            Ok(Value::Str(canonical_type_name(arg)))
+            Ok(Value::Str(canonical_type_name(arg, vm.symbols)))
         }
         "helper" => Ok(Value::Str("std/core ready".to_string())),
         "assert" => {
@@ -7270,7 +7270,7 @@ fn builtin_type_name(v: &Value) -> &'static str {
     }
 }
 
-fn canonical_type_name(v: &Value) -> String {
+fn canonical_type_name(v: &Value, symbols: &SymbolTable) -> String {
     match v {
         Value::Int128(_) => "i128".to_string(),
         Value::UInt128(_) => "u128".to_string(),
@@ -7281,38 +7281,119 @@ fn canonical_type_name(v: &Value) -> String {
         Value::Char(_) => "char".to_string(),
         Value::Unit => "unit".to_string(),
         Value::Null => "null".to_string(),
-        Value::Builtin(_) | Value::Function { .. } => "fn(any) -> any".to_string(),
+        Value::Builtin(sym) => {
+            if let Some(symbol) = symbols.symbol(*sym) {
+                analyzer_type_to_string(&symbol.ty, symbols)
+            } else {
+                "fn(any) -> any".to_string()
+            }
+        }
+        Value::Function {
+            function,
+            self_symbol,
+            ..
+        } => {
+            if let Some(sym) = self_symbol {
+                if let Some(symbol) = symbols.symbol(*sym) {
+                    return analyzer_type_to_string(&symbol.ty, symbols);
+                }
+            }
+            let params = if function.params.is_empty() {
+                String::new()
+            } else {
+                vec!["any"; function.params.len()].join(", ")
+            };
+            format!("fn({params}) -> any")
+        }
         Value::Tuple(items) => {
             let inner = items
                 .iter()
-                .map(canonical_type_name)
+                .map(|item| canonical_type_name(item, symbols))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("({inner})")
         }
         Value::Array(items) => {
             if let Some(first) = items.first() {
-                format!("[{}]", canonical_type_name(first))
+                format!("[{}]", canonical_type_name(first, symbols))
             } else {
                 "[unknown]".to_string()
             }
         }
         Value::Map(entries) => {
             if let Some((k, v)) = entries.first() {
-                format!("map[{}]{}", canonical_type_name(k), canonical_type_name(v))
+                format!(
+                    "map[{}]{}",
+                    canonical_type_name(k, symbols),
+                    canonical_type_name(v, symbols)
+                )
             } else {
                 "map[unknown]unknown".to_string()
             }
         }
         Value::Set(items) => {
             if let Some(first) = items.first() {
-                format!("set[{}]", canonical_type_name(first))
+                format!("set[{}]", canonical_type_name(first, symbols))
             } else {
                 "set[unknown]".to_string()
             }
         }
         Value::Err { .. } => "err".to_string(),
         Value::StructInstance { type_name, .. } => type_name.clone(),
+    }
+}
+
+fn analyzer_type_to_string(ty: &crate::analyzer::Type, symbols: &SymbolTable) -> String {
+    match ty {
+        crate::analyzer::Type::Int { signed: true, bits } => format!("i{bits}"),
+        crate::analyzer::Type::Int {
+            signed: false,
+            bits,
+        } => format!("u{bits}"),
+        crate::analyzer::Type::Float { bits } => format!("f{bits}"),
+        crate::analyzer::Type::Bool => "bool".to_string(),
+        crate::analyzer::Type::Str => "str".to_string(),
+        crate::analyzer::Type::Char => "char".to_string(),
+        crate::analyzer::Type::Unit => "unit".to_string(),
+        crate::analyzer::Type::Null => "null".to_string(),
+        crate::analyzer::Type::Err => "err".to_string(),
+        crate::analyzer::Type::Unknown => "unknown".to_string(),
+        crate::analyzer::Type::Any => "any".to_string(),
+        crate::analyzer::Type::Function { params, ret } => {
+            let rendered_params = params
+                .iter()
+                .map(|p| analyzer_type_to_string(p, symbols))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rendered_ret = analyzer_type_to_string(ret, symbols);
+            format!("fn({rendered_params}) -> {rendered_ret}")
+        }
+        crate::analyzer::Type::Tuple(items) => {
+            let rendered = items
+                .iter()
+                .map(|item| analyzer_type_to_string(item, symbols))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({rendered})")
+        }
+        crate::analyzer::Type::Array(item) => {
+            format!("[{}]", analyzer_type_to_string(item, symbols))
+        }
+        crate::analyzer::Type::Map(k, v) => {
+            format!(
+                "map[{}]{}",
+                analyzer_type_to_string(k, symbols),
+                analyzer_type_to_string(v, symbols)
+            )
+        }
+        crate::analyzer::Type::Set(item) => {
+            format!("set[{}]", analyzer_type_to_string(item, symbols))
+        }
+        crate::analyzer::Type::Struct(sym) | crate::analyzer::Type::Trait(sym) => symbols
+            .symbol(*sym)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "unknown".to_string()),
+        crate::analyzer::Type::SelfType => "Self".to_string(),
     }
 }
 
@@ -8973,9 +9054,10 @@ mod tests {
     use foundation::ids::FileId;
 
     use crate::builtins::default_registry;
+    use crate::hir::symbols::SymbolId;
     use crate::hir::symbols::SymbolTable;
     use crate::vm::bytecode::Op;
-    use crate::vm::chunk::ChunkBuilder;
+    use crate::vm::chunk::{ChunkBuilder, FunctionChunk};
 
     use super::*;
 
@@ -9540,6 +9622,49 @@ mod tests {
             true,
         );
         execute(&b.finish(), &symbols, Vec::new()).expect("typeof should execute");
+    }
+
+    #[test]
+    fn canonical_type_name_uses_function_signature_from_symbols() {
+        let mut symbols = SymbolTable::new();
+        let root = symbols.create_scope(None);
+        let fn_sym = symbols.define(
+            root,
+            "add".to_string(),
+            crate::analyzer::Type::Function {
+                params: vec![
+                    crate::analyzer::Type::Int {
+                        signed: true,
+                        bits: 32,
+                    },
+                    crate::analyzer::Type::Int {
+                        signed: true,
+                        bits: 32,
+                    },
+                ],
+                ret: Box::new(crate::analyzer::Type::Int {
+                    signed: true,
+                    bits: 32,
+                }),
+            },
+            crate::hir::SymbolOrigin::User,
+            false,
+        );
+
+        let empty_chunk = Arc::new(ChunkBuilder::new().finish());
+        let value = Value::Function {
+            function: Arc::new(FunctionChunk {
+                params: vec![SymbolId(101), SymbolId(102)],
+                chunk: empty_chunk,
+            }),
+            captured: Arc::new(HashMap::default()),
+            self_symbol: Some(fn_sym),
+        };
+
+        assert_eq!(
+            canonical_type_name(&value, &symbols),
+            "fn(i32, i32) -> i32".to_string()
+        );
     }
 
     #[test]
