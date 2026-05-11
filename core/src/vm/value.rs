@@ -3,15 +3,18 @@ use std::sync::Arc;
 
 use crate::hir::symbols::SymbolId;
 use crate::vm::chunk::FunctionChunk;
+use crate::vm::int::{IntPayload, IntTag, TypedInt};
 
 /// Runtime values for the stack machine.
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    /// Signed integers at full static-analysis width (see [`crate::analyzer::Type::Int`] signed).
+    /// Transitional legacy variant while engine migration is in progress.
     Int128(i128),
-    /// Unsigned integers at full static-analysis width.
+    /// Transitional legacy variant while engine migration is in progress.
     UInt128(u128),
+    /// Integer value with exact runtime tag (signed + bits).
+    Int(TypedInt),
     Bool(bool),
     Str(String),
     Float(f64),
@@ -41,10 +44,60 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn int_i128(value: i128) -> Self {
+        Value::Int(TypedInt::try_from_signed(IntTag::I128, value).expect("i128 in range"))
+    }
+
+    pub fn int_u128(value: u128) -> Self {
+        Value::Int(TypedInt::try_from_unsigned(IntTag::U128, value).expect("u128 in range"))
+    }
+
+    pub fn as_i128(&self) -> Option<i128> {
+        match self {
+            Value::Int128(i) => Some(*i),
+            Value::UInt128(u) => i128::try_from(*u).ok(),
+            Value::Int(v) => match v.payload() {
+                IntPayload::Signed(i) => Some(i),
+                IntPayload::Unsigned(u) => i128::try_from(u).ok(),
+            },
+            _ => None,
+        }
+    }
+
+    pub fn as_u128(&self) -> Option<u128> {
+        match self {
+            Value::UInt128(u) => Some(*u),
+            Value::Int128(i) if *i >= 0 => Some(*i as u128),
+            Value::Int(v) => match v.payload() {
+                IntPayload::Unsigned(u) => Some(u),
+                IntPayload::Signed(i) if i >= 0 => Some(i as u128),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub fn is_signed_int(&self) -> bool {
+        match self {
+            Value::Int128(_) => true,
+            Value::Int(v) => matches!(v.payload(), IntPayload::Signed(_)),
+            _ => false,
+        }
+    }
+
+    pub fn is_unsigned_int(&self) -> bool {
+        match self {
+            Value::UInt128(_) => true,
+            Value::Int(v) => matches!(v.payload(), IntPayload::Unsigned(_)),
+            _ => false,
+        }
+    }
+
     pub fn display_for_print(&self) -> String {
         match self {
             Value::Int128(i) => i.to_string(),
             Value::UInt128(u) => u.to_string(),
+            Value::Int(v) => v.display_value(),
             Value::Bool(b) => b.to_string(),
             Value::Str(s) => s.clone(),
             Value::Float(f) => f.to_string(),

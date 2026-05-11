@@ -27,12 +27,14 @@
 //! grapheme clusters — see [`crate::vm::engine`] `dispatch_builtin`.
 
 use crate::hir::symbols::SymbolId;
+use crate::vm::int::TypedInt;
 
 /// Stack-machine instruction. Execution order equals vector order in [`crate::vm::chunk::Chunk::code`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
     ConstI128(i128),
     ConstU128(u128),
+    ConstInt(TypedInt),
     ConstBool(bool),
     ConstStr(String),
     ConstFloat(f64),

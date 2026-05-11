@@ -20,6 +20,7 @@ use crate::{
 use super::{
     bytecode::Op,
     chunk::{Chunk, ChunkBuilder, FunctionChunk},
+    int::{IntTag, TypedInt},
 };
 
 pub fn compile_program(hir: &Hir, model: &SemanticModel) -> (Chunk, Diagnostics) {
@@ -471,7 +472,14 @@ fn emit_stmt(
             *scope_depth += 1;
             emit_expr(hir, model, *iterable, b, diagnostics, method_table);
             b.emit(Op::Bind(*iterable_symbol), *span);
-            b.emit(Op::ConstI128(0), *span);
+            match TypedInt::try_from_signed(IntTag::I128, 0) {
+                Ok(v) => b.emit(Op::ConstInt(v), *span),
+                Err(msg) => diagnostics.push(Diagnostic::new(
+                    format!("failed to emit loop index initializer: {msg}"),
+                    *span,
+                    Severity::Error,
+                )),
+            }
             b.emit(Op::Bind(*index_symbol), *span);
             b.emit(Op::ConstNull, *span);
             b.emit(Op::Bind(*symbol), *span);
@@ -506,7 +514,14 @@ fn emit_stmt(
             *scope_depth = scope_depth.saturating_sub(1);
 
             b.emit(Op::Load(*index_symbol), *span);
-            b.emit(Op::ConstI128(1), *span);
+            match TypedInt::try_from_signed(IntTag::I128, 1) {
+                Ok(v) => b.emit(Op::ConstInt(v), *span),
+                Err(msg) => diagnostics.push(Diagnostic::new(
+                    format!("failed to emit loop index increment: {msg}"),
+                    *span,
+                    Severity::Error,
+                )),
+            }
             b.emit(Op::Add, *span);
             b.emit(Op::Assign(*index_symbol), *span);
             b.emit(Op::Jump(loop_start), *span);
@@ -625,8 +640,7 @@ fn emit_expr(
             let hir_ty = model.types.get(&id).cloned().unwrap_or(Type::Unknown);
 
             match emit_int_const(raw, &hir_ty) {
-                Ok(IntConst::Signed(v)) => b.emit(Op::ConstI128(v), span),
-                Ok(IntConst::Unsigned(v)) => b.emit(Op::ConstU128(v), span),
+                Ok(v) => b.emit(Op::ConstInt(v), span),
                 Err(msg) => {
                     diagnostics.push(Diagnostic::new(
                         format!("integer literal `{raw}`: {msg}"),
@@ -1325,8 +1339,29 @@ fn emit_numeric_one_const(
     diagnostics: &mut Diagnostics,
 ) {
     match ty {
-        Type::Int { signed: true, .. } => b.emit(Op::ConstI128(1), span),
-        Type::Int { signed: false, .. } => b.emit(Op::ConstU128(1), span),
+        Type::Int { signed, bits } => {
+            let Some(tag) = int_tag_from_parts(*signed, *bits) else {
+                diagnostics.push(Diagnostic::new(
+                    format!("unsupported integer width `{bits}` in emitter"),
+                    span,
+                    Severity::Error,
+                ));
+                return;
+            };
+            let value = if *signed {
+                TypedInt::try_from_signed(tag, 1)
+            } else {
+                TypedInt::try_from_unsigned(tag, 1)
+            };
+            match value {
+                Ok(v) => b.emit(Op::ConstInt(v), span),
+                Err(msg) => diagnostics.push(Diagnostic::new(
+                    format!("failed to emit integer constant `1`: {msg}"),
+                    span,
+                    Severity::Error,
+                )),
+            }
+        }
         Type::Float { .. } => b.emit(Op::ConstFloat(1.0), span),
         _ => diagnostics.push(Diagnostic::new(
             "increment/decrement requires numeric type in emitter",
@@ -1337,12 +1372,48 @@ fn emit_numeric_one_const(
 }
 
 /// Integer literals use the semantic type produced by analyze; fallback matches checker inference ladder.
-fn emit_int_const(raw: &str, hir_ty: &Type) -> Result<IntConst, &'static str> {
+fn emit_int_const(raw: &str, hir_ty: &Type) -> Result<TypedInt, &'static str> {
     match hir_ty {
-        Type::Unknown => fallback_inference_int(raw),
-        ty @ Type::Int { .. } => bytecode_int_from_checked_literal(raw, ty),
+        Type::Unknown => {
+            let v = fallback_inference_int(raw)?;
+            match v {
+                IntConst::Signed(i) => TypedInt::try_from_signed(IntTag::I128, i),
+                IntConst::Unsigned(u) => TypedInt::try_from_unsigned(IntTag::U128, u),
+            }
+        }
+        Type::Int { signed, bits } => {
+            let tag = int_tag_from_parts(*signed, *bits).ok_or("unsupported integer width")?;
+            let v = bytecode_int_from_checked_literal(raw, hir_ty)?;
+            match v {
+                IntConst::Signed(i) => TypedInt::try_from_signed(tag, i),
+                IntConst::Unsigned(u) => TypedInt::try_from_unsigned(tag, u),
+            }
+        }
         // Defensive fallback if analyzer and HIR ever diverge:
-        _ => fallback_inference_int(raw),
+        _ => {
+            let v = fallback_inference_int(raw)?;
+            match v {
+                IntConst::Signed(i) => TypedInt::try_from_signed(IntTag::I128, i),
+                IntConst::Unsigned(u) => TypedInt::try_from_unsigned(IntTag::U128, u),
+            }
+        }
+    }
+}
+
+fn int_tag_from_parts(signed: bool, bits: u16) -> Option<IntTag> {
+    match (signed, bits) {
+        (true, 8) => Some(IntTag::I8),
+        (true, 16) => Some(IntTag::I16),
+        (true, 32) => Some(IntTag::I32),
+        (true, 64) => Some(IntTag::I64),
+        (true, 128) => Some(IntTag::I128),
+        (false, 1) => Some(IntTag::U1),
+        (false, 8) => Some(IntTag::U8),
+        (false, 16) => Some(IntTag::U16),
+        (false, 32) => Some(IntTag::U32),
+        (false, 64) => Some(IntTag::U64),
+        (false, 128) => Some(IntTag::U128),
+        _ => None,
     }
 }
 
@@ -1481,5 +1552,57 @@ mod tests {
                 .iter()
                 .any(|op| matches!(op, Op::MakeTuple(2)))
         }));
+    }
+
+    #[test]
+    fn emits_typed_int_const_for_signed_annotation() {
+        let src = "x: i32 = 42";
+        let lex_output = lex(FileId::from_u32(37), src);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(37), src.len() as u32, lex_output.tokens);
+        assert!(!parser_diagnostics.has_errors());
+        let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
+        assert!(!lowering_diagnostics.has_errors());
+        let (model, analysis_diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!analysis_diagnostics.has_errors());
+        let (chunk, compile_diagnostics) = compile_program(&hir, &model);
+        assert!(!compile_diagnostics.has_errors());
+
+        let typed_consts = chunk
+            .code
+            .iter()
+            .filter_map(|op| match op {
+                Op::ConstInt(v) => Some(*v),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!typed_consts.is_empty());
+        assert!(typed_consts.iter().any(|v| v.type_name() == "i32"));
+    }
+
+    #[test]
+    fn emits_typed_int_const_for_unsigned_annotation() {
+        let src = "x: u16 = 42";
+        let lex_output = lex(FileId::from_u32(38), src);
+        let (ast, parser_diagnostics) =
+            parse(FileId::from_u32(38), src.len() as u32, lex_output.tokens);
+        assert!(!parser_diagnostics.has_errors());
+        let (hir, mut symbols, lowering_diagnostics) = lower(&ast);
+        assert!(!lowering_diagnostics.has_errors());
+        let (model, analysis_diagnostics) = analyze(&hir, &mut symbols);
+        assert!(!analysis_diagnostics.has_errors());
+        let (chunk, compile_diagnostics) = compile_program(&hir, &model);
+        assert!(!compile_diagnostics.has_errors());
+
+        let typed_consts = chunk
+            .code
+            .iter()
+            .filter_map(|op| match op {
+                Op::ConstInt(v) => Some(*v),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!typed_consts.is_empty());
+        assert!(typed_consts.iter().any(|v| v.type_name() == "u16"));
     }
 }

@@ -212,8 +212,17 @@ impl<'a> Vm<'a> {
 
     fn step_op(&mut self, op: &Op, span: Span) -> Result<(), Diagnostic> {
         match op {
-            Op::ConstI128(n) => self.stack.push(Value::Int128(*n)),
-            Op::ConstU128(n) => self.stack.push(Value::UInt128(*n)),
+            Op::ConstI128(n) => {
+                let v = super::int::TypedInt::try_from_signed(super::int::IntTag::I128, *n)
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+                self.stack.push(Value::Int(v));
+            }
+            Op::ConstU128(n) => {
+                let v = super::int::TypedInt::try_from_unsigned(super::int::IntTag::U128, *n)
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+                self.stack.push(Value::Int(v));
+            }
+            Op::ConstInt(n) => self.stack.push(Value::Int(*n)),
             Op::ConstBool(b) => self.stack.push(Value::Bool(*b)),
             Op::ConstStr(s) => self.stack.push(Value::Str(s.clone())),
             Op::ConstFloat(f) => self.stack.push(Value::Float(*f)),
@@ -266,6 +275,58 @@ impl<'a> Vm<'a> {
                 let start = self.pop_one(span)?;
                 let mut items = Vec::new();
                 match (start, end) {
+                    (Value::Int(s), Value::Int(e)) => {
+                        if s.tag() != e.tag() {
+                            return Err(Diagnostic::new(
+                                "range bounds must be same integer type",
+                                span,
+                                Severity::Error,
+                            ));
+                        }
+                        match (s.payload(), e.payload()) {
+                            (
+                                super::int::IntPayload::Signed(ss),
+                                super::int::IntPayload::Signed(ee),
+                            ) => {
+                                let end_bound = if *inclusive { ee.saturating_add(1) } else { ee };
+                                if ss < end_bound {
+                                    let mut i = ss;
+                                    while i < end_bound {
+                                        let v = super::int::TypedInt::try_from_signed(s.tag(), i)
+                                            .map_err(|msg| {
+                                                Diagnostic::new(msg, span, Severity::Error)
+                                            })?;
+                                        items.push(Value::Int(v));
+                                        i = i.saturating_add(1);
+                                    }
+                                }
+                            }
+                            (
+                                super::int::IntPayload::Unsigned(ss),
+                                super::int::IntPayload::Unsigned(ee),
+                            ) => {
+                                let end_bound = if *inclusive { ee.saturating_add(1) } else { ee };
+                                if ss < end_bound {
+                                    let mut i = ss;
+                                    while i < end_bound {
+                                        let v = super::int::TypedInt::try_from_unsigned(s.tag(), i)
+                                            .map_err(|msg| {
+                                                Diagnostic::new(msg, span, Severity::Error)
+                                            })?;
+                                        items.push(Value::Int(v));
+                                        i = i.saturating_add(1);
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(Diagnostic::new(
+                                    "range bounds must be same integer signedness",
+                                    span,
+                                    Severity::Error,
+                                ));
+                            }
+                        }
+                    }
                     (Value::Int128(s), Value::Int128(e)) => {
                         let end_bound = if *inclusive { e.saturating_add(1) } else { e };
                         if s < end_bound {
@@ -381,7 +442,9 @@ impl<'a> Vm<'a> {
                                 Severity::Error,
                             )
                         })?;
-                        self.stack.push(Value::Int128(n));
+                        let v = super::int::TypedInt::try_from_signed(super::int::IntTag::I128, n)
+                            .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+                        self.stack.push(Value::Int(v));
                     }
                     other => {
                         return Err(Diagnostic::new(
@@ -493,7 +556,14 @@ impl<'a> Vm<'a> {
                     } => {
                         let value = match field.as_str() {
                             "message" => Value::Str(message),
-                            "code" => Value::Int128(i128::from(code)),
+                            "code" => {
+                                let v = super::int::TypedInt::try_from_signed(
+                                    super::int::IntTag::I32,
+                                    i128::from(code),
+                                )
+                                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+                                Value::Int(v)
+                            }
                             "origin" => Value::Str(origin),
                             "cause" => cause.map(|c| *c).unwrap_or(Value::Null),
                             _ => {
@@ -1017,6 +1087,10 @@ impl<'a> Vm<'a> {
                 let rhs = self.pop_one(span)?;
                 let lhs = self.pop_one(span)?;
                 let out = match (lhs, rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Int(
+                        a.checked_div(b)
+                            .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+                    ),
                     (Value::Int128(a), Value::Int128(b)) => {
                         if b == 0 {
                             return Err(Diagnostic::new("division by zero", span, Severity::Error));
@@ -1046,6 +1120,10 @@ impl<'a> Vm<'a> {
                 let rhs = self.pop_one(span)?;
                 let lhs = self.pop_one(span)?;
                 let out = match (lhs, rhs) {
+                    (Value::Int(a), Value::Int(b)) => Value::Int(
+                        a.checked_mod(b)
+                            .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+                    ),
                     (Value::Int128(a), Value::Int128(b)) => {
                         if b == 0 {
                             return Err(Diagnostic::new("modulo by zero", span, Severity::Error));
@@ -1337,6 +1415,9 @@ impl<'a> Vm<'a> {
     fn apply_neg(&mut self, span: Span) -> Result<(), Diagnostic> {
         let v = self.pop_one(span)?;
         let out = match v {
+            Value::Int(i) => Value::Int(i.checked_neg().map_err(|msg| {
+                Diagnostic::new(msg, span, Severity::Error)
+            })?),
             Value::Int128(i) => Value::Int128(i.checked_neg().ok_or_else(|| {
                 Diagnostic::new("integer overflow in unary negation", span, Severity::Error)
             })?),
@@ -1384,6 +1465,13 @@ impl<'a> Vm<'a> {
     fn apply_bit_not(&mut self, span: Span) -> Result<(), Diagnostic> {
         let v = self.pop_one(span)?;
         match v {
+            Value::Int(i) => {
+                let out = i
+                    .bit_not()
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+                self.stack.push(Value::Int(out));
+                Ok(())
+            }
             Value::Int128(i) => {
                 self.stack.push(Value::Int128(!i));
                 Ok(())
@@ -1413,6 +1501,52 @@ impl<'a> Vm<'a> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         let out = match (lhs, rhs) {
+            (Value::Int(a), Value::Int(b)) => {
+                if a.tag() != b.tag() {
+                    return Err(Diagnostic::new(
+                        "integer type mismatch",
+                        span,
+                        Severity::Error,
+                    ));
+                }
+                let out = match (a.payload(), b.payload()) {
+                    (super::int::IntPayload::Signed(x), super::int::IntPayload::Signed(y)) => {
+                        let v = signed_int(x, y).ok_or_else(|| {
+                            Diagnostic::new(
+                                "integer overflow or invalid operation",
+                                span,
+                                Severity::Error,
+                            )
+                        })?;
+                        super::int::TypedInt::try_from_signed(a.tag(), v).map_err(|msg| {
+                            Diagnostic::new(msg, span, Severity::Error)
+                        })?
+                    }
+                    (
+                        super::int::IntPayload::Unsigned(x),
+                        super::int::IntPayload::Unsigned(y),
+                    ) => {
+                        let v = unsigned_int(x, y).ok_or_else(|| {
+                            Diagnostic::new(
+                                "integer overflow or invalid operation",
+                                span,
+                                Severity::Error,
+                            )
+                        })?;
+                        super::int::TypedInt::try_from_unsigned(a.tag(), v).map_err(|msg| {
+                            Diagnostic::new(msg, span, Severity::Error)
+                        })?
+                    }
+                    _ => {
+                        return Err(Diagnostic::new(
+                            "integer payload mismatch",
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                };
+                Value::Int(out)
+            }
             (Value::Int128(a), Value::Int128(b)) => {
                 let r = signed_int(a, b).ok_or_else(|| {
                     Diagnostic::new(
@@ -1455,6 +1589,10 @@ impl<'a> Vm<'a> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         let out = match (lhs, rhs) {
+            (Value::Int(a), Value::Int(b)) => Value::Int(
+                a.checked_div(b)
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            ),
             (Value::Int128(a), Value::Int128(b)) => {
                 if b == 0 {
                     return Err(Diagnostic::new("division by zero", span, Severity::Error));
@@ -1492,6 +1630,10 @@ impl<'a> Vm<'a> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         let out = match (lhs, rhs) {
+            (Value::Int(a), Value::Int(b)) => Value::Int(
+                a.checked_mod(b)
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            ),
             (Value::Int128(a), Value::Int128(b)) => {
                 if b == 0 {
                     return Err(Diagnostic::new("modulo by zero", span, Severity::Error));
@@ -1520,6 +1662,10 @@ impl<'a> Vm<'a> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         let out = match (lhs, rhs) {
+            (Value::Int(base), Value::Int(exp)) => Value::Int(
+                base.checked_pow(exp)
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            ),
             (Value::Int128(base), Value::Int128(exp)) => {
                 let exp_u32 = u32::try_from(exp).map_err(|_| {
                     Diagnostic::new("integer exponent out of range", span, Severity::Error)
@@ -1556,7 +1702,15 @@ impl<'a> Vm<'a> {
     ) -> Result<(), Diagnostic> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
+        if let Some(ord) = compare_integer_values(&lhs, &rhs) {
+            let ord = ord.map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+            self.stack.push(Value::Bool(predicate(ord)));
+            return Ok(());
+        }
         let ord = match (lhs, rhs) {
+            (Value::Int(a), Value::Int(b)) => a
+                .cmp_same_type(b)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
             (Value::Int128(a), Value::Int128(b)) => a.cmp(&b),
             (Value::UInt128(a), Value::UInt128(b)) => a.cmp(&b),
             (Value::Float(a), Value::Float(b)) => a.partial_cmp(&b).ok_or_else(|| {
@@ -1580,6 +1734,11 @@ impl<'a> Vm<'a> {
     fn apply_eq(&mut self, span: Span) -> Result<(), Diagnostic> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
+        if let Some(ord) = compare_integer_values(&lhs, &rhs) {
+            let ord = ord.map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+            self.stack.push(Value::Bool(ord == std::cmp::Ordering::Equal));
+            return Ok(());
+        }
         self.stack.push(Value::Bool(lhs == rhs));
         Ok(())
     }
@@ -1587,6 +1746,11 @@ impl<'a> Vm<'a> {
     fn apply_ne(&mut self, span: Span) -> Result<(), Diagnostic> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
+        if let Some(ord) = compare_integer_values(&lhs, &rhs) {
+            let ord = ord.map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+            self.stack.push(Value::Bool(ord != std::cmp::Ordering::Equal));
+            return Ok(());
+        }
         self.stack.push(Value::Bool(lhs != rhs));
         Ok(())
     }
@@ -1616,6 +1780,35 @@ impl<'a> Vm<'a> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         match (lhs, rhs) {
+            (Value::Int(a), Value::Int(b)) => {
+                if a.tag() != b.tag() {
+                    return Err(Diagnostic::new(
+                        "integer type mismatch",
+                        span,
+                        Severity::Error,
+                    ));
+                }
+                let out = match (a.payload(), b.payload()) {
+                    (super::int::IntPayload::Signed(x), super::int::IntPayload::Signed(y)) => {
+                        super::int::TypedInt::try_from_signed(a.tag(), signed_op(x, y))
+                            .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?
+                    }
+                    (
+                        super::int::IntPayload::Unsigned(x),
+                        super::int::IntPayload::Unsigned(y),
+                    ) => super::int::TypedInt::try_from_unsigned(a.tag(), unsigned_op(x, y))
+                        .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+                    _ => {
+                        return Err(Diagnostic::new(
+                            "integer payload mismatch",
+                            span,
+                            Severity::Error,
+                        ));
+                    }
+                };
+                self.stack.push(Value::Int(out));
+                Ok(())
+            }
             (Value::Int128(a), Value::Int128(b)) => {
                 self.stack.push(Value::Int128(signed_op(a, b)));
                 Ok(())
@@ -1636,6 +1829,13 @@ impl<'a> Vm<'a> {
         let rhs = self.pop_one(span)?;
         let lhs = self.pop_one(span)?;
         match (lhs, rhs) {
+            (Value::Int(a), Value::Int(b)) => {
+                let out = a
+                    .checked_shift(b, is_left)
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+                self.stack.push(Value::Int(out));
+                Ok(())
+            }
             (Value::Int128(a), Value::Int128(b)) => {
                 let shift = u32::try_from(b).map_err(|_| {
                     Diagnostic::new("shift amount must be non-negative", span, Severity::Error)
@@ -5788,31 +5988,23 @@ fn dispatch_integer_method(name: &str, args: &[Value], span: Span) -> Result<Val
         .strip_prefix("__meth_is_")
         .or_else(|| name.strip_prefix("__meth_iu_"))
         .unwrap_or(name);
-    let signed = matches!(recv, Value::Int128(_));
-    let unsigned = matches!(recv, Value::UInt128(_));
-    if !signed && !unsigned {
+    let Some(recv_int) = value_to_typed_int(recv) else {
         return Err(Diagnostic::new(
             "integer method receiver must be integer",
             span,
             Severity::Error,
         ));
-    }
-    let ri = match recv {
-        Value::Int128(v) => *v,
-        Value::UInt128(v) => *v as i128,
-        _ => 0,
     };
-    let ru = match recv {
-        Value::UInt128(v) => *v,
-        Value::Int128(v) => *v as u128,
-        _ => 0,
-    };
-    let ai = |idx: usize| -> Result<i128, Diagnostic> {
+
+    let arg_int = |idx: usize| -> Result<super::int::TypedInt, Diagnostic> {
         match tail.get(idx) {
-            Some(Value::Int128(v)) => Ok(*v),
-            Some(Value::UInt128(v)) => i128::try_from(*v).map_err(|_| {
-                Diagnostic::new("integer argument out of range", span, Severity::Error)
-            }),
+            Some(v) => {
+                let raw = value_to_typed_int(v).ok_or_else(|| {
+                    Diagnostic::new("expected integer argument", span, Severity::Error)
+                })?;
+                cast_typed_int_to_tag(raw, recv_int.tag())
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))
+            }
             _ => Err(Diagnostic::new(
                 "expected integer argument",
                 span,
@@ -5820,37 +6012,25 @@ fn dispatch_integer_method(name: &str, args: &[Value], span: Span) -> Result<Val
             )),
         }
     };
-    let au = |idx: usize| -> Result<u128, Diagnostic> {
-        match tail.get(idx) {
-            Some(Value::UInt128(v)) => Ok(*v),
-            Some(Value::Int128(v)) if *v >= 0 => Ok(*v as u128),
-            _ => Err(Diagnostic::new(
-                "expected unsigned integer argument",
-                span,
-                Severity::Error,
-            )),
+
+    let typed_zero = || -> Value {
+        match recv_int.payload() {
+            super::int::IntPayload::Signed(_) => Value::Int(
+                super::int::TypedInt::try_from_signed(recv_int.tag(), 0).expect("zero signed"),
+            ),
+            super::int::IntPayload::Unsigned(_) => Value::Int(
+                super::int::TypedInt::try_from_unsigned(recv_int.tag(), 0)
+                    .expect("zero unsigned"),
+            ),
         }
     };
-    let ret_same = |v: i128| {
-        if signed {
-            Value::Int128(v)
-        } else {
-            Value::UInt128(v as u128)
-        }
-    };
-    let ret_same_u = |v: u128| {
-        if signed {
-            Value::Int128(v as i128)
-        } else {
-            Value::UInt128(v)
-        }
-    };
+
     let checked = |ok: Option<Value>, label: &str| -> Value {
         if let Some(v) = ok {
             Value::Tuple(vec![v, Value::Null])
         } else {
             Value::Tuple(vec![
-                ret_same(0),
+                typed_zero(),
                 Value::Err {
                     message: format!("{label} overflow"),
                     code: 1,
@@ -5860,167 +6040,235 @@ fn dispatch_integer_method(name: &str, args: &[Value], span: Span) -> Result<Val
             ])
         }
     };
+
     let out = match method {
-        "add" => {
-            if signed {
-                ret_same(ri + ai(0)?)
-            } else {
-                ret_same_u(ru + au(0)?)
-            }
-        }
-        "sub" => {
-            if signed {
-                ret_same(ri - ai(0)?)
-            } else {
-                ret_same_u(ru - au(0)?)
-            }
-        }
-        "mul" => {
-            if signed {
-                ret_same(ri * ai(0)?)
-            } else {
-                ret_same_u(ru * au(0)?)
-            }
-        }
-        "div" => {
-            if signed {
-                ret_same(ri / ai(0)?)
-            } else {
-                ret_same_u(ru / au(0)?)
-            }
-        }
-        "mod" => {
-            if signed {
-                ret_same(ri % ai(0)?)
-            } else {
-                ret_same_u(ru % au(0)?)
-            }
-        }
-        "neg" => ret_same(-ri),
-        "abs" => ret_same(ri.abs()),
-        "and" => ret_same_u(ru & au(0)?),
-        "or" => ret_same_u(ru | au(0)?),
-        "xor" => ret_same_u(ru ^ au(0)?),
-        "not" => ret_same_u(!ru),
-        "shl" => ret_same_u(ru << (au(0)? as u32)),
-        "shr" => ret_same_u(ru >> (au(0)? as u32)),
-        "rotl" => ret_same_u(ru.rotate_left(au(0)? as u32)),
-        "rotr" => ret_same_u(ru.rotate_right(au(0)? as u32)),
-        "eq" => Value::Bool(if signed { ri == ai(0)? } else { ru == au(0)? }),
-        "ne" => Value::Bool(if signed { ri != ai(0)? } else { ru != au(0)? }),
-        "lt" => Value::Bool(if signed { ri < ai(0)? } else { ru < au(0)? }),
-        "le" => Value::Bool(if signed { ri <= ai(0)? } else { ru <= au(0)? }),
-        "gt" => Value::Bool(if signed { ri > ai(0)? } else { ru > au(0)? }),
-        "ge" => Value::Bool(if signed { ri >= ai(0)? } else { ru >= au(0)? }),
+        "add" => Value::Int(
+            recv_int
+                .checked_add(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "sub" => Value::Int(
+            recv_int
+                .checked_sub(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "mul" => Value::Int(
+            recv_int
+                .checked_mul(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "div" => Value::Int(
+            recv_int
+                .checked_div(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "mod" => Value::Int(
+            recv_int
+                .checked_mod(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "neg" => Value::Int(
+            recv_int
+                .checked_neg()
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "abs" => match recv_int.payload() {
+            super::int::IntPayload::Signed(v) => Value::Int(
+                super::int::TypedInt::try_from_signed(recv_int.tag(), v.abs())
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            ),
+            super::int::IntPayload::Unsigned(_) => Value::Int(recv_int),
+        },
+        "and" => Value::Int(
+            recv_int
+                .checked_bitwise_and(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "or" => Value::Int(
+            recv_int
+                .checked_bitwise_or(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "xor" => Value::Int(
+            recv_int
+                .checked_bitwise_xor(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "not" => Value::Int(
+            recv_int
+                .bit_not()
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "shl" => Value::Int(
+            recv_int
+                .checked_shift(arg_int(0)?, true)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "shr" => Value::Int(
+            recv_int
+                .checked_shift(arg_int(0)?, false)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+        ),
+        "rotl" => Value::Int(int_rotate(recv_int, arg_int(0)?, true).map_err(|msg| {
+            Diagnostic::new(msg, span, Severity::Error)
+        })?),
+        "rotr" => Value::Int(int_rotate(recv_int, arg_int(0)?, false).map_err(|msg| {
+            Diagnostic::new(msg, span, Severity::Error)
+        })?),
+        "eq" => Value::Bool(
+            recv_int
+                .cmp_same_type(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?
+                == std::cmp::Ordering::Equal,
+        ),
+        "ne" => Value::Bool(
+            recv_int
+                .cmp_same_type(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?
+                != std::cmp::Ordering::Equal,
+        ),
+        "lt" => Value::Bool(
+            recv_int
+                .cmp_same_type(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?
+                == std::cmp::Ordering::Less,
+        ),
+        "le" => Value::Bool(matches!(
+            recv_int
+                .cmp_same_type(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            std::cmp::Ordering::Less | std::cmp::Ordering::Equal
+        )),
+        "gt" => Value::Bool(
+            recv_int
+                .cmp_same_type(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?
+                == std::cmp::Ordering::Greater,
+        ),
+        "ge" => Value::Bool(matches!(
+            recv_int
+                .cmp_same_type(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
+        )),
         "cmp" => {
-            let ord = if signed {
-                ri.cmp(&ai(0)?)
-            } else {
-                ru.cmp(&au(0)?)
-            };
+            let ord = recv_int
+                .cmp_same_type(arg_int(0)?)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
             let v = match ord {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
                 std::cmp::Ordering::Greater => 1,
             };
-            Value::Int128(v)
+            Value::int_i128(v)
         }
         "min" => {
-            if signed {
-                ret_same(ri.min(ai(0)?))
+            let rhs = arg_int(0)?;
+            let ord = recv_int
+                .cmp_same_type(rhs)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+            Value::Int(if ord == std::cmp::Ordering::Greater {
+                rhs
             } else {
-                ret_same_u(ru.min(au(0)?))
-            }
+                recv_int
+            })
         }
         "max" => {
-            if signed {
-                ret_same(ri.max(ai(0)?))
+            let rhs = arg_int(0)?;
+            let ord = recv_int
+                .cmp_same_type(rhs)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?;
+            Value::Int(if ord == std::cmp::Ordering::Less {
+                rhs
             } else {
-                ret_same_u(ru.max(au(0)?))
-            }
+                recv_int
+            })
         }
         "clamp" => {
-            if signed {
-                ret_same(ri.clamp(ai(0)?, ai(1)?))
+            let lo = arg_int(0)?;
+            let hi = arg_int(1)?;
+            let below = recv_int
+                .cmp_same_type(lo)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?
+                == std::cmp::Ordering::Less;
+            let above = recv_int
+                .cmp_same_type(hi)
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?
+                == std::cmp::Ordering::Greater;
+            Value::Int(if below {
+                lo
+            } else if above {
+                hi
             } else {
-                ret_same_u(ru.clamp(au(0)?, au(1)?))
-            }
+                recv_int
+            })
         }
-        "is_zero" => Value::Bool(if signed { ri == 0 } else { ru == 0 }),
-        "is_even" => Value::Bool(if signed { ri % 2 == 0 } else { ru % 2 == 0 }),
-        "is_odd" => Value::Bool(if signed { ri % 2 != 0 } else { ru % 2 != 0 }),
-        "checked_add" => checked(
-            if signed {
-                ri.checked_add(ai(0)?).map(Value::Int128)
-            } else {
-                ru.checked_add(au(0)?).map(Value::UInt128)
-            },
-            "checked_add",
-        ),
-        "checked_sub" => checked(
-            if signed {
-                ri.checked_sub(ai(0)?).map(Value::Int128)
-            } else {
-                ru.checked_sub(au(0)?).map(Value::UInt128)
-            },
-            "checked_sub",
-        ),
-        "checked_mul" => checked(
-            if signed {
-                ri.checked_mul(ai(0)?).map(Value::Int128)
-            } else {
-                ru.checked_mul(au(0)?).map(Value::UInt128)
-            },
-            "checked_mul",
-        ),
-        "checked_div" => checked(
-            if signed {
-                ri.checked_div(ai(0)?).map(Value::Int128)
-            } else {
-                ru.checked_div(au(0)?).map(Value::UInt128)
-            },
-            "checked_div",
-        ),
-        "wrapping_add" => {
-            if signed {
-                ret_same(ri.wrapping_add(ai(0)?))
-            } else {
-                ret_same_u(ru.wrapping_add(au(0)?))
-            }
-        }
-        "wrapping_sub" => {
-            if signed {
-                ret_same(ri.wrapping_sub(ai(0)?))
-            } else {
-                ret_same_u(ru.wrapping_sub(au(0)?))
-            }
-        }
-        "saturating_add" => {
-            if signed {
-                ret_same(ri.saturating_add(ai(0)?))
-            } else {
-                ret_same_u(ru.saturating_add(au(0)?))
-            }
-        }
-        "saturating_sub" => {
-            if signed {
-                ret_same(ri.saturating_sub(ai(0)?))
-            } else {
-                ret_same_u(ru.saturating_sub(au(0)?))
-            }
-        }
+        "is_zero" => Value::Bool(match recv_int.payload() {
+            super::int::IntPayload::Signed(v) => v == 0,
+            super::int::IntPayload::Unsigned(v) => v == 0,
+        }),
+        "is_even" => Value::Bool(match recv_int.payload() {
+            super::int::IntPayload::Signed(v) => v % 2 == 0,
+            super::int::IntPayload::Unsigned(v) => v % 2 == 0,
+        }),
+        "is_odd" => Value::Bool(match recv_int.payload() {
+            super::int::IntPayload::Signed(v) => v % 2 != 0,
+            super::int::IntPayload::Unsigned(v) => v % 2 != 0,
+        }),
+        "checked_add" => checked(recv_int.checked_add(arg_int(0)?).ok().map(Value::Int), "checked_add"),
+        "checked_sub" => checked(recv_int.checked_sub(arg_int(0)?).ok().map(Value::Int), "checked_sub"),
+        "checked_mul" => checked(recv_int.checked_mul(arg_int(0)?).ok().map(Value::Int), "checked_mul"),
+        "checked_div" => checked(recv_int.checked_div(arg_int(0)?).ok().map(Value::Int), "checked_div"),
+        "wrapping_add" => Value::Int(int_wrapping_add(recv_int, arg_int(0)?).map_err(|msg| {
+            Diagnostic::new(msg, span, Severity::Error)
+        })?),
+        "wrapping_sub" => Value::Int(int_wrapping_sub(recv_int, arg_int(0)?).map_err(|msg| {
+            Diagnostic::new(msg, span, Severity::Error)
+        })?),
+        "saturating_add" => Value::Int(int_saturating_add(recv_int, arg_int(0)?).map_err(|msg| {
+            Diagnostic::new(msg, span, Severity::Error)
+        })?),
+        "saturating_sub" => Value::Int(int_saturating_sub(recv_int, arg_int(0)?).map_err(|msg| {
+            Diagnostic::new(msg, span, Severity::Error)
+        })?),
         "to_i32" => {
-            Value::Int128(i128::from(i32::try_from(ri).map_err(|_| {
-                Diagnostic::new("to_i32 overflow", span, Severity::Error)
-            })?))
+            let raw = recv
+                .as_i128()
+                .ok_or_else(|| Diagnostic::new("to_i32 overflow", span, Severity::Error))?;
+            Value::Int(
+                super::int::TypedInt::try_from_signed(
+                    super::int::IntTag::I32,
+                    i128::from(
+                        i32::try_from(raw)
+                            .map_err(|_| Diagnostic::new("to_i32 overflow", span, Severity::Error))?,
+                    ),
+                )
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            )
         }
         "to_u32" => {
-            Value::UInt128(u128::from(u32::try_from(ru).map_err(|_| {
-                Diagnostic::new("to_u32 overflow", span, Severity::Error)
-            })?))
+            let raw = recv
+                .as_u128()
+                .ok_or_else(|| Diagnostic::new("to_u32 overflow", span, Severity::Error))?;
+            Value::Int(
+                super::int::TypedInt::try_from_unsigned(
+                    super::int::IntTag::U32,
+                    u128::from(
+                        u32::try_from(raw)
+                            .map_err(|_| Diagnostic::new("to_u32 overflow", span, Severity::Error))?,
+                    ),
+                )
+                .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            )
         }
-        "to_f32" => Value::Float(if signed { ri as f64 } else { ru as f64 }),
-        "to_bool" => Value::Bool(if signed { ri != 0 } else { ru != 0 }),
+        "to_f32" => Value::Float(match recv_int.payload() {
+            super::int::IntPayload::Signed(v) => v as f64,
+            super::int::IntPayload::Unsigned(v) => v as f64,
+        }),
+        "to_bool" => Value::Bool(match recv_int.payload() {
+            super::int::IntPayload::Signed(v) => v != 0,
+            super::int::IntPayload::Unsigned(v) => v != 0,
+        }),
         "to_str" => Value::Str(recv.display_for_print()),
         _ => {
             return Err(Diagnostic::new(
@@ -6078,7 +6326,7 @@ fn dispatch_float_method(name: &str, args: &[Value], span: Span) -> Result<Value
             } else {
                 0
             };
-            Value::Int128(cmp)
+            Value::int_i128(cmp)
         }
         "abs" => Value::Float(r.abs()),
         "sqrt" => Value::Float(r.sqrt()),
@@ -6111,7 +6359,10 @@ fn dispatch_float_method(name: &str, args: &[Value], span: Span) -> Result<Value
             if *r < i32::MIN as f64 || *r > i32::MAX as f64 {
                 return Err(Diagnostic::new("to_i32 overflow", span, Severity::Error));
             }
-            Value::Int128(i128::from(*r as i32))
+            Value::Int(
+                super::int::TypedInt::try_from_signed(super::int::IntTag::I32, i128::from(*r as i32))
+                    .map_err(|msg| Diagnostic::new(msg, span, Severity::Error))?,
+            )
         }
         "to_str" => Value::Str(recv.display_for_print()),
         _ => {
@@ -6245,6 +6496,15 @@ fn dispatch_str_method(name: &str, args: &[Value], span: Span) -> Result<Value, 
     };
     let aidx = |idx: usize| -> Result<usize, Diagnostic> {
         match tail.get(idx) {
+            Some(Value::Int(v)) => match v.payload() {
+                super::int::IntPayload::Unsigned(u) => usize::try_from(u).map_err(|_| {
+                    Diagnostic::new("index does not fit usize", span, Severity::Error)
+                }),
+                super::int::IntPayload::Signed(i) if i >= 0 => usize::try_from(i).map_err(|_| {
+                    Diagnostic::new("index does not fit usize", span, Severity::Error)
+                }),
+                _ => Err(Diagnostic::new("index must be non-negative", span, Severity::Error)),
+            },
             Some(Value::UInt128(v)) => usize::try_from(*v)
                 .map_err(|_| Diagnostic::new("index does not fit usize", span, Severity::Error)),
             Some(Value::Int128(v)) if *v >= 0 => usize::try_from(*v)
@@ -6368,6 +6628,13 @@ fn dispatch_array_method(name: &str, args: &[Value], span: Span) -> Result<Value
     let method = name.strip_prefix("__meth_a_").unwrap_or(name);
     let aidx = |idx: usize| -> Result<usize, Diagnostic> {
         match tail.get(idx) {
+            Some(Value::Int(v)) => match v.payload() {
+                super::int::IntPayload::Unsigned(u) => usize::try_from(u)
+                    .map_err(|_| Diagnostic::new("index too large", span, Severity::Error)),
+                super::int::IntPayload::Signed(i) if i >= 0 => usize::try_from(i)
+                    .map_err(|_| Diagnostic::new("index too large", span, Severity::Error)),
+                _ => Err(Diagnostic::new("index must be non-negative", span, Severity::Error)),
+            },
             Some(Value::UInt128(v)) => usize::try_from(*v)
                 .map_err(|_| Diagnostic::new("index too large", span, Severity::Error)),
             Some(Value::Int128(v)) if *v >= 0 => usize::try_from(*v)
@@ -6955,6 +7222,13 @@ fn builtin_type_name(v: &Value) -> &'static str {
     match v {
         Value::Int128(_) => "int",
         Value::UInt128(_) => "uint",
+        Value::Int(v) => {
+            if v.tag().is_signed() {
+                "int"
+            } else {
+                "uint"
+            }
+        }
         Value::Bool(_) => "bool",
         Value::Str(_) => "str",
         Value::Float(_) => "float",
@@ -6976,6 +7250,7 @@ fn canonical_type_name(v: &Value) -> String {
     match v {
         Value::Int128(_) => "i128".to_string(),
         Value::UInt128(_) => "u128".to_string(),
+        Value::Int(v) => v.type_name().to_string(),
         Value::Bool(_) => "bool".to_string(),
         Value::Str(_) => "str".to_string(),
         Value::Float(_) => "f64".to_string(),
@@ -7022,6 +7297,10 @@ fn is_truthy(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int128(i) => *i != 0,
         Value::UInt128(u) => *u != 0,
+        Value::Int(v) => match v.payload() {
+            super::int::IntPayload::Signed(i) => i != 0,
+            super::int::IntPayload::Unsigned(u) => u != 0,
+        },
         Value::Float(f) => *f != 0.0,
         Value::Str(s) => !s.is_empty(),
         Value::Char(c) => *c != '\0',
@@ -7039,6 +7318,25 @@ fn is_truthy(v: &Value) -> bool {
 
 fn to_usize_index(value: &Value, span: Span) -> Result<usize, Diagnostic> {
     match value {
+        Value::Int(i) => match i.payload() {
+            super::int::IntPayload::Signed(v) => usize::try_from(v).map_err(|_| {
+                Diagnostic::new(
+                    format!(
+                        "array index must be non-negative usize-compatible int, got {}",
+                        v
+                    ),
+                    span,
+                    Severity::Error,
+                )
+            }),
+            super::int::IntPayload::Unsigned(v) => usize::try_from(v).map_err(|_| {
+                Diagnostic::new(
+                    format!("array index too large for usize: {}", v),
+                    span,
+                    Severity::Error,
+                )
+            }),
+        },
         Value::Int128(i) => usize::try_from(*i).map_err(|_| {
             Diagnostic::new(
                 format!(
@@ -7191,6 +7489,22 @@ fn wrap_err_value(
 
 fn coerce_i32_code(value: &Value, span: Span, fn_name: &str) -> Result<i32, Diagnostic> {
     match value {
+        Value::Int(v) => match v.payload() {
+            super::int::IntPayload::Signed(i) => i32::try_from(i).map_err(|_| {
+                Diagnostic::new(
+                    format!("{fn_name} code is out of i32 range"),
+                    span,
+                    Severity::Error,
+                )
+            }),
+            super::int::IntPayload::Unsigned(u) => i32::try_from(u).map_err(|_| {
+                Diagnostic::new(
+                    format!("{fn_name} code is out of i32 range"),
+                    span,
+                    Severity::Error,
+                )
+            }),
+        },
         Value::Int128(n) => i32::try_from(*n).map_err(|_| {
             Diagnostic::new(
                 format!("{fn_name} code is out of i32 range"),
@@ -7249,6 +7563,22 @@ fn expect_f64_arg(value: &Value, label: &str, span: Span) -> Result<f64, Diagnos
 
 fn expect_i32_like(value: &Value, label: &str, span: Span) -> Result<i32, Diagnostic> {
     match value {
+        Value::Int(v) => match v.payload() {
+            super::int::IntPayload::Signed(i) => i32::try_from(i).map_err(|_| {
+                Diagnostic::new(
+                    format!("{label} is out of i32 range"),
+                    span,
+                    Severity::Error,
+                )
+            }),
+            super::int::IntPayload::Unsigned(u) => i32::try_from(u).map_err(|_| {
+                Diagnostic::new(
+                    format!("{label} is out of i32 range"),
+                    span,
+                    Severity::Error,
+                )
+            }),
+        },
         Value::Int128(v) => i32::try_from(*v).map_err(|_| {
             Diagnostic::new(
                 format!("{label} is out of i32 range"),
@@ -7276,6 +7606,27 @@ fn expect_i32_like(value: &Value, label: &str, span: Span) -> Result<i32, Diagno
 
 fn expect_u64_arg(value: &Value, label: &str, span: Span) -> Result<u64, Diagnostic> {
     match value {
+        Value::Int(v) => match v.payload() {
+            super::int::IntPayload::Unsigned(u) => u64::try_from(u).map_err(|_| {
+                Diagnostic::new(
+                    format!("{label} is out of u64 range"),
+                    span,
+                    Severity::Error,
+                )
+            }),
+            super::int::IntPayload::Signed(i) if i >= 0 => u64::try_from(i).map_err(|_| {
+                Diagnostic::new(
+                    format!("{label} is out of u64 range"),
+                    span,
+                    Severity::Error,
+                )
+            }),
+            _ => Err(Diagnostic::new(
+                format!("{label} must be non-negative"),
+                span,
+                Severity::Error,
+            )),
+        },
         Value::UInt128(v) => u64::try_from(*v).map_err(|_| {
             Diagnostic::new(
                 format!("{label} is out of u64 range"),
@@ -7404,6 +7755,22 @@ fn next_channel_id() -> u64 {
 
 fn expect_i64_like(value: &Value, label: &str, span: Span) -> Result<i64, Diagnostic> {
     match value {
+        Value::Int(v) => match v.payload() {
+            super::int::IntPayload::Signed(i) => i64::try_from(i).map_err(|_| {
+                Diagnostic::new(
+                    format!("{label}: integer out of range for i64"),
+                    span,
+                    Severity::Error,
+                )
+            }),
+            super::int::IntPayload::Unsigned(u) => i64::try_from(u).map_err(|_| {
+                Diagnostic::new(
+                    format!("{label}: unsigned integer out of range for i64"),
+                    span,
+                    Severity::Error,
+                )
+            }),
+        },
         Value::Int128(v) => i64::try_from(*v).map_err(|_| {
             Diagnostic::new(
                 format!("{label}: integer out of range for i64"),
@@ -8280,9 +8647,210 @@ fn rand_state() -> &'static AtomicU64 {
 
 fn as_i128(value: &Value) -> Option<i128> {
     match value {
+        Value::Int(v) => match v.payload() {
+            super::int::IntPayload::Signed(i) => Some(i),
+            super::int::IntPayload::Unsigned(u) => i128::try_from(u).ok(),
+        },
         Value::Int128(v) => Some(*v),
         Value::UInt128(v) => i128::try_from(*v).ok(),
         _ => None,
+    }
+}
+
+fn value_to_typed_int(value: &Value) -> Option<super::int::TypedInt> {
+    match value {
+        Value::Int(v) => Some(*v),
+        Value::Int128(v) => super::int::TypedInt::try_from_signed(super::int::IntTag::I128, *v).ok(),
+        Value::UInt128(v) => super::int::TypedInt::try_from_unsigned(super::int::IntTag::U128, *v).ok(),
+        _ => None,
+    }
+}
+
+fn cast_typed_int_to_tag(
+    value: super::int::TypedInt,
+    target: super::int::IntTag,
+) -> Result<super::int::TypedInt, &'static str> {
+    match value.payload() {
+        super::int::IntPayload::Signed(i) => {
+            if target.is_signed() {
+                super::int::TypedInt::try_from_signed(target, i)
+            } else if i >= 0 {
+                super::int::TypedInt::try_from_unsigned(target, i as u128)
+            } else {
+                Err("integer type mismatch")
+            }
+        }
+        super::int::IntPayload::Unsigned(u) => {
+            if target.is_signed() {
+                let i = i128::try_from(u).map_err(|_| "integer type mismatch")?;
+                super::int::TypedInt::try_from_signed(target, i)
+            } else {
+                super::int::TypedInt::try_from_unsigned(target, u)
+            }
+        }
+    }
+}
+
+fn int_rotate(
+    lhs: super::int::TypedInt,
+    rhs: super::int::TypedInt,
+    left: bool,
+) -> Result<super::int::TypedInt, &'static str> {
+    let shift = match rhs.payload() {
+        super::int::IntPayload::Signed(i) if i >= 0 => i as u32,
+        super::int::IntPayload::Unsigned(u) => u32::try_from(u).map_err(|_| "shift amount out of range")?,
+        _ => return Err("shift amount must be non-negative"),
+    };
+    match lhs.tag() {
+        super::int::IntTag::I8 => {
+            let v = lhs.as_signed().ok_or("integer payload mismatch")? as i8;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_signed(lhs.tag(), i128::from(out))
+        }
+        super::int::IntTag::I16 => {
+            let v = lhs.as_signed().ok_or("integer payload mismatch")? as i16;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_signed(lhs.tag(), i128::from(out))
+        }
+        super::int::IntTag::I32 => {
+            let v = lhs.as_signed().ok_or("integer payload mismatch")? as i32;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_signed(lhs.tag(), i128::from(out))
+        }
+        super::int::IntTag::I64 => {
+            let v = lhs.as_signed().ok_or("integer payload mismatch")? as i64;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_signed(lhs.tag(), i128::from(out))
+        }
+        super::int::IntTag::I128 => {
+            let v = lhs.as_signed().ok_or("integer payload mismatch")?;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_signed(lhs.tag(), out)
+        }
+        super::int::IntTag::U1 => super::int::TypedInt::try_from_unsigned(
+            lhs.tag(),
+            lhs.as_unsigned().ok_or("integer payload mismatch")?,
+        ),
+        super::int::IntTag::U8 => {
+            let v = lhs.as_unsigned().ok_or("integer payload mismatch")? as u8;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), u128::from(out))
+        }
+        super::int::IntTag::U16 => {
+            let v = lhs.as_unsigned().ok_or("integer payload mismatch")? as u16;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), u128::from(out))
+        }
+        super::int::IntTag::U32 => {
+            let v = lhs.as_unsigned().ok_or("integer payload mismatch")? as u32;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), u128::from(out))
+        }
+        super::int::IntTag::U64 => {
+            let v = lhs.as_unsigned().ok_or("integer payload mismatch")? as u64;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), u128::from(out))
+        }
+        super::int::IntTag::U128 => {
+            let v = lhs.as_unsigned().ok_or("integer payload mismatch")?;
+            let out = if left { v.rotate_left(shift) } else { v.rotate_right(shift) };
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), out)
+        }
+    }
+}
+
+fn compare_integer_values(lhs: &Value, rhs: &Value) -> Option<Result<std::cmp::Ordering, &'static str>> {
+    let l = value_to_typed_int(lhs)?;
+    let r = value_to_typed_int(rhs)?;
+    Some(match (l.payload(), r.payload()) {
+        (super::int::IntPayload::Signed(a), super::int::IntPayload::Signed(b)) => Ok(a.cmp(&b)),
+        (super::int::IntPayload::Unsigned(a), super::int::IntPayload::Unsigned(b)) => Ok(a.cmp(&b)),
+        (super::int::IntPayload::Signed(a), super::int::IntPayload::Unsigned(b)) => {
+            if a < 0 {
+                Ok(std::cmp::Ordering::Less)
+            } else {
+                Ok((a as u128).cmp(&b))
+            }
+        }
+        (super::int::IntPayload::Unsigned(a), super::int::IntPayload::Signed(b)) => {
+            if b < 0 {
+                Ok(std::cmp::Ordering::Greater)
+            } else {
+                Ok(a.cmp(&(b as u128)))
+            }
+        }
+    })
+}
+
+fn int_wrapping_add(
+    lhs: super::int::TypedInt,
+    rhs: super::int::TypedInt,
+) -> Result<super::int::TypedInt, &'static str> {
+    if lhs.tag() != rhs.tag() {
+        return Err("integer type mismatch");
+    }
+    match (lhs.payload(), rhs.payload()) {
+        (super::int::IntPayload::Signed(a), super::int::IntPayload::Signed(b)) => {
+            super::int::TypedInt::try_from_signed(lhs.tag(), a.wrapping_add(b))
+        }
+        (super::int::IntPayload::Unsigned(a), super::int::IntPayload::Unsigned(b)) => {
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), a.wrapping_add(b))
+        }
+        _ => Err("integer payload mismatch"),
+    }
+}
+
+fn int_wrapping_sub(
+    lhs: super::int::TypedInt,
+    rhs: super::int::TypedInt,
+) -> Result<super::int::TypedInt, &'static str> {
+    if lhs.tag() != rhs.tag() {
+        return Err("integer type mismatch");
+    }
+    match (lhs.payload(), rhs.payload()) {
+        (super::int::IntPayload::Signed(a), super::int::IntPayload::Signed(b)) => {
+            super::int::TypedInt::try_from_signed(lhs.tag(), a.wrapping_sub(b))
+        }
+        (super::int::IntPayload::Unsigned(a), super::int::IntPayload::Unsigned(b)) => {
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), a.wrapping_sub(b))
+        }
+        _ => Err("integer payload mismatch"),
+    }
+}
+
+fn int_saturating_add(
+    lhs: super::int::TypedInt,
+    rhs: super::int::TypedInt,
+) -> Result<super::int::TypedInt, &'static str> {
+    if lhs.tag() != rhs.tag() {
+        return Err("integer type mismatch");
+    }
+    match (lhs.payload(), rhs.payload()) {
+        (super::int::IntPayload::Signed(a), super::int::IntPayload::Signed(b)) => {
+            super::int::TypedInt::try_from_signed(lhs.tag(), a.saturating_add(b))
+        }
+        (super::int::IntPayload::Unsigned(a), super::int::IntPayload::Unsigned(b)) => {
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), a.saturating_add(b))
+        }
+        _ => Err("integer payload mismatch"),
+    }
+}
+
+fn int_saturating_sub(
+    lhs: super::int::TypedInt,
+    rhs: super::int::TypedInt,
+) -> Result<super::int::TypedInt, &'static str> {
+    if lhs.tag() != rhs.tag() {
+        return Err("integer type mismatch");
+    }
+    match (lhs.payload(), rhs.payload()) {
+        (super::int::IntPayload::Signed(a), super::int::IntPayload::Signed(b)) => {
+            super::int::TypedInt::try_from_signed(lhs.tag(), a.saturating_sub(b))
+        }
+        (super::int::IntPayload::Unsigned(a), super::int::IntPayload::Unsigned(b)) => {
+            super::int::TypedInt::try_from_unsigned(lhs.tag(), a.saturating_sub(b))
+        }
+        _ => Err("integer payload mismatch"),
     }
 }
 
@@ -8433,7 +9001,14 @@ mod tests {
         let chunk = b.finish();
         let symbols = SymbolTable::new();
         let err = execute(&chunk, &symbols, Vec::new()).expect_err("div0");
-        assert!(err.iter().any(|d| d.message.contains("division by zero")));
+        assert!(
+            err.iter().any(|d| {
+                d.message.contains("division by zero")
+                    || d.message.contains("integer division by zero")
+            }),
+            "unexpected div by zero diagnostics: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -8566,7 +9141,14 @@ mod tests {
         let chunk = b.finish();
         let symbols = SymbolTable::new();
         let err = execute(&chunk, &symbols, Vec::new()).expect_err("mod zero");
-        assert!(err.iter().any(|d| d.message.contains("modulo by zero")));
+        assert!(
+            err.iter().any(|d| {
+                d.message.contains("modulo by zero")
+                    || d.message.contains("integer modulo by zero")
+            }),
+            "unexpected modulo by zero diagnostics: {:?}",
+            err
+        );
     }
 
     #[test]

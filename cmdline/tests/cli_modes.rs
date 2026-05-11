@@ -133,7 +133,12 @@ fn ast_mode_prints_ast_root() {
         .arg("--bytecode")
         .assert()
         .success()
-        .stdout(contains("== <main> ==").and(contains("Return")).and(contains("ConstI128(123)")));
+        .stdout(
+            contains("== <main> ==")
+                .and(contains("Return"))
+                .and(contains("ConstInt"))
+                .and(contains("Signed(123)")),
+        );
     }
 
 #[test]
@@ -515,8 +520,8 @@ fn runs_example_028_optional_params_typeof() {
         .stdout(
             contains("hello pandora!")
                 .and(contains("hello dev!!"))
-                .and(contains("i128"))
-                .and(contains("[i128]")),
+            .and(contains("i32"))
+            .and(contains("[i32]")),
         );
 }
 
