@@ -123,6 +123,19 @@ fn ast_mode_prints_ast_root() {
         .stdout(contains("LetDecl"));
 }
 
+    #[test]
+    fn bytecode_mode_prints_chunk_without_executing_program() {
+        let mut file = NamedTempFile::new().expect("temp file");
+        std::io::Write::write_all(&mut file, b"print(123)").expect("write");
+        Command::cargo_bin("pandora")
+        .expect("binary")
+        .arg(file.path())
+        .arg("--bytecode")
+        .assert()
+        .success()
+        .stdout(contains("== <main> ==").and(contains("Return")).and(contains("ConstI128(123)")));
+    }
+
 #[test]
 fn runs_example_003_operators_and_literals() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

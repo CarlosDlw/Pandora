@@ -1,10 +1,11 @@
 use clap::{ArgGroup, CommandFactory, Parser};
 use core::analyzer::analyze_with_registry;
 use core::builtins::default_registry;
+use core::hir::symbols::SymbolTable;
 use core::lexer::lex;
 use core::lowering::lower_with_registry;
 use core::parser::parse;
-use core::vm::{compile_program, execute};
+use core::vm::{Chunk, compile_program, execute};
 use foundation::diagnostics::Diagnostics;
 use foundation::ids::FileId;
 use std::{fs, process::ExitCode};
@@ -16,7 +17,7 @@ mod diagnostic_renderer;
 #[command(about = "CLI entrypoint for Pandora", long_about = None)]
 #[command(group(
     ArgGroup::new("mode")
-        .args(["lexeme", "ast", "hir", "check"])
+    .args(["lexeme", "ast", "hir", "check", "bytecode"])
         .multiple(false)
 ))]
 struct Cli {
@@ -34,6 +35,9 @@ struct Cli {
     /// Run semantic checks only (diagnostics output).
     #[arg(long)]
     check: bool,
+    /// Print VM bytecode and function chunks.
+    #[arg(long)]
+    bytecode: bool,
     /// Arguments to pass to the program (after `--`).
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
@@ -119,7 +123,9 @@ fn main() -> ExitCode {
                         return finish_with_diagnostics(&cli.file, &contents, diagnostics);
                     }
 
-                    if let Err(vm_diagnostics) = execute(&chunk, &symbols, cli.args.clone()) {
+                    if cli.bytecode {
+                        print_chunk("<main>", &chunk, &symbols);
+                    } else if let Err(vm_diagnostics) = execute(&chunk, &symbols, cli.args.clone()) {
                         diagnostics.extend(vm_diagnostics);
                     }
                 }
@@ -139,5 +145,28 @@ fn finish_with_diagnostics(path: &str, source: &str, diagnostics: Diagnostics) -
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn print_chunk(label: &str, chunk: &Chunk, symbols: &SymbolTable) {
+    println!("== {label} ==");
+    for (ip, op) in chunk.code.iter().enumerate() {
+        let span = chunk.spans[ip];
+        println!("{ip:04} {op:?} [{}..{}]", span.start(), span.end());
+    }
+
+    if chunk.functions.is_empty() {
+        return;
+    }
+
+    let mut functions: Vec<_> = chunk.functions.iter().collect();
+    functions.sort_by_key(|(id, _)| id.0);
+    for (id, function) in functions {
+        let function_name = symbols
+            .symbol(*id)
+            .map(|s| s.name.as_str())
+            .unwrap_or("<unknown>");
+        let header = format!("fn {function_name}#{}", id.0);
+        print_chunk(&header, function.chunk.as_ref(), symbols);
     }
 }

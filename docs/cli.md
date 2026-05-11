@@ -17,6 +17,7 @@ Examples:
 pandora examples/001_simple.pand
 pandora examples/001_simple.pand --check
 pandora examples/001_simple.pand --ast
+pandora examples/001_simple.pand --bytecode
 ```
 
 Help output is available in two ways:
@@ -42,6 +43,10 @@ Mode flags are mutually exclusive (only one can be used at a time):
 - `--check`
   - Runs lexing + parsing + lowering + semantic/type analysis.
   - Reports diagnostics only; does not compile bytecode or execute VM.
+- `--bytecode`
+  - Runs lexing + parsing + lowering + semantic/type analysis + bytecode compilation.
+  - Prints the generated VM chunk for `<main>` and function chunks.
+  - Does not execute VM code.
 
 Default mode (no mode flag):
 - Runs full pipeline: lex -> parse -> lower -> analyze -> bytecode compile -> VM execute.

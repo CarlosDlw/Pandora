@@ -23,7 +23,7 @@ print("Hello, Pandora")
 - Struct field assignment (for example, `state.debug = false`)
 - Named struct types inside array annotations (for example, `[ByteOp]`)
 - Relational comparisons across integer widths/signs (for example, `i32 < u32`)
-- CLI modes for lexing, AST/HIR inspection, checking, and execution
+- CLI modes for lexing, AST/HIR inspection, bytecode dump, checking, and execution
 - Standard library modules under `stdlib/std/`
 
 ## Run
@@ -38,6 +38,12 @@ Check-only mode:
 
 ```bash
 pandora examples/001_simple.pand --check
+```
+
+Bytecode inspection mode:
+
+```bash
+pandora examples/001_simple.pand --bytecode
 ```
 
 ## Full Documentation
