@@ -8306,9 +8306,24 @@ fn str_pad_impl(s: &str, total: i128, pad: &str, left: bool) -> String {
 }
 
 /// Run a full program chunk. Requires `chunk.invariant_holds()` and terminates with [`Op::Return`].
-pub fn execute(chunk: &Chunk, symbols: &SymbolTable) -> Result<(), Diagnostics> {
+/// Arguments are passed to the program as a global `argv` array of strings.
+pub fn execute(chunk: &Chunk, symbols: &SymbolTable, args: Vec<String>) -> Result<(), Diagnostics> {
     debug_assert!(chunk.invariant_holds());
-    let mut vm = Vm::new(chunk, symbols, HashMap::default());
+    let mut initial_env = HashMap::default();
+    
+    // Create argv as an array of strings if args are provided
+    if !args.is_empty() {
+        let argv_values: Vec<Value> = args.into_iter()
+            .map(Value::Str)
+            .collect();
+        // Try to find argv in symbol table; use a high SymbolId as fallback
+        let argv_sym = symbols
+            .resolve(crate::hir::symbols::ScopeId(0), "argv")
+            .unwrap_or(SymbolId(u32::MAX - 1));
+        initial_env.insert(argv_sym, Value::Array(argv_values));
+    }
+    
+    let mut vm = Vm::new(chunk, symbols, initial_env);
     vm.run()
 }
 
@@ -8404,7 +8419,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("ok");
+        execute(&chunk, &symbols, Vec::new()).expect("ok");
     }
 
     #[test]
@@ -8417,7 +8432,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        let err = execute(&chunk, &symbols).expect_err("div0");
+        let err = execute(&chunk, &symbols, Vec::new()).expect_err("div0");
         assert!(err.iter().any(|d| d.message.contains("division by zero")));
     }
 
@@ -8445,7 +8460,7 @@ mod tests {
         b.emit(Op::Load(local), s);
         b.emit(Op::Return, s);
         let chunk = b.finish();
-        let err = execute(&chunk, &symbols).expect_err("missing local after exit");
+        let err = execute(&chunk, &symbols, Vec::new()).expect_err("missing local after exit");
         assert!(err.iter().any(|d| {
             d.message
                 .contains("load of uninitialized or missing symbol")
@@ -8490,7 +8505,7 @@ mod tests {
         b.emit(Op::Pop, s);
         b.emit(Op::Return, s);
         let chunk = b.finish();
-        execute(&chunk, &symbols).expect("outer binding should remain");
+        execute(&chunk, &symbols, Vec::new()).expect("outer binding should remain");
     }
 
     #[test]
@@ -8506,7 +8521,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("mod/comparison should execute");
+        execute(&chunk, &symbols, Vec::new()).expect("mod/comparison should execute");
     }
 
     #[test]
@@ -8522,7 +8537,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("bitwise/shift should execute");
+        execute(&chunk, &symbols, Vec::new()).expect("bitwise/shift should execute");
     }
 
     #[test]
@@ -8537,7 +8552,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("logical ops should execute");
+        execute(&chunk, &symbols, Vec::new()).expect("logical ops should execute");
     }
 
     #[test]
@@ -8550,7 +8565,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        let err = execute(&chunk, &symbols).expect_err("mod zero");
+        let err = execute(&chunk, &symbols, Vec::new()).expect_err("mod zero");
         assert!(err.iter().any(|d| d.message.contains("modulo by zero")));
     }
 
@@ -8565,7 +8580,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("should jump and finish");
+        execute(&chunk, &symbols, Vec::new()).expect("should jump and finish");
     }
 
     #[test]
@@ -8576,7 +8591,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        let err = execute(&chunk, &symbols).expect_err("invalid jump");
+        let err = execute(&chunk, &symbols, Vec::new()).expect_err("invalid jump");
         assert!(
             err.iter()
                 .any(|d| d.message.contains("invalid jump target"))
@@ -8594,7 +8609,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("concat should execute");
+        execute(&chunk, &symbols, Vec::new()).expect("concat should execute");
     }
 
     #[test]
@@ -8608,7 +8623,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("concat should execute");
+        execute(&chunk, &symbols, Vec::new()).expect("concat should execute");
     }
 
     #[test]
@@ -8622,7 +8637,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("concat should execute");
+        execute(&chunk, &symbols, Vec::new()).expect("concat should execute");
     }
 
     #[test]
@@ -8636,7 +8651,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("concat should execute");
+        execute(&chunk, &symbols, Vec::new()).expect("concat should execute");
     }
 
     #[test]
@@ -8657,7 +8672,7 @@ mod tests {
         b.emit(Op::Return, s);
         let chunk = b.finish();
         let symbols = SymbolTable::new();
-        execute(&chunk, &symbols).expect("tuple ops should execute");
+        execute(&chunk, &symbols, Vec::new()).expect("tuple ops should execute");
     }
 
     #[test]
@@ -8685,7 +8700,7 @@ mod tests {
             crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
-        execute(&b.finish(), &symbols).expect("error builtin should execute");
+        execute(&b.finish(), &symbols, Vec::new()).expect("error builtin should execute");
     }
 
     #[test]
@@ -8708,7 +8723,7 @@ mod tests {
             crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
-        let err = execute(&b.finish(), &symbols).expect_err("panic must abort");
+        let err = execute(&b.finish(), &symbols, Vec::new()).expect_err("panic must abort");
         assert!(err.iter().any(|d| d.message.contains("panic: fatal")));
     }
 
@@ -8740,7 +8755,7 @@ mod tests {
             crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
-        execute(&b.finish(), &symbols).expect("panic should be converted inside try");
+        execute(&b.finish(), &symbols, Vec::new()).expect("panic should be converted inside try");
     }
 
     #[test]
@@ -8784,7 +8799,7 @@ mod tests {
             crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
-        execute(&b.finish(), &symbols).expect("wrap should produce chained err");
+        execute(&b.finish(), &symbols, Vec::new()).expect("wrap should produce chained err");
     }
 
     #[test]
@@ -8815,7 +8830,7 @@ mod tests {
         b.emit(Op::ArrayGet, s);
         b.emit(Op::Pop, s);
         b.emit(Op::Return, s);
-        execute(&b.finish(), &symbols).expect("array get/set should execute");
+        execute(&b.finish(), &symbols, Vec::new()).expect("array get/set should execute");
     }
 
     #[test]
@@ -8828,7 +8843,7 @@ mod tests {
         b.emit(Op::ArrayGet, s);
         b.emit(Op::Return, s);
         let symbols = SymbolTable::new();
-        let err = execute(&b.finish(), &symbols).expect_err("array get oob");
+        let err = execute(&b.finish(), &symbols, Vec::new()).expect_err("array get oob");
         assert!(
             err.iter()
                 .any(|d| d.message.contains("index out of bounds"))
@@ -8848,7 +8863,7 @@ mod tests {
         b.emit(Op::Pop, s);
         b.emit(Op::Return, s);
         let symbols = SymbolTable::new();
-        execute(&b.finish(), &symbols).expect("array extend should execute");
+        execute(&b.finish(), &symbols, Vec::new()).expect("array extend should execute");
     }
 
     #[test]
@@ -8872,7 +8887,7 @@ mod tests {
             crate::hir::SymbolOrigin::Intrinsic,
             true,
         );
-        execute(&b.finish(), &symbols).expect("typeof should execute");
+        execute(&b.finish(), &symbols, Vec::new()).expect("typeof should execute");
     }
 
     #[test]
@@ -8886,6 +8901,6 @@ mod tests {
         b.emit(Op::Pop, s);
         b.emit(Op::Return, s);
         let symbols = SymbolTable::new();
-        execute(&b.finish(), &symbols).expect("range should execute");
+        execute(&b.finish(), &symbols, Vec::new()).expect("range should execute");
     }
 }

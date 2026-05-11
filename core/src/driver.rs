@@ -48,7 +48,7 @@ pub fn compile_file_with_registry(
         return diagnostics;
     }
 
-    if let Err(vm_diagnostics) = execute(&chunk, &symbols) {
+    if let Err(vm_diagnostics) = execute(&chunk, &symbols, Vec::new()) {
         diagnostics.extend(vm_diagnostics);
     }
     diagnostics

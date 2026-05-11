@@ -34,6 +34,9 @@ struct Cli {
     /// Run semantic checks only (diagnostics output).
     #[arg(long)]
     check: bool,
+    /// Arguments to pass to the program (after `--`).
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -116,7 +119,7 @@ fn main() -> ExitCode {
                         return finish_with_diagnostics(&cli.file, &contents, diagnostics);
                     }
 
-                    if let Err(vm_diagnostics) = execute(&chunk, &symbols) {
+                    if let Err(vm_diagnostics) = execute(&chunk, &symbols, cli.args.clone()) {
                         diagnostics.extend(vm_diagnostics);
                     }
                 }
