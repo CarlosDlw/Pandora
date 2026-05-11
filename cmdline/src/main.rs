@@ -125,7 +125,8 @@ fn main() -> ExitCode {
 
                     if cli.bytecode {
                         print_chunk("<main>", &chunk, &symbols);
-                    } else if let Err(vm_diagnostics) = execute(&chunk, &symbols, cli.args.clone()) {
+                    } else if let Err(vm_diagnostics) = execute(&chunk, &symbols, cli.args.clone())
+                    {
                         diagnostics.extend(vm_diagnostics);
                     }
                 }

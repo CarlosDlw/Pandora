@@ -863,7 +863,8 @@ fn emit_expr(
                 b.emit(Op::StructLoadSlot(*sym, slot), span);
             } else {
                 emit_expr(hir, model, *base, b, diagnostics, method_table);
-                if let Type::Struct(struct_id) = model.types.get(base).cloned().unwrap_or(Type::Unknown)
+                if let Type::Struct(struct_id) =
+                    model.types.get(base).cloned().unwrap_or(Type::Unknown)
                     && let Some(slot) = struct_field_slot_by_id(hir, struct_id, field)
                 {
                     b.emit(Op::StructGetSlot(slot), span);
@@ -981,7 +982,10 @@ fn emit_expr(
             }
         }
         HirExpr::Array(items) => {
-            if items.iter().all(|item| matches!(item, HirArrayItem::Expr(_))) {
+            if items
+                .iter()
+                .all(|item| matches!(item, HirArrayItem::Expr(_)))
+            {
                 for item in items {
                     if let HirArrayItem::Expr(item_expr) = item {
                         emit_expr(hir, model, *item_expr, b, diagnostics, method_table);
@@ -1509,10 +1513,12 @@ mod tests {
         let (chunk, compile_diagnostics) = compile_program(&hir, &model);
         assert!(!compile_diagnostics.has_errors());
         assert!(chunk.code.iter().any(|op| matches!(op, Op::MakeClosure(_))));
-        assert!(chunk
-            .code
-            .iter()
-            .any(|op| matches!(op, Op::CallValue(_) | Op::CallDirect(_, _))));
+        assert!(
+            chunk
+                .code
+                .iter()
+                .any(|op| matches!(op, Op::CallValue(_) | Op::CallDirect(_, _)))
+        );
     }
 
     #[test]

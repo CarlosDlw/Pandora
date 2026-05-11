@@ -205,16 +205,12 @@ impl TypedInt {
         match (self.payload, rhs.payload) {
             (IntPayload::Signed(base), IntPayload::Signed(exp)) => {
                 let exp_u32 = u32::try_from(exp).map_err(|_| "integer exponent out of range")?;
-                let out = base
-                    .checked_pow(exp_u32)
-                    .ok_or("integer overflow in pow")?;
+                let out = base.checked_pow(exp_u32).ok_or("integer overflow in pow")?;
                 Self::try_from_signed(self.tag, out)
             }
             (IntPayload::Unsigned(base), IntPayload::Unsigned(exp)) => {
                 let exp_u32 = u32::try_from(exp).map_err(|_| "integer exponent out of range")?;
-                let out = base
-                    .checked_pow(exp_u32)
-                    .ok_or("integer overflow in pow")?;
+                let out = base.checked_pow(exp_u32).ok_or("integer overflow in pow")?;
                 Self::try_from_unsigned(self.tag, out)
             }
             _ => Err("integer payload mismatch"),

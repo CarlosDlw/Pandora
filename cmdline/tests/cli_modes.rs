@@ -123,11 +123,11 @@ fn ast_mode_prints_ast_root() {
         .stdout(contains("LetDecl"));
 }
 
-    #[test]
-    fn bytecode_mode_prints_chunk_without_executing_program() {
-        let mut file = NamedTempFile::new().expect("temp file");
-        std::io::Write::write_all(&mut file, b"print(123)").expect("write");
-        Command::cargo_bin("pandora")
+#[test]
+fn bytecode_mode_prints_chunk_without_executing_program() {
+    let mut file = NamedTempFile::new().expect("temp file");
+    std::io::Write::write_all(&mut file, b"print(123)").expect("write");
+    Command::cargo_bin("pandora")
         .expect("binary")
         .arg(file.path())
         .arg("--bytecode")
@@ -139,7 +139,7 @@ fn ast_mode_prints_ast_root() {
                 .and(contains("ConstInt"))
                 .and(contains("Signed(123)")),
         );
-    }
+}
 
 #[test]
 fn runs_example_003_operators_and_literals() {
@@ -520,8 +520,8 @@ fn runs_example_028_optional_params_typeof() {
         .stdout(
             contains("hello pandora!")
                 .and(contains("hello dev!!"))
-            .and(contains("i32"))
-            .and(contains("[i32]")),
+                .and(contains("i32"))
+                .and(contains("[i32]")),
         );
 }
 
