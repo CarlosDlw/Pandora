@@ -6,12 +6,31 @@ This document describes the current runtime behavior implemented in the VM.
 
 The VM executes a linear bytecode chunk with explicit runtime state:
 - Operand stack (`Vec<Value>`) for expression/intermediate values
-- Environment (`HashMap<SymbolId, Value>`) for symbol bindings
+- Locals (`Vec<(SymbolId, Value)>`) for bindings in the current frame
+- Globals (`HashMap<SymbolId, Value>`) for global/module-level bindings
 - Scope frame stack (`Vec<Vec<SymbolId>>`) for lexical scope cleanup
 - Call stack (`Vec<CallFrame>`) for function calls
 - Try stack (`Vec<TryContext>`) for panic recovery in `try` regions
 
-At runtime, symbol values are stored in the environment map, and block exits remove symbols tracked by the current scope frame.
+Runtime symbol resolution in `Load` follows this order:
+- current `locals`
+- `globals`
+- current function self-symbol (for recursion)
+
+On block exit, symbols tracked by the current scope frame are removed from `locals`.
+
+### Closure Capture Semantics (Current Behavior)
+
+Closures capture runtime bindings using a snapshot of current `locals` (`snapshot_locals`) at closure creation time.
+This captured map is stored inside `Value::Function { captured, ... }`.
+
+When a closure is called, a new frame is created by cloning captured bindings into call `locals` and then binding call arguments.
+
+Implication: captured mutable state is not shared across calls to the same closure value.
+Example pattern:
+- counter closure that does `c += 1` returns `1, 1, 1...` (current behavior)
+
+This is value-snapshot closure semantics, not shared-cell/by-reference closure semantics.
 
 There is also a foundation-side indexed model used by shared infrastructure:
 - `Arena<T>` stores items in `Vec<T>` and addresses them by stable `ArenaId(u32)`
@@ -27,7 +46,7 @@ So the project currently uses two complementary models:
 ### Stack-like runtime structures
 - Operand evaluation is stack-based (push/pop per opcode)
 - Function calls push a call frame and restore it on return
-- Scope entry/exit uses scope frame stacks to track local bindings
+- Scope entry/exit uses scope frame stacks to track and remove local bindings
 
 ### Heap-backed value storage
 There is no custom VM heap allocator in the runtime module.

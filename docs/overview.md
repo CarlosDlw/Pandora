@@ -24,6 +24,22 @@ The CLI currently supports mode flags for:
 - HIR output
 - semantic check only
 
+## Runtime Memory Model (Current)
+
+Pandora's VM uses explicit runtime state:
+- operand stack for expression evaluation
+- locals for current frame bindings
+- globals for module-level bindings
+- scope frame stack for lexical cleanup
+- call stack and try stack for function calls and panic recovery
+
+Closures currently use snapshot capture semantics:
+- creating a closure captures a snapshot of current locals
+- calling a closure clones captured bindings into a new frame
+- mutable captured state is not shared across repeated calls to the same closure value
+
+This means closures are value-snapshot based, not shared-cell/by-reference closures.
+
 ## Type System (Static and Strong)
 
 Pandora performs static type checking before bytecode execution.

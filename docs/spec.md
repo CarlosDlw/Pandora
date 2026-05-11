@@ -378,6 +378,11 @@ Success path extracts tuple success value.
 - array index out-of-bounds produces runtime diagnostic.
 - calling a non-function value produces runtime diagnostic.
 - explicit `panic(...)` outside recovery path terminates execution with diagnostic.
+- runtime symbol resolution in `Load` checks: current locals, then globals, then current function self-symbol (recursion case).
+- lexical scopes remove local bindings on scope exit (`EnterScope` / `ExitScope`).
+- closures capture a snapshot of current locals at creation time.
+- closure invocation clones captured bindings into the callee frame before binding call arguments.
+- captured mutable bindings are not shared across calls to the same closure value (snapshot/value semantics).
 
 ### 5.4 Type-literal boundaries
 
