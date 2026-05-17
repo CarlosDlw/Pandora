@@ -19,6 +19,7 @@ pub struct SemanticModel {
     pub types: HashMap<HirId, AnalyzerType>,
     pub method_builtin_targets: HashMap<HirId, SymbolId>,
     pub symbol_types: HashMap<SymbolId, AnalyzerType>,
+    pub module_alias_targets: HashMap<HirId, SymbolId>,
 }
 
 pub fn analyze(hir: &Hir, symbols: &mut SymbolTable) -> (SemanticModel, Diagnostics) {
@@ -43,6 +44,7 @@ pub fn analyze_with_registry(
         impl_methods: HashMap::new(),
         fn_required_params: HashMap::new(),
         builtins: registry,
+        module_aliases: HashMap::new(),
     };
     checker.check_program();
     checker.snapshot_symbol_types();
@@ -66,6 +68,7 @@ struct Checker<'a> {
     impl_methods: HashMap<ImplMethodKey, ImplMethodSignature>,
     fn_required_params: HashMap<SymbolId, usize>,
     builtins: &'a BuiltinRegistry,
+    module_aliases: HashMap<SymbolId, String>,
 }
 
 impl<'a> Checker<'a> {
@@ -676,10 +679,12 @@ impl<'a> Checker<'a> {
                 }
                 expected_return
             }
-            HirStmt::Import { path, span, .. } => {
+            HirStmt::Import { path, alias, span } => {
                 let module_path = normalize_stdlib_path(path);
                 if stdlib_module_exports(&module_path).is_none() {
                     self.push_error(format!("unknown stdlib module '{module_path}'"), *span);
+                } else {
+                    self.module_aliases.insert(*alias, module_path);
                 }
                 AnalyzerType::Unknown
             }
@@ -977,6 +982,26 @@ impl<'a> Checker<'a> {
                         other => other.clone(),
                     };
                     return resolved_ret;
+                }
+                // Check if receiver is a module alias (import "path" as alias)
+                if let Some(HirExpr::Var(recv_sym)) = self.hir.exprs.get(*receiver) {
+                    if let Some(module_path) = self.module_aliases.get(recv_sym).cloned() {
+                        if let Some(exports) = stdlib_module_exports(&module_path) {
+                            if exports.contains(method.as_str()) {
+                                if let Some(sym_id) = self.find_builtin_symbol_by_name(method) {
+                                    self.model.module_alias_targets.insert(id, sym_id);
+                                }
+                                return self.check_special_builtin_contract(method, args, span);
+                            }
+                        }
+                        self.push_error(
+                            format!(
+                                "function '{method}' is not exported by module '{module_path}'"
+                            ),
+                            span,
+                        );
+                        return AnalyzerType::Unknown;
+                    }
                 }
                 let AnalyzerType::Struct(struct_id) = recv_ty.clone() else {
                     self.push_error(

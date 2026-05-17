@@ -878,6 +878,21 @@ fn emit_expr(
             method,
             args,
         } => {
+            if let Some(symbol_id) = model.module_alias_targets.get(&id).copied() {
+                b.emit(Op::Load(symbol_id), span);
+                for arg in args {
+                    emit_expr(hir, model, *arg, b, diagnostics, method_table);
+                }
+                match u8::try_from(args.len()) {
+                    Ok(argc) => b.emit(Op::CallValue(argc), span),
+                    Err(_) => diagnostics.push(Diagnostic::new(
+                        "too many arguments for module alias call",
+                        span,
+                        Severity::Error,
+                    )),
+                }
+                return;
+            }
             if let Some(symbol_id) = model.method_builtin_targets.get(&id).copied() {
                 b.emit(Op::Load(symbol_id), span);
                 emit_expr(hir, model, *receiver, b, diagnostics, method_table);
