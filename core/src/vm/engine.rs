@@ -7293,10 +7293,10 @@ fn canonical_type_name(v: &Value, symbols: &SymbolTable) -> String {
             self_symbol,
             ..
         } => {
-            if let Some(sym) = self_symbol {
-                if let Some(symbol) = symbols.symbol(*sym) {
-                    return analyzer_type_to_string(&symbol.ty, symbols);
-                }
+            if let Some(sym) = self_symbol
+                && let Some(symbol) = symbols.symbol(*sym)
+            {
+                return analyzer_type_to_string(&symbol.ty, symbols);
             }
             let params = if function.params.is_empty() {
                 String::new()

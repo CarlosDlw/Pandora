@@ -984,24 +984,22 @@ impl<'a> Checker<'a> {
                     return resolved_ret;
                 }
                 // Check if receiver is a module alias (import "path" as alias)
-                if let Some(HirExpr::Var(recv_sym)) = self.hir.exprs.get(*receiver) {
-                    if let Some(module_path) = self.module_aliases.get(recv_sym).cloned() {
-                        if let Some(exports) = stdlib_module_exports(&module_path) {
-                            if exports.contains(method.as_str()) {
-                                if let Some(sym_id) = self.find_builtin_symbol_by_name(method) {
-                                    self.model.module_alias_targets.insert(id, sym_id);
-                                }
-                                return self.check_special_builtin_contract(method, args, span);
-                            }
+                if let Some(HirExpr::Var(recv_sym)) = self.hir.exprs.get(*receiver)
+                    && let Some(module_path) = self.module_aliases.get(recv_sym).cloned()
+                {
+                    if let Some(exports) = stdlib_module_exports(&module_path)
+                        && exports.contains(method.as_str())
+                    {
+                        if let Some(sym_id) = self.find_builtin_symbol_by_name(method) {
+                            self.model.module_alias_targets.insert(id, sym_id);
                         }
-                        self.push_error(
-                            format!(
-                                "function '{method}' is not exported by module '{module_path}'"
-                            ),
-                            span,
-                        );
-                        return AnalyzerType::Unknown;
+                        return self.check_special_builtin_contract(method, args, span);
                     }
+                    self.push_error(
+                        format!("function '{method}' is not exported by module '{module_path}'"),
+                        span,
+                    );
+                    return AnalyzerType::Unknown;
                 }
                 let AnalyzerType::Struct(struct_id) = recv_ty.clone() else {
                     self.push_error(
